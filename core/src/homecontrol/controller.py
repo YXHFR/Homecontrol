@@ -18,9 +18,10 @@ from homecontrol.connectors import (
     LightLevelObserved,
     Observation,
     SourceLost,
+    Target,
     TargetsObserved,
 )
-from homecontrol.home import Home, Point
+from homecontrol.home import Home
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class LampView:
 class Snapshot:
     """Det som just nu går att visa om hemmet."""
 
-    targets: tuple[Point, ...]
+    targets: tuple[Target, ...]
     rooms: tuple[RoomView, ...]
     lamps: tuple[LampView, ...]
 
@@ -55,7 +56,7 @@ class Controller:
         self._home = home
         self._clock = clock
         self._outputs = tuple(outputs)
-        self._targets: dict[str, tuple[Point, ...]] = {}
+        self._targets: dict[str, tuple[Target, ...]] = {}
         self._lux: dict[str, float] = {}
         self._presence = presence.initial_presence(home, clock.now())
         # Lamporna antas vara släckta vid start.
@@ -124,7 +125,7 @@ class Controller:
             self._home, self._targets, self._presence, self._clock.now()
         )
 
-    def _all_targets(self) -> tuple[Point, ...]:
+    def _all_targets(self) -> tuple[Target, ...]:
         return tuple(target for targets in self._targets.values() for target in targets)
 
     def _evaluate(self) -> None:

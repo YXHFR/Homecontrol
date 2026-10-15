@@ -29,6 +29,24 @@
       .status {
         color: #666;
       }
+      .floors {
+        display: flex;
+        gap: 8px;
+        margin: 0 0 12px;
+      }
+      .floors button {
+        font: inherit;
+        padding: 6px 12px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        background: #fff;
+        cursor: pointer;
+      }
+      .floors button[aria-pressed="true"] {
+        background: #2f6fed;
+        border-color: #2f6fed;
+        color: #fff;
+      }
     </style>
   </head>
   <body>

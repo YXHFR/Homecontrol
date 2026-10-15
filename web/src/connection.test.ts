@@ -61,9 +61,9 @@ describe("LiveConnection", () => {
     sockets[0].open();
 
     sockets[0].receive("inte json");
-    sockets[0].receive('{"type":"home","rooms":[],"lamps":[]}');
+    sockets[0].receive('{"type":"state","targets":[],"rooms":[],"lamps":[]}');
 
-    expect(messages).toEqual([{ type: "home", rooms: [], lamps: [] }]);
+    expect(messages).toEqual([{ type: "state", targets: [], rooms: [], lamps: [] }]);
   });
 
   it("skickar bara när anslutningen är öppen", () => {

@@ -21,6 +21,14 @@ from homecontrol.home import Point
 
 
 @dataclass(frozen=True)
+class Target:
+    """Ett mål (en person) på en plats i hemmet: en punkt på en våning."""
+
+    floor_id: str
+    position: Point
+
+
+@dataclass(frozen=True)
 class TargetsObserved:
     """Alla mål (personer) som källan ser just nu, i hemmets koordinater.
 
@@ -29,7 +37,7 @@ class TargetsObserved:
     """
 
     source_id: str
-    targets: tuple[Point, ...]
+    targets: tuple[Target, ...]
 
 
 @dataclass(frozen=True)

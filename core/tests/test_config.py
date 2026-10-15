@@ -11,6 +11,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_PORT",
         "HOMECONTROL_WEB_DIR",
         "HOMECONTROL_ALLOWED_HOSTS",
+        "HOMECONTROL_DATABASE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -35,3 +36,15 @@ def test_reads_allowed_hosts_as_lowercase_list(monkeypatch: pytest.MonkeyPatch) 
     settings = Settings.from_env()
 
     assert settings.allowed_hosts == {"hemma.local", "homecontrol.lan"}
+
+
+def test_reads_database_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_DATABASE", " host=db dbname=homecontrol ")
+
+    assert Settings.from_env().database == "host=db dbname=homecontrol"
+
+
+def test_empty_database_setting_means_no_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_DATABASE", "")
+
+    assert Settings.from_env().database is None

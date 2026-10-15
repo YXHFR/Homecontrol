@@ -9,6 +9,7 @@ from homecontrol.connectors import (
     LightLevelObserved,
     ObservationSink,
     SourceLost,
+    Target,
     TargetsObserved,
 )
 from homecontrol.home import Point
@@ -20,14 +21,14 @@ class SimulatedSource:
     def __init__(self, source_id: str = "simulering") -> None:
         self._source_id = source_id
         self._sink: ObservationSink | None = None
-        self._person: Point | None = None
+        self._person: Target | None = None
 
     @property
     def source_id(self) -> str:
         return self._source_id
 
     @property
-    def person(self) -> Point | None:
+    def person(self) -> Target | None:
         return self._person
 
     def start(self, sink: ObservationSink) -> None:
@@ -39,8 +40,8 @@ class SimulatedSource:
             self._sink(SourceLost(self._source_id))
         self._sink = None
 
-    def move_person(self, position: Point) -> None:
-        self._person = position
+    def move_person(self, floor_id: str, position: Point) -> None:
+        self._person = Target(floor_id, position)
         self._emit_targets()
 
     def remove_person(self) -> None:

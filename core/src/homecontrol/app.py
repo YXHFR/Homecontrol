@@ -15,7 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from homecontrol import __version__
 from homecontrol.clock import Clock, SystemClock
 from homecontrol.controller import Controller
-from homecontrol.home import demo_home
+from homecontrol.home import Home
+from homecontrol.homefile import example_home
 from homecontrol.live import create_live_router, run_timer
 from homecontrol.simulation import SimulatedLampOutput, SimulatedSource
 
@@ -26,13 +27,15 @@ def create_app(
     web_dir: Path | None = None,
     clock: Clock | None = None,
     allowed_hosts: Set[str] = frozenset(),
+    home: Home | None = None,
 ) -> FastAPI:
+    """`home` är hemmet från databasen. Utan det används exempelhemmet."""
     clock = clock if clock is not None else SystemClock()
-    # Än så länge finns bara Simulering: ett hårdkodat rum, en låtsasperson
-    # och en virtuell lampa. Riktiga kopplingar ansluts på samma sätt.
+    # Än så länge finns bara Simulering: en låtsasperson och virtuella lampor.
+    # Riktiga kopplingar ansluts på samma sätt.
     source = SimulatedSource()
     lamps = SimulatedLampOutput()
-    controller = Controller(demo_home(), clock, [lamps])
+    controller = Controller(home if home is not None else example_home(), clock, [lamps])
     source.start(controller.observe)
 
     @contextlib.asynccontextmanager

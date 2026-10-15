@@ -5,6 +5,8 @@ Demohemmet är ett vardagsrum på 5 × 4 meter med en taklampa i mitten.
 
 import pytest
 
+from homecontrol.home import RoomSettings
+from homes import home_with_settings, two_floor_home
 from scenario import Scenario
 
 # Stegen står ett per rad så att de läses som en berättelse. Formateraren
@@ -139,6 +141,41 @@ def test_lamp_switches_exactly_once_per_change() -> None:
         .person_leaves()
         .wait(minutes=30)
         .expect_lamp_switches(True, False)
+    )
+
+
+def test_person_upstairs_does_not_light_the_room_below() -> None:
+    """Rummen ligger ovanför varandra, men bara våningen där personen är räknas."""
+    (
+        Scenario(two_floor_home())
+        .light_level(10, room="vardagsrum")
+        .light_level(10, room="sovrum")
+        .person_enters(room="sovrum")
+        .expect_lamp_on(lamp="lampa-uppe")
+        .expect_lamp_off(lamp="lampa-nere")
+        .person_moves_to(x=2.5, y=2, floor="nere")
+        .expect_lamp_on(lamp="lampa-nere")
+        .wait(minutes=3)
+        .expect_lamp_off(lamp="lampa-uppe")
+        .expect_lamp_on(lamp="lampa-nere")
+    )
+
+
+def test_room_settings_decide_darkness_and_delay() -> None:
+    """Ett rum som räknas som mörkt under 50 lux och släcks efter en minut."""
+    settings = RoomSettings(dark_below_lux=50, off_after_empty_seconds=60)
+    (
+        Scenario(home_with_settings(settings))
+        .light_level(40)
+        .person_enters()
+        .expect_lamp_on()
+        .expect_explanation("under 50")
+        .person_leaves()
+        .wait(seconds=59)
+        .expect_lamp_on()
+        .expect_explanation("släcks när det varit tomt i 1 minut")
+        .wait(seconds=1)
+        .expect_lamp_off()
     )
 
 

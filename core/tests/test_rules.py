@@ -1,7 +1,8 @@
 from homecontrol.connectors import LampCommand
-from homecontrol.home import demo_home
+from homecontrol.home import DEFAULT_OFF_AFTER_EMPTY_SECONDS as OFF_AFTER_EMPTY_SECONDS
 from homecontrol.presence import RoomPresence
-from homecontrol.rules import OFF_AFTER_EMPTY_SECONDS, RoomState, evaluate
+from homecontrol.rules import RoomState, evaluate
+from homes import demo_home
 
 HOME = demo_home()
 ROOM = HOME.rooms[0].id

@@ -25,8 +25,9 @@ from typing import Self
 
 from homecontrol.clock import ManualClock
 from homecontrol.controller import Controller, LampView
-from homecontrol.home import Home, Point, demo_home
+from homecontrol.home import Home, Point
 from homecontrol.simulation import SimulatedLampOutput, SimulatedSource
+from homes import demo_home
 
 
 class Scenario:
@@ -46,11 +47,13 @@ class Scenario:
 
     def person_enters(self, room: str | None = None) -> Self:
         """Låtsaspersonen går till mitten av rummet."""
-        self.source.move_person(self.home.room(self._room_id(room)).center)
+        room_id = self._room_id(room)
+        self.source.move_person(self.home.floor_of(room_id).id, self.home.room(room_id).center)
         return self
 
-    def person_moves_to(self, *, x: float, y: float) -> Self:
-        self.source.move_person(Point(x, y))
+    def person_moves_to(self, *, x: float, y: float, floor: str | None = None) -> Self:
+        floor_id = floor if floor is not None else _only(f.id for f in self.home.floors)
+        self.source.move_person(floor_id, Point(x, y))
         return self
 
     def source_lost(self) -> Self:
