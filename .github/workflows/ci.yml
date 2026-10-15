@@ -20,7 +20,7 @@ jobs:
         working-directory: core
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv sync --frozen
       - name: Lint
         run: uv run ruff check .. && uv run ruff format --check ..
@@ -79,6 +79,7 @@ jobs:
           cp .env.example .env
           sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" .env
           sed -i "s/^MQTT_PASSWORD=.*/MQTT_PASSWORD=$(openssl rand -hex 16)/" .env
+          sed -i "s/^ZIGBEE2MQTT_AUTH_TOKEN=.*/ZIGBEE2MQTT_AUTH_TOKEN=$(openssl rand -hex 16)/" .env
       - name: Starta alla tjänster
         run: docker compose up --detach --build --wait --wait-timeout 300
       - name: Kontrollera kärnan och webbgränssnittet
@@ -98,9 +99,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/build-push-action@v7
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: core/Dockerfile
