@@ -6,13 +6,13 @@ from homecontrol.clock import ManualClock
 from homecontrol.connectors import LampCommand, LightLevelObserved, SourceLost, TargetsObserved
 from homecontrol.controller import Controller
 from homecontrol.simulation import SimulatedLampOutput
-from homes import at, demo_home
+from homes import at, one_room_home
 
 
 def make() -> tuple[Controller, ManualClock, SimulatedLampOutput]:
     clock = ManualClock()
     lamps = SimulatedLampOutput()
-    return Controller(demo_home(), clock, [lamps]), clock, lamps
+    return Controller(one_room_home(), clock, [lamps]), clock, lamps
 
 
 def test_targets_from_several_sources_are_combined() -> None:
@@ -44,7 +44,7 @@ class BrokenOutput:
 
 def test_broken_output_does_not_stop_the_others(caplog: pytest.LogCaptureFixture) -> None:
     lamps = SimulatedLampOutput()
-    controller = Controller(demo_home(), ManualClock(), [BrokenOutput(), lamps])
+    controller = Controller(one_room_home(), ManualClock(), [BrokenOutput(), lamps])
 
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
     controller.observe(TargetsObserved("sim", (at(1, 1),)))

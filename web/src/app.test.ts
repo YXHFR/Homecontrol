@@ -128,6 +128,26 @@ describe("mountApp", () => {
     expect(buttons[1].getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("visar ljusnivån för våningen som visas", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(twoFloors);
+    handlers.onMessage({
+      type: "state",
+      targets: [],
+      rooms: [
+        { id: "vardagsrum", occupied: false, lux: 40 },
+        { id: "sovrum", occupied: false, lux: 5 },
+      ],
+      lamps: [],
+    });
+    const output = find<HTMLOutputElement>(root, "output");
+    expect(output.textContent).toBe("40 lux");
+
+    find<HTMLButtonElement>(root, ".floors button").click();
+
+    expect(output.textContent).toBe("5 lux");
+  });
+
   it("flyttar personen till våningen som visas", () => {
     const { root, sent, handlers, callbacks } = setup();
     handlers.onMessage(twoFloors);

@@ -96,7 +96,7 @@ def _occupied_room(room: Room, lux: float | None, is_on: bool) -> _Decision:
 def _vacant_room(room: Room, vacant_since: float, is_on: bool, now: float) -> _Decision:
     name = room.name
     off_after = room.settings.off_after_empty_seconds
-    delay = _minutes(off_after)
+    delay = _duration(off_after)
     if not is_on:
         return _Decision(f"Släckt: {name} är tomt.")
     if now - vacant_since >= off_after:
@@ -107,6 +107,9 @@ def _vacant_room(room: Room, vacant_since: float, is_on: bool, now: float) -> _D
     )
 
 
-def _minutes(seconds: float) -> str:
-    minutes = seconds / 60
-    return "1 minut" if minutes == 1 else f"{minutes:g} minuter"
+def _duration(seconds: float) -> str:
+    """Hela minuter skrivs i minuter, allt annat i sekunder."""
+    if seconds % 60 == 0:
+        minutes = seconds / 60
+        return "1 minut" if minutes == 1 else f"{minutes:g} minuter"
+    return "1 sekund" if seconds == 1 else f"{seconds:g} sekunder"

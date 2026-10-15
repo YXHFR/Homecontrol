@@ -79,18 +79,18 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   );
 
   let home: HomeMessage | null = null;
-  let floor: Floor | null = null;
+  let shownFloor: Floor | null = null;
   let lastState: StateMessage | null = null;
   const view = deps.createView(stageContainer, {
     onMovePerson: (position) => {
-      if (floor !== null) {
-        connection.send({ type: "move_person", floor_id: floor.id, ...position });
+      if (shownFloor !== null) {
+        connection.send({ type: "move_person", floor_id: shownFloor.id, ...position });
       }
     },
   });
 
   /** Rum som redan har fått reglagets värde för att kärnan inte visste något. */
-  const filledIn = new Set<string>();
+  const roomsGivenSliderLux = new Set<string>();
 
   const sendLightLevel = (roomIds: string[]) => {
     for (const roomId of roomIds) {
@@ -100,11 +100,11 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
 
   /** Samma ljusnivå i alla rum, som dagsljuset ute. */
   const sendLightLevelEverywhere = () => {
-    sendLightLevel(home?.floors.flatMap((f) => f.rooms.map((room) => room.id)) ?? []);
+    sendLightLevel(home?.floors.flatMap((floor) => floor.rooms.map((room) => room.id)) ?? []);
   };
 
   const showExplanations = () => {
-    const lamps = floor?.lamps ?? [];
+    const lamps = shownFloor?.lamps ?? [];
     const states = new Map(lastState?.lamps.map((lamp) => [lamp.id, lamp]));
     explanations.replaceChildren(
       ...lamps.flatMap((lamp) => {
@@ -116,30 +116,44 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     );
   };
 
+  /** Reglaget visar ljusnivån i första rummet på våningen som visas. */
+  const showLux = () => {
+    if (document.activeElement === lux) {
+      return; // användaren drar i reglaget just nu
+    }
+    const shownRoom = shownFloor?.rooms[0]?.id;
+    const roomLux = lastState?.rooms.find((room) => room.id === shownRoom)?.lux;
+    if (roomLux !== undefined && roomLux !== null) {
+      lux.value = String(roomLux);
+      luxValue.textContent = `${roomLux} lux`;
+    }
+  };
+
   const showFloor = (next: Floor) => {
-    floor = next;
+    shownFloor = next;
     for (const button of floorPicker.querySelectorAll("button")) {
       button.setAttribute("aria-pressed", String(button.dataset.floor === next.id));
     }
     view.setFloor(next);
+    showLux();
     showExplanations();
   };
 
   const showHome = (next: HomeMessage) => {
     home = next;
     // Ny anslutning: kärnan kan ha startat om och glömt ljusnivåerna.
-    filledIn.clear();
+    roomsGivenSliderLux.clear();
     floorPicker.replaceChildren(
-      ...next.floors.map((f) => {
-        const button = element("button", { type: "button" }, f.name);
-        button.dataset.floor = f.id;
-        button.addEventListener("click", () => showFloor(f));
+      ...next.floors.map((floor) => {
+        const button = element("button", { type: "button" }, floor.name);
+        button.dataset.floor = floor.id;
+        button.addEventListener("click", () => showFloor(floor));
         return button;
       }),
     );
     // Gränssnittet visar en våning åt gången; väljaren behövs bara om det finns flera.
     floorPicker.hidden = next.floors.length < 2;
-    const same = next.floors.find((f) => f.id === floor?.id);
+    const same = next.floors.find((floor) => floor.id === shownFloor?.id);
     showFloor(same ?? startFloor(next));
   };
 
@@ -148,18 +162,11 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     view.setState(state);
     // Kärnan vet inte hur ljust det är i de här rummen; ge dem reglagets värde.
     const unknown = state.rooms
-      .filter((room) => room.lux === null && !filledIn.has(room.id))
+      .filter((room) => room.lux === null && !roomsGivenSliderLux.has(room.id))
       .map((room) => room.id);
-    unknown.forEach((roomId) => filledIn.add(roomId));
+    unknown.forEach((roomId) => roomsGivenSliderLux.add(roomId));
     sendLightLevel(unknown);
-    if (document.activeElement !== lux) {
-      const shownRoom = floor?.rooms[0]?.id;
-      const roomLux = state.rooms.find((room) => room.id === shownRoom)?.lux;
-      if (roomLux !== undefined && roomLux !== null) {
-        lux.value = String(roomLux);
-        luxValue.textContent = `${roomLux} lux`;
-      }
-    }
+    showLux();
     showExplanations();
   };
 

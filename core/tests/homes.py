@@ -1,15 +1,24 @@
 """Små hem för testerna."""
 
-from homecontrol.connectors import Target
-from homecontrol.home import Floor, Home, Lamp, Point, Room, RoomSettings, WallKind, rectangle
+from homecontrol.home import (
+    Floor,
+    Home,
+    Lamp,
+    Point,
+    Room,
+    RoomSettings,
+    Target,
+    WallKind,
+    rectangle,
+)
 
 FLOOR = "plan"
 
 
-def demo_home() -> Home:
+def one_room_home() -> Home:
     """Ett vardagsrum på 5 × 4 meter med en taklampa i mitten, på en enda våning."""
     return Home(
-        name="Demohemmet",
+        name="Enrumshemmet",
         floors=(
             Floor(
                 id=FLOOR,
@@ -38,13 +47,13 @@ def room(
         id=room_id,
         name=name,
         polygon=polygon,
-        walls=(WallKind.GIPS,) * 4,
+        walls=(WallKind.PLASTERBOARD,) * 4,
         lamps=() if lamp is None else (Lamp(id=lamp, name="Taklampa", position=center),),
     )
 
 
 def at(x: float, y: float, floor: str = FLOOR) -> Target:
-    """Ett mål (en person) i punkten (x, y) på demohemmets våning."""
+    """Ett mål (en person) i punkten (x, y) på enrumshemmets våning."""
     return Target(floor, Point(x, y))
 
 
@@ -70,8 +79,8 @@ def two_floor_home() -> Home:
 
 
 def home_with_settings(settings: RoomSettings) -> Home:
-    """Demohemmet, men vardagsrummet har egna inställningar."""
-    home = demo_home()
+    """Enrumshemmet, men vardagsrummet har egna inställningar."""
+    home = one_room_home()
     floor = home.floors[0]
     living_room = floor.rooms[0].model_copy(update={"settings": settings})
     return home.model_copy(update={"floors": (floor.model_copy(update={"rooms": (living_room,)}),)})

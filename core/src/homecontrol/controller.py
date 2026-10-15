@@ -18,10 +18,9 @@ from homecontrol.connectors import (
     LightLevelObserved,
     Observation,
     SourceLost,
-    Target,
     TargetsObserved,
 )
-from homecontrol.home import Home
+from homecontrol.home import Home, Target
 
 logger = logging.getLogger(__name__)
 

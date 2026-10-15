@@ -9,7 +9,7 @@ from homecontrol import store
 from homecontrol.__main__ import load_or_seed_home, main
 from homecontrol.config import Settings
 from homecontrol.homefile import dumps, example_home, loads
-from homes import demo_home
+from homes import one_room_home
 
 
 def test_export_needs_a_database(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,19 +37,19 @@ def test_first_start_saves_the_example_home(database: str) -> None:
 def test_start_uses_the_saved_home(database: str) -> None:
     with store.connect(database, attempts=1) as conn:
         store.migrate(conn)
-        store.save_home(conn, demo_home())
+        store.save_home(conn, one_room_home())
     settings = Settings(host="127.0.0.1", port=8000, web_dir=Path("web"), database=database)
 
-    assert load_or_seed_home(settings) == demo_home()
+    assert load_or_seed_home(settings) == one_room_home()
 
 
 def test_import_from_stdin_and_export_to_stdout(
     database: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("HOMECONTROL_DATABASE", database)
-    monkeypatch.setattr("sys.stdin", io.StringIO(dumps(demo_home())))
+    monkeypatch.setattr("sys.stdin", io.StringIO(dumps(one_room_home())))
 
     main(["importera", "-"])
     main(["exportera"])
 
-    assert loads(capsys.readouterr().out) == demo_home()
+    assert loads(capsys.readouterr().out) == one_room_home()

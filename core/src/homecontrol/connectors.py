@@ -17,15 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from homecontrol.home import Point
-
-
-@dataclass(frozen=True)
-class Target:
-    """Ett mål (en person) på en plats i hemmet: en punkt på en våning."""
-
-    floor_id: str
-    position: Point
+from homecontrol.home import Target
 
 
 @dataclass(frozen=True)

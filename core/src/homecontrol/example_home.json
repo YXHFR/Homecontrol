@@ -18,12 +18,7 @@
               [4.0, 5.0],
               [1.0, 5.0]
             ],
-            "walls": [
-              "betong",
-              "dörröppning",
-              "dörröppning",
-              "betong"
-            ],
+            "walls": ["betong", "dörröppning", "dörröppning", "betong"],
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
@@ -50,11 +45,7 @@
                 "height": 2.2,
                 "rotation": 45.0,
                 "mirrored": false,
-                "capabilities": [
-                  "radar",
-                  "csi",
-                  "lux"
-                ]
+                "capabilities": ["radar", "csi", "lux"]
               }
             ],
             "lamps": [
@@ -78,14 +69,7 @@
               [4.0, 6.0],
               [4.0, 5.0]
             ],
-            "walls": [
-              "betong",
-              "glas",
-              "betong",
-              "gips",
-              "gips",
-              "dörröppning"
-            ],
+            "walls": ["betong", "glas", "betong", "gips", "gips", "dörröppning"],
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
@@ -112,11 +96,7 @@
                 "height": 2.2,
                 "rotation": 45.0,
                 "mirrored": false,
-                "capabilities": [
-                  "radar",
-                  "csi",
-                  "lux"
-                ]
+                "capabilities": ["radar", "csi", "lux"]
               }
             ],
             "lamps": [
@@ -147,14 +127,7 @@
               [7.0, 9.0],
               [1.0, 9.0]
             ],
-            "walls": [
-              "dörröppning",
-              "gips",
-              "gips",
-              "gips",
-              "betong",
-              "betong"
-            ],
+            "walls": ["dörröppning", "gips", "gips", "gips", "betong", "betong"],
             "settings": {
               "dark_below_lux": 50.0,
               "bright_above_lux": 100.0,
@@ -181,11 +154,7 @@
                 "height": 2.2,
                 "rotation": 225.0,
                 "mirrored": true,
-                "capabilities": [
-                  "radar",
-                  "csi",
-                  "lux"
-                ]
+                "capabilities": ["radar", "csi", "lux"]
               }
             ],
             "lamps": [
@@ -229,12 +198,7 @@
               [6.0, 5.0],
               [1.0, 5.0]
             ],
-            "walls": [
-              "betong",
-              "trä",
-              "dörröppning",
-              "betong"
-            ],
+            "walls": ["betong", "trä", "dörröppning", "betong"],
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
@@ -261,11 +225,7 @@
                 "height": 2.0,
                 "rotation": 225.0,
                 "mirrored": false,
-                "capabilities": [
-                  "radar",
-                  "csi",
-                  "lux"
-                ]
+                "capabilities": ["radar", "csi", "lux"]
               }
             ],
             "lamps": [
@@ -287,12 +247,7 @@
               [9.0, 5.0],
               [6.0, 5.0]
             ],
-            "walls": [
-              "betong",
-              "betong",
-              "dörröppning",
-              "trä"
-            ],
+            "walls": ["betong", "betong", "dörröppning", "trä"],
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
@@ -307,10 +262,7 @@
                 "height": 2.2,
                 "rotation": 135.0,
                 "mirrored": false,
-                "capabilities": [
-                  "radar",
-                  "lux"
-                ]
+                "capabilities": ["radar", "lux"]
               }
             ],
             "lamps": [
@@ -333,13 +285,7 @@
               [9.0, 7.0],
               [1.0, 7.0]
             ],
-            "walls": [
-              "dörröppning",
-              "dörröppning",
-              "betong",
-              "betong",
-              "betong"
-            ],
+            "walls": ["dörröppning", "dörröppning", "betong", "betong", "betong"],
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
@@ -354,11 +300,7 @@
                 "height": 2.2,
                 "rotation": 315.0,
                 "mirrored": false,
-                "capabilities": [
-                  "radar",
-                  "csi",
-                  "lux"
-                ]
+                "capabilities": ["radar", "csi", "lux"]
               }
             ],
             "lamps": [

@@ -7,8 +7,7 @@ olika. Här räcker det att någon av dem ser någon.
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from homecontrol.connectors import Target
-from homecontrol.home import Home, Point, Room
+from homecontrol.home import Home, Point, Room, Target
 
 
 @dataclass(frozen=True)

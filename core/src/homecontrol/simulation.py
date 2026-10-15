@@ -9,10 +9,9 @@ from homecontrol.connectors import (
     LightLevelObserved,
     ObservationSink,
     SourceLost,
-    Target,
     TargetsObserved,
 )
-from homecontrol.home import Point
+from homecontrol.home import Point, Target
 
 
 class SimulatedSource:

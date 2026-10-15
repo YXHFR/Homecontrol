@@ -27,12 +27,12 @@ from homecontrol.clock import ManualClock
 from homecontrol.controller import Controller, LampView
 from homecontrol.home import Home, Point
 from homecontrol.simulation import SimulatedLampOutput, SimulatedSource
-from homes import demo_home
+from homes import one_room_home
 
 
 class Scenario:
     def __init__(self, home: Home | None = None) -> None:
-        self.home = home if home is not None else demo_home()
+        self.home = home if home is not None else one_room_home()
         self.clock = ManualClock()
         self.lamps = SimulatedLampOutput()
         self.controller = Controller(self.home, self.clock, [self.lamps])

@@ -4,12 +4,12 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from homecontrol import store
 from homecontrol.__main__ import export_home, import_home
-from homecontrol.homefile import dumps, example_home, loads
-from homes import demo_home
+from homecontrol.homefile import FORMAT, VERSION, HomeFileError, dumps, example_home, loads
+from homes import one_room_home
 
 
 def test_saved_home_is_loaded_unchanged(conn: psycopg.Connection) -> None:
@@ -26,24 +26,32 @@ def test_empty_database_has_no_home(conn: psycopg.Connection) -> None:
 
 def test_saving_replaces_the_whole_home(conn: psycopg.Connection) -> None:
     store.save_home(conn, example_home())
-    store.save_home(conn, demo_home())
+    store.save_home(conn, one_room_home())
 
-    assert store.load_home(conn) == demo_home()
-    assert conn.execute("SELECT count(*) FROM lamp").fetchone() == (1,)
+    assert store.load_home(conn) == one_room_home()
+    assert conn.execute("SELECT count(*) FROM home").fetchone() == (1,)
 
 
-def test_every_concept_has_its_own_table(conn: psycopg.Connection) -> None:
+def test_home_is_stored_in_the_same_form_as_the_file(conn: psycopg.Connection) -> None:
     store.save_home(conn, example_home())
 
-    for table in ("home", "floor", "room", "wall", "zone", "node", "signal_source", "lamp"):
-        row = conn.execute(
-            sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(table))
-        ).fetchone()
-        assert row is not None
-        assert row[0] > 0, table
-    doorways = conn.execute("SELECT count(*) FROM wall WHERE kind = 'dörröppning'").fetchone()
-    assert doorways is not None
-    assert doorways[0] > 0
+    row = conn.execute("SELECT document FROM home").fetchone()
+
+    assert row is not None
+    document = row[0]
+    assert (document["format"], document["version"]) == (FORMAT, VERSION)
+    rooms = document["home"]["floors"][0]["rooms"]
+    assert rooms[0]["walls"] == ["betong", "dörröppning", "dörröppning", "betong"]
+
+
+def test_broken_document_in_the_database_is_reported(conn: psycopg.Connection) -> None:
+    conn.execute(
+        "INSERT INTO home (document) VALUES (%s)",
+        (Jsonb({"format": FORMAT, "version": VERSION, "home": {"name": "H", "floors": []}}),),
+    )
+
+    with pytest.raises(HomeFileError, match="minst en våning"):
+        store.load_home(conn)
 
 
 def test_migrating_again_changes_nothing(conn: psycopg.Connection) -> None:
@@ -53,32 +61,6 @@ def test_migrating_again_changes_nothing(conn: psycopg.Connection) -> None:
 
     assert store.load_home(conn) == example_home()
     assert conn.execute("SELECT version FROM schema_migration").fetchall() == [(1,)]
-
-
-def test_failed_save_keeps_the_old_home(conn: psycopg.Connection) -> None:
-    store.save_home(conn, example_home())
-    # model_copy kontrollerar inget, så databasens egen kontroll får säga nej
-    # mitt i sparandet, efter att det gamla hemmet redan tagits bort.
-    room = demo_home().floors[0].rooms[0]
-    settings = room.settings.model_copy(update={"dark_below_lux": 500.0})
-    floor = (
-        demo_home()
-        .floors[0]
-        .model_copy(update={"rooms": (room.model_copy(update={"settings": settings}),)})
-    )
-    broken = demo_home().model_copy(update={"floors": (floor,)})
-
-    with pytest.raises(psycopg.errors.CheckViolation):
-        store.save_home(conn, broken)
-
-    assert store.load_home(conn) == example_home()
-
-
-def test_database_refuses_values_outside_the_model(conn: psycopg.Connection) -> None:
-    store.save_home(conn, demo_home())
-
-    with pytest.raises(psycopg.errors.CheckViolation):
-        conn.execute("UPDATE wall SET kind = 'lera'")
 
 
 def test_file_round_trip_through_the_database(database: str, tmp_path: Path) -> None:
@@ -92,6 +74,15 @@ def test_file_round_trip_through_the_database(database: str, tmp_path: Path) -> 
 
     assert exported.read_text("utf-8") == original.read_text("utf-8")
     assert loads(exported.read_text("utf-8")) == example_home()
+
+
+def test_exported_file_can_only_be_read_by_its_owner(database: str, tmp_path: Path) -> None:
+    import_home(database, None)
+    exported = tmp_path / "export.json"
+
+    export_home(database, str(exported))
+
+    assert exported.stat().st_mode & 0o777 == 0o600
 
 
 def test_import_of_a_broken_file_leaves_the_home_alone(database: str, tmp_path: Path) -> None:

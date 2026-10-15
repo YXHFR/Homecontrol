@@ -16,7 +16,7 @@ from homecontrol.home import (
     ZoneKind,
     rectangle,
 )
-from homes import FLOOR, demo_home, room
+from homes import FLOOR, one_room_home, room
 
 # Ett L-format rum: 4 × 4 meter där den nedre högra kvadranten saknas.
 L_SHAPE = (Point(0, 0), Point(4, 0), Point(4, 2), Point(2, 2), Point(2, 4), Point(0, 4))
@@ -27,7 +27,7 @@ def l_room(**changes: object) -> Room:
         "id": "rum",
         "name": "Rum",
         "polygon": L_SHAPE,
-        "walls": (WallKind.GIPS,) * 6,
+        "walls": (WallKind.PLASTERBOARD,) * 6,
     }
     return Room.model_validate(fields | changes)
 
@@ -56,21 +56,23 @@ def test_room_center_is_the_centroid_of_the_area() -> None:
 
 def test_walls_follow_the_sides_clockwise_from_top_left() -> None:
     rum = room("r", "R", 0, 0, 3, 2).model_copy(
-        update={"walls": (WallKind.BETONG, WallKind.GLAS, WallKind.GIPS, WallKind.DOORWAY)}
+        update={
+            "walls": (WallKind.CONCRETE, WallKind.GLASS, WallKind.PLASTERBOARD, WallKind.DOORWAY)
+        }
     )
 
     sides = [(a, b, kind) for a, b, kind in rum.wall_segments()]
 
     # Origo uppe till vänster och y nedåt: första sidan är överkanten, sedan höger.
-    assert sides[0] == (Point(0, 0), Point(3, 0), WallKind.BETONG)
-    assert sides[1] == (Point(3, 0), Point(3, 2), WallKind.GLAS)
+    assert sides[0] == (Point(0, 0), Point(3, 0), WallKind.CONCRETE)
+    assert sides[1] == (Point(3, 0), Point(3, 2), WallKind.GLASS)
     assert sides[3] == (Point(0, 2), Point(0, 0), WallKind.DOORWAY)
     assert sides[3][2].is_doorway
 
 
 def test_room_needs_one_wall_per_side() -> None:
     with pytest.raises(ValidationError, match="4 sidor men 3 väggar"):
-        Room(id="r", name="R", polygon=rectangle(0, 0, 1, 1), walls=(WallKind.GIPS,) * 3)
+        Room(id="r", name="R", polygon=rectangle(0, 0, 1, 1), walls=(WallKind.PLASTERBOARD,) * 3)
 
 
 @pytest.mark.parametrize(
@@ -82,7 +84,7 @@ def test_room_needs_one_wall_per_side() -> None:
 )
 def test_polygon_needs_an_area(polygon: tuple[Point, ...]) -> None:
     with pytest.raises(ValidationError):
-        Zone(id="z", name="Z", kind=ZoneKind.VANLIG, polygon=polygon)
+        Zone(id="z", name="Z", kind=ZoneKind.NORMAL, polygon=polygon)
 
 
 def test_coordinates_start_at_the_top_left_corner() -> None:
@@ -102,7 +104,7 @@ def test_lamp_zone_must_be_in_the_same_room() -> None:
     with pytest.raises(ValidationError, match="zon som inte finns"):
         l_room(lamps=(lamp,))
 
-    sofa = Zone(id="soffa", name="Soffa", kind=ZoneKind.STILLHET, polygon=rectangle(0, 0, 1, 1))
+    sofa = Zone(id="soffa", name="Soffa", kind=ZoneKind.STILL, polygon=rectangle(0, 0, 1, 1))
     assert l_room(zones=(sofa,), lamps=(lamp,)).lamps[0].zone_id == "soffa"
 
 
@@ -138,7 +140,7 @@ def test_ids_are_simple() -> None:
 
 
 def test_home_finds_rooms_floors_and_lamps() -> None:
-    home = demo_home()
+    home = one_room_home()
 
     assert home.room("vardagsrum").name == "Vardagsrum"
     assert home.floor_of("vardagsrum").id == FLOOR
@@ -149,6 +151,30 @@ def test_home_finds_rooms_floors_and_lamps() -> None:
 
 
 def test_model_cannot_be_changed_by_mistake() -> None:
-    home = demo_home()
+    home = one_room_home()
     with pytest.raises(ValidationError):
         home.name = "Annat"
+
+
+def test_rooms_sharing_a_wall_must_agree_on_it() -> None:
+    left = room("vanster", "Vänster", 0, 0, 2, 2)
+    right = room("hoger", "Höger", 2, 0, 2, 2)
+    # Den vänstra kanten på det högra rummet är sida 4 (från (2, 2) upp till (2, 0)).
+    door = right.model_copy(update={"walls": (*right.walls[:3], WallKind.DOORWAY)})
+
+    with pytest.raises(ValidationError, match="vanster och hoger delar en vägg"):
+        Floor(id="plan", name="Plan", level=0, rooms=(left, door))
+
+    # Den högra kanten på det vänstra rummet är sida 2.
+    walls = (left.walls[0], WallKind.DOORWAY, *left.walls[2:])
+    both_doors = left.model_copy(update={"walls": walls})
+    floor = Floor(id="plan", name="Plan", level=0, rooms=(both_doors, door))
+    assert floor.rooms[1].walls[3].is_doorway
+
+
+def test_walls_that_only_touch_at_a_corner_do_not_need_to_agree() -> None:
+    first = room("a", "A", 0, 0, 2, 2)
+    diagonal = room("b", "B", 2, 2, 2, 2)
+    concrete = diagonal.model_copy(update={"walls": (WallKind.CONCRETE,) * 4})
+
+    assert Floor(id="plan", name="Plan", level=0, rooms=(first, concrete))

@@ -10,10 +10,15 @@ unikt i hela hemmet, så att resten av kärnan kan peka ut den med bara id:t.
 
 Modellen är oföränderlig och kontrolleras när den skapas, oavsett om den
 kommer från databasen, en importerad fil eller koden.
+
+Några delar är förberedda för kommande steg och påverkar ännu inget:
+zonernas sorter, lampornas zon, rummens ljusgräns och nodernas placering.
+Regeln använder i dag bara rummens mörkergräns och fördröjning.
 """
 
 import math
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, NamedTuple, Self
 
@@ -25,6 +30,14 @@ class Point(NamedTuple):
 
     x: float
     y: float
+
+
+@dataclass(frozen=True)
+class Target:
+    """Ett mål (en person) någonstans i hemmet: en punkt på en våning."""
+
+    floor_id: str
+    position: Point
 
 
 # Gränser som håller orimliga värden ute. Ett hem är mindre än så här.
@@ -77,10 +90,10 @@ class _Model(BaseModel):
 class WallKind(StrEnum):
     """Vad en vägg är gjord av, eller att den är en dörröppning utan vägg."""
 
-    GIPS = "gips"
-    BETONG = "betong"
-    TRA = "trä"
-    GLAS = "glas"
+    PLASTERBOARD = "gips"
+    CONCRETE = "betong"
+    WOOD = "trä"
+    GLASS = "glas"
     DOORWAY = "dörröppning"
 
     @property
@@ -89,12 +102,14 @@ class WallKind(StrEnum):
 
 
 class ZoneKind(StrEnum):
-    VANLIG = "vanlig"
-    STILLHET = "stillhet"
+    """Vad en zon betyder för närvaron. Används när sammanvägningen kommer (#37)."""
+
+    NORMAL = "vanlig"
+    STILL = "stillhet"
     """Där man sitter eller ligger still länge, till exempel soffa och säng."""
-    IGNORERA = "ignorera"
+    IGNORE = "ignorera"
     """Störkällor som radarn inte ska bry sig om, till exempel en fläkt."""
-    ENTRE = "entré"
+    ENTRANCE = "entré"
     """Vid en dörr, där den som försvinner ur sikte har gått ut."""
 
 
@@ -110,7 +125,7 @@ class Capability(StrEnum):
 class LampProfile(StrEnum):
     """Hur lampan ska styras. Lamputgången anpassar sig efter lampans egenheter."""
 
-    GENERISK = "generisk"
+    GENERIC = "generisk"
     IKEA_TRADFRI = "ikea-tradfri"
 
 
@@ -118,7 +133,7 @@ class RoomSettings(_Model):
     dark_below_lux: Lux = DEFAULT_DARK_BELOW_LUX
     """Under den här ljusnivån räknas rummet som mörkt."""
     bright_above_lux: Lux = DEFAULT_BRIGHT_ABOVE_LUX
-    """Över den här ljusnivån räknas rummet som ljust av dagsljus."""
+    """Över den här ljusnivån räknas rummet som ljust av dagsljus. Används inte än."""
     off_after_empty_seconds: Annotated[float, Field(gt=0, le=MAX_DELAY_SECONDS)] = (
         DEFAULT_OFF_AFTER_EMPTY_SECONDS
     )
@@ -165,7 +180,7 @@ class Lamp(_Model):
     position: Position
     zone_id: Id | None = None
     """Zonen i rummet som lampan hör till, om den bara lyser upp en del av rummet."""
-    profile: LampProfile = LampProfile.GENERISK
+    profile: LampProfile = LampProfile.GENERIC
 
 
 class Room(_Model):
@@ -222,6 +237,28 @@ class Floor(_Model):
     """Våningsplanet: 0 är entréplanet, 1 en trappa upp och -1 källaren."""
     rooms: tuple[Room, ...] = ()
     signal_sources: tuple[SignalSource, ...] = ()
+
+    @model_validator(mode="after")
+    def _shared_walls_agree(self) -> Self:
+        """Två rum som delar en väggsträcka måste säga samma sak om den."""
+        walls = [
+            (room.id, start, end, kind)
+            for room in self.rooms
+            for start, end, kind in room.wall_segments()
+        ]
+        for i, (room_a, start_a, end_a, kind_a) in enumerate(walls):
+            for room_b, start_b, end_b, kind_b in walls[i + 1 :]:
+                if (
+                    room_a != room_b
+                    and kind_a != kind_b
+                    and _overlapping(start_a, end_a, start_b, end_b)
+                ):
+                    raise ValueError(
+                        f"Rummen {room_a} och {room_b} delar en vägg men anger olika "
+                        f"sorter ({kind_a.value} och {kind_b.value}). Dela sidan med ett "
+                        "extra hörn där väggen byter sort."
+                    )
+        return self
 
 
 class Home(_Model):
@@ -314,6 +351,22 @@ def _in_polygon(point: Point, polygon: Sequence[Point]) -> bool:
             if point.x < crossing_x:
                 inside = not inside
     return inside
+
+
+def _overlapping(a: Point, b: Point, c: Point, d: Point, tolerance: float = 1e-6) -> bool:
+    """Om sträckorna a–b och c–d ligger på samma linje och delar en bit."""
+    dx, dy = b.x - a.x, b.y - a.y
+    length = math.hypot(dx, dy)
+    if length < tolerance:
+        return False
+    for p in (c, d):
+        if abs(dx * (p.y - a.y) - dy * (p.x - a.x)) / length > tolerance:
+            return False
+    # Hur långt längs a–b som c och d ligger, i meter.
+    along_c = ((c.x - a.x) * dx + (c.y - a.y) * dy) / length
+    along_d = ((d.x - a.x) * dx + (d.y - a.y) * dy) / length
+    shared = min(length, max(along_c, along_d)) - max(0.0, min(along_c, along_d))
+    return shared > tolerance
 
 
 def _on_segment(point: Point, a: Point, b: Point, tolerance: float = 1e-9) -> bool:

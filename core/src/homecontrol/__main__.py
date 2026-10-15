@@ -2,7 +2,8 @@
 
     homecontrol                      startar kärnan
     homecontrol exportera [FIL]      skriver hemmet till FIL (eller skärmen)
-    homecontrol importera FIL        ersätter hemmet med det i FIL (- läser från in-strömmen)
+    homecontrol importera FIL        ersätter hemmet med det i FIL
+                                     (- läser det som skickas in med <)
     homecontrol importera --exempelhem
 
 Export och import kräver databasen (HOMECONTROL_DATABASE). Efter en import
@@ -11,6 +12,7 @@ startas kärnan om för att läsa in det nya hemmet.
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -29,10 +31,12 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="homecontrol", description="Närvarostyrd belysning.")
     commands = parser.add_subparsers(dest="command")
     export = commands.add_parser("exportera", help="skriv hemmet till en läsbar fil")
-    export.add_argument("fil", nargs="?", default="-", help="filen att skriva (- är skärmen)")
+    export.add_argument(
+        "fil", nargs="?", default="-", help="filen att skriva (- skriver ut den, som med >)"
+    )
     import_ = commands.add_parser("importera", help="ersätt hemmet med det i en fil")
     source = import_.add_mutually_exclusive_group(required=True)
-    source.add_argument("fil", nargs="?", help="filen att läsa (- är in-strömmen)")
+    source.add_argument("fil", nargs="?", help="filen att läsa (- läser det som skickas in med <)")
     source.add_argument("--exempelhem", action="store_true", help="läs in exempelhemmet")
     args = parser.parse_args(argv)
 
@@ -70,9 +74,12 @@ def export_home(database: str, path: str) -> None:
     text = dumps(home)
     if path == "-":
         sys.stdout.write(text)
-    else:
-        Path(path).write_text(text, encoding="utf-8")
-        logger.info("Skrev hemmet %r till %s", home.name, path)
+        return
+    # Filen visar hur hemmet ser ut, så bara ägaren får läsa den.
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+        file.write(text)
+    logger.info("Skrev hemmet till %s (%s)", path, _summary(home))
 
 
 def import_home(database: str, path: str | None) -> None:
@@ -88,8 +95,9 @@ def import_home(database: str, path: str | None) -> None:
         store.migrate(conn)
         store.save_home(conn, home)
     logger.info(
-        "Importerade hemmet %r. Starta om kärnan för att använda det: docker compose restart core",
-        home.name,
+        "Importerade hemmet (%s). Starta om kärnan för att använda det: "
+        "docker compose restart core",
+        _summary(home),
     )
 
 
@@ -105,8 +113,13 @@ def load_or_seed_home(settings: Settings) -> Home:
             home = example_home()
             store.save_home(conn, home)
             logger.info("Inget hem var sparat, så exempelhemmet lades in")
-    logger.info("Läste in hemmet %r från databasen", home.name)
+    logger.info("Läste in hemmet från databasen (%s)", _summary(home))
     return home
+
+
+def _summary(home: Home) -> str:
+    # Hemmets och rummens namn kan vara personliga och loggas därför inte.
+    return f"{len(home.floors)} våningar, {len(home.rooms)} rum, {len(home.lamps)} lampor"
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """Scenarier för den minimala regeln, i snabbspolad tid.
 
-Demohemmet är ett vardagsrum på 5 × 4 meter med en taklampa i mitten.
+Om inget annat anges är hemmet ett vardagsrum på 5 × 4 meter med en taklampa i mitten.
 """
 
 import pytest

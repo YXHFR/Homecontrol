@@ -1,5 +1,6 @@
 import asyncio
 import time
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -14,12 +15,12 @@ from homecontrol.controller import Controller
 from homecontrol.home import DEFAULT_OFF_AFTER_EMPTY_SECONDS as OFF_AFTER_EMPTY_SECONDS
 from homecontrol.live import create_live_router, run_timer
 from homecontrol.simulation import SimulatedLampOutput
-from homes import FLOOR, at, demo_home
+from homes import FLOOR, at, one_room_home
 
 
 def app() -> FastAPI:
     # TestClient anropar kärnan som http://testserver.
-    return create_app(allowed_hosts={"testserver"}, home=demo_home())
+    return create_app(allowed_hosts={"testserver"}, home=one_room_home())
 
 
 def lamp_on(state: dict[str, Any]) -> bool:
@@ -118,7 +119,7 @@ def test_accepts_localhost_addresses_and_allowed_names(host: str) -> None:
 
 
 def test_without_simulation_commands_are_ignored_but_state_streams() -> None:
-    controller = Controller(demo_home(), OffsetClock(), [])
+    controller = Controller(one_room_home(), OffsetClock(), [])
     application = FastAPI()
     application.include_router(create_live_router(controller, None, {"testserver"}))
     with TestClient(application) as client, client.websocket_connect("/api/live") as ws:
@@ -127,6 +128,35 @@ def test_without_simulation_commands_are_ignored_but_state_streams() -> None:
         assert ws.receive_json()["targets"] == []
         controller.observe(TargetsObserved("radar", (at(1, 1),)))
         assert ws.receive_json()["targets"] == [{"floor_id": FLOOR, "x": 1, "y": 1}]
+
+
+def test_client_that_leaves_stops_listening() -> None:
+    controller = Controller(one_room_home(), OffsetClock(), [])
+    listening = 0
+    subscribe = controller.subscribe
+
+    def counting_subscribe(listener: Callable[[], None]) -> Callable[[], None]:
+        nonlocal listening
+        listening += 1
+        stop = subscribe(listener)
+
+        def counting_stop() -> None:
+            nonlocal listening
+            listening -= 1
+            stop()
+
+        return counting_stop
+
+    controller.subscribe = counting_subscribe  # type: ignore[method-assign]
+    application = FastAPI()
+    application.include_router(create_live_router(controller, None, {"testserver"}))
+    with TestClient(application) as client:
+        with client.websocket_connect("/api/live") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            assert listening == 1
+
+        assert listening == 0
 
 
 def test_accepts_same_origin() -> None:
@@ -150,7 +180,7 @@ class OffsetClock:
 def test_timer_survives_an_error() -> None:
     async def scenario() -> None:
         clock = OffsetClock()
-        controller = Controller(demo_home(), clock, [])
+        controller = Controller(one_room_home(), clock, [])
         timer = asyncio.create_task(run_timer(controller, clock))
         await asyncio.sleep(0)  # låt timern börja lyssna
         original_tick = controller.tick
@@ -178,7 +208,7 @@ def test_timer_switches_off_the_lamp_when_the_delay_is_over() -> None:
     async def scenario() -> None:
         clock = OffsetClock()
         lamps = SimulatedLampOutput()
-        controller = Controller(demo_home(), clock, [lamps])
+        controller = Controller(one_room_home(), clock, [lamps])
         timer = asyncio.create_task(run_timer(controller, clock))
         controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
         controller.observe(TargetsObserved("sim", (at(1, 1),)))

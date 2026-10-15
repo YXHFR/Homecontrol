@@ -50,7 +50,12 @@ const WALLS: Record<WallKind, { color: string; width: number; dash?: number[] }>
   dörröppning: { color: "#e08a00", width: 2, dash: [6, 4] },
 };
 
-function drawRooms(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
+function drawRoomFloors(
+  layer: Konva.Layer,
+  t: Transform,
+  floor: Floor,
+  state: StateMessage | null,
+) {
   for (const room of floor.rooms) {
     const occupied = state?.rooms.find((r) => r.id === room.id)?.occupied ?? false;
     layer.add(
@@ -64,16 +69,20 @@ function drawRooms(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
       }),
     );
   }
-  // Grannrum delar väggar. Dörröppningar ritas sist så att de syns även om
-  // grannrummet har en hel vägg på samma ställe.
+}
+
+/**
+ * Grannrum delar väggar. Dörröppningar ritas sist så att de syns även om
+ * grannrummet har en hel vägg på samma ställe, och alla väggar ritas åt
+ * samma håll så att två likadana dörröppningar får strecken på samma ställe.
+ */
+function drawWalls(layer: Konva.Layer, t: Transform, floor: Floor) {
   const walls = floor.rooms.flatMap(wallSegments);
   const ordered = [
     ...walls.filter((wall) => wall.kind !== "dörröppning"),
     ...walls.filter((wall) => wall.kind === "dörröppning"),
   ];
   for (const wall of ordered) {
-    // Samma riktning oavsett vilket rum väggen kommer från, så att två
-    // likadana dörröppningar ovanpå varandra får strecken på samma ställe.
     const [a, b] = [t.toScreen(wall.from), t.toScreen(wall.to)];
     const [from, to] = a.x < b.x || (a.x === b.x && a.y <= b.y) ? [a, b] : [b, a];
     const style = WALLS[wall.kind];
@@ -87,6 +96,9 @@ function drawRooms(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
       }),
     );
   }
+}
+
+function drawRoomNames(layer: Konva.Layer, t: Transform, floor: Floor) {
   for (const room of floor.rooms) {
     const points = corners(room).map((p) => t.toScreen(p));
     layer.add(
@@ -151,7 +163,7 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
   });
   personLayer.add(person);
 
-  let floor: Floor | null = null;
+  let shownFloor: Floor | null = null;
   let state: StateMessage | null = null;
   /** Senaste omräkningen mellan meter och pixlar; behövs när personen dras. */
   let transform: Transform | null = null;
@@ -190,18 +202,20 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
   };
 
   const render = () => {
-    if (floor === null) {
+    if (shownFloor === null) {
       return;
     }
     const width = Math.min(container.clientWidth || MAX_WIDTH, MAX_WIDTH);
     const height = Math.round(width * ASPECT);
     stage.size({ width, height });
-    transform = fitTransform(floor.rooms, width, height);
+    transform = fitTransform(shownFloor.rooms, width, height);
 
     roomLayer.destroyChildren();
-    drawRooms(roomLayer, transform, floor, state);
-    drawLamps(roomLayer, transform, floor, state);
-    placePerson(transform, floor);
+    drawRoomFloors(roomLayer, transform, shownFloor, state);
+    drawWalls(roomLayer, transform, shownFloor);
+    drawRoomNames(roomLayer, transform, shownFloor);
+    drawLamps(roomLayer, transform, shownFloor, state);
+    placePerson(transform, shownFloor);
   };
 
   const onResize = () => render();
@@ -209,7 +223,7 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
 
   return {
     setFloor(next) {
-      floor = next;
+      shownFloor = next;
       render();
     },
     setState(next) {

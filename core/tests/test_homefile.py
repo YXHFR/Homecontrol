@@ -7,7 +7,7 @@ import pytest
 
 from homecontrol.home import Capability, LampProfile, WallKind, ZoneKind
 from homecontrol.homefile import HomeFileError, dumps, example_home, loads
-from homes import demo_home
+from homes import one_room_home
 
 EXAMPLE_FILE = resources.files("homecontrol").joinpath("example_home.json").read_text("utf-8")
 
@@ -24,10 +24,11 @@ def test_example_file_is_exactly_what_export_writes() -> None:
 
 
 def test_file_is_readable_json_with_points_on_one_line() -> None:
-    text = dumps(demo_home())
+    text = dumps(one_room_home())
 
     assert text.startswith('{\n  "format": "homecontrol-hem",\n  "version": 1,')
     assert "[0.0, 0.0],\n" in text
+    assert '"walls": ["gips", "gips", "gips", "gips"],' in text
     assert json.loads(text)["home"]["floors"][0]["rooms"][0]["walls"] == ["gips"] * 4
 
 
@@ -39,7 +40,7 @@ def test_example_home_uses_every_concept_on_two_floors() -> None:
 
     assert len(home.floors) == 2
     assert {kind for room in rooms for kind in room.walls} == set(WallKind)
-    assert {zone.kind for zone in zones} >= {ZoneKind.STILLHET, ZoneKind.IGNORERA, ZoneKind.ENTRE}
+    assert {zone.kind for zone in zones} >= {ZoneKind.STILL, ZoneKind.IGNORE, ZoneKind.ENTRANCE}
     assert {cap for node in nodes for cap in node.capabilities} == set(Capability)
     assert any(node.mirrored for node in nodes)
     assert all(floor.signal_sources for floor in home.floors)
@@ -63,12 +64,38 @@ def test_broken_files_are_refused_with_a_reason(text: str, message: str) -> None
         loads(text)
 
 
-def test_invalid_home_says_where_the_error_is() -> None:
-    document = json.loads(dumps(demo_home()))
-    document["home"]["floors"][0]["rooms"][0]["polygon"][1] = [-1, 0]
+def test_invalid_home_says_in_swedish_where_and_what_is_wrong() -> None:
+    document = json.loads(dumps(one_room_home()))
+    room = document["home"]["floors"][0]["rooms"][0]
+    room["polygon"][1] = [-1, 0]
+    room["walls"][0] = "lera"
+    room["lamps"][0]["id"] = "kök"
+    del document["home"]["floors"][0]["name"]
 
     with pytest.raises(HomeFileError) as error:
         loads(json.dumps(document))
 
-    assert "floors.0.rooms.0.polygon.1" in str(error.value)
-    assert "mellan 0 och 1000" in str(error.value)
+    lines = str(error.value).splitlines()
+    assert lines[0] == "Hemmet i filen är inte giltigt (4 fel):"
+    assert '  våning 1 ("plan") › name: saknas' in lines
+    assert (
+        '  våning 1 ("plan") › rum 1 ("vardagsrum") › hörn 2: '
+        "Koordinaterna ska vara mellan 0 och 1000 meter: [-1.0, 0.0]"
+    ) in lines
+    assert (
+        '  våning 1 ("plan") › rum 1 ("vardagsrum") › vägg 1: '
+        "ska vara en av 'gips', 'betong', 'trä', 'glas' eller 'dörröppning'"
+    ) in lines
+    assert any(
+        line.startswith('  våning 1 ("plan") › rum 1 ("vardagsrum") › lampa 1 ("kök") › id:')
+        and "inte å, ä, ö" in line
+        for line in lines
+    )
+
+
+def test_wrong_type_is_explained() -> None:
+    document = json.loads(dumps(one_room_home()))
+    document["home"]["floors"][0]["level"] = "ett"
+
+    with pytest.raises(HomeFileError, match=r'våning 1 \("plan"\) › level: ska vara ett heltal'):
+        loads(json.dumps(document))
