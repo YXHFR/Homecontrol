@@ -1,9 +1,11 @@
 from homecontrol.connectors import LampCommand
-from homecontrol.home import demo_home
+from homecontrol.home import DEFAULT_OFF_AFTER_EMPTY_SECONDS as OFF_AFTER_EMPTY_SECONDS
+from homecontrol.home import RoomSettings
 from homecontrol.presence import RoomPresence
-from homecontrol.rules import OFF_AFTER_EMPTY_SECONDS, RoomState, evaluate
+from homecontrol.rules import RoomState, evaluate
+from homes import home_with_settings, one_room_home
 
-HOME = demo_home()
+HOME = one_room_home()
 ROOM = HOME.rooms[0].id
 LAMP = HOME.lamps[0].id
 
@@ -49,3 +51,12 @@ def test_nothing_to_wait_for_when_lamp_is_off() -> None:
     assert result.commands == ()
     assert result.wake_at is None
     assert result.explanations[LAMP] == "Släckt: Vardagsrum är tomt."
+
+
+def test_short_delays_are_explained_in_seconds() -> None:
+    settings = RoomSettings(off_after_empty_seconds=10)
+    home = home_with_settings(settings)
+
+    result = evaluate(home, rooms(vacant_since=100), {LAMP: True}, now=105)
+
+    assert "släcks när det varit tomt i 10 sekunder" in result.explanations[LAMP]

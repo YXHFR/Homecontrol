@@ -5,31 +5,31 @@ import pytest
 from homecontrol.clock import ManualClock
 from homecontrol.connectors import LampCommand, LightLevelObserved, SourceLost, TargetsObserved
 from homecontrol.controller import Controller
-from homecontrol.home import Home, Lamp, Point, Room, demo_home
 from homecontrol.simulation import SimulatedLampOutput
+from homes import at, one_room_home
 
 
 def make() -> tuple[Controller, ManualClock, SimulatedLampOutput]:
     clock = ManualClock()
     lamps = SimulatedLampOutput()
-    return Controller(demo_home(), clock, [lamps]), clock, lamps
+    return Controller(one_room_home(), clock, [lamps]), clock, lamps
 
 
 def test_targets_from_several_sources_are_combined() -> None:
     controller, _, _ = make()
-    controller.observe(TargetsObserved("a", (Point(1, 1),)))
-    controller.observe(TargetsObserved("b", (Point(9, 9),)))
+    controller.observe(TargetsObserved("a", (at(1, 1),)))
+    controller.observe(TargetsObserved("b", (at(9, 9),)))
     controller.observe(TargetsObserved("a", ()))
 
     snapshot = controller.snapshot()
 
-    assert snapshot.targets == (Point(9, 9),)
+    assert snapshot.targets == (at(9, 9),)
     assert not snapshot.rooms[0].occupied
 
 
 def test_lost_source_forgets_its_targets() -> None:
     controller, _, _ = make()
-    controller.observe(TargetsObserved("a", (Point(1, 1),)))
+    controller.observe(TargetsObserved("a", (at(1, 1),)))
 
     controller.observe(SourceLost("a"))
 
@@ -44,10 +44,10 @@ class BrokenOutput:
 
 def test_broken_output_does_not_stop_the_others(caplog: pytest.LogCaptureFixture) -> None:
     lamps = SimulatedLampOutput()
-    controller = Controller(demo_home(), ManualClock(), [BrokenOutput(), lamps])
+    controller = Controller(one_room_home(), ManualClock(), [BrokenOutput(), lamps])
 
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-    controller.observe(TargetsObserved("sim", (Point(1, 1),)))
+    controller.observe(TargetsObserved("sim", (at(1, 1),)))
 
     assert lamps.states == {"taklampa": True}
     assert "kunde inte ta emot" in caplog.text
@@ -58,7 +58,7 @@ def test_log_says_which_lamp_but_not_where_someone_is(caplog: pytest.LogCaptureF
     controller, _, _ = make()
 
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-    controller.observe(TargetsObserved("sim", (Point(1, 1),)))
+    controller.observe(TargetsObserved("sim", (at(1, 1),)))
 
     assert "Tänder taklampa" in caplog.text
     assert "Vardagsrum" not in caplog.text
@@ -96,7 +96,7 @@ def test_listeners_are_told_about_changes_until_unsubscribed() -> None:
 def test_tick_before_wake_at_does_nothing() -> None:
     controller, clock, lamps = make()
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-    controller.observe(TargetsObserved("sim", (Point(1, 1),)))
+    controller.observe(TargetsObserved("sim", (at(1, 1),)))
     controller.observe(TargetsObserved("sim", ()))
     wake_at = controller.wake_at
     assert wake_at is not None
@@ -105,19 +105,6 @@ def test_tick_before_wake_at_does_nothing() -> None:
     controller.tick()
 
     assert lamps.states == {"taklampa": True}
-
-
-def test_home_rejects_lamp_in_unknown_room() -> None:
-    with pytest.raises(ValueError, match="okänt rum"):
-        Home(rooms=(), lamps=(Lamp("l", "L", "saknas", Point(0, 0)),))
-
-
-def test_room_contains_its_edges_only() -> None:
-    room = Room("r", "R", x=0, y=0, width=2, height=1)
-
-    assert room.contains(Point(0, 0))
-    assert room.contains(Point(2, 1))
-    assert not room.contains(Point(2.01, 0.5))
 
 
 def test_manual_clock_cannot_go_backwards() -> None:

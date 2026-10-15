@@ -5,10 +5,11 @@ känner av var någon befinner sig, och lamporna (IKEA via Zigbee2MQTT) tänds
 och släcks efter det.
 
 > Projektet är i ett tidigt skede. Grunden startar (kärnan, databasen, MQTT och
-> Zigbee2MQTT) och det finns en första livevy med ett låtsasrum: dra en
-> låtsasperson in i rummet så tänds en virtuell lampa när det är mörkt, och
-> den släcks när rummet har varit tomt i 3 minuter. Riktiga sensorer och
-> lampor kopplas in i senare steg.
+> Zigbee2MQTT) och det finns en första livevy som ritar hemmet från
+> databasen, en våning i taget. Första gången visas ett påhittat exempelhem.
+> Dra en låtsasperson in i ett rum så tänds de virtuella lamporna när det är
+> mörkt, och de släcks när rummet har varit tomt en stund. Riktiga sensorer
+> och lampor kopplas in i senare steg.
 
 ## Snabbstart
 
@@ -75,6 +76,59 @@ docker compose logs    # visar vad tjänsterna skriver, leta efter fel
 Ett vanligt fel är att `.env` saknas eller att ett värde är tomt. Då säger
 `docker compose up` vilken inställning som saknas.
 
+### Hemmet: spara, flytta och läsa in
+
+Hemmet (våningar, rum, väggar, dörröppningar, zoner, rumskort, routrar och
+lampor) sparas i databasen. Första gången kärnan startar läggs ett påhittat
+exempelhem in. Hemmet kan sparas till en läsbar fil och läsas in igen, till
+exempel som säkerhetskopia eller för att flytta det till en annan dator:
+
+```sh
+docker compose exec -T core homecontrol exportera > hem.json      # spara till fil
+docker compose exec -T core homecontrol importera - < hem.json     # läs in från fil
+docker compose exec -T core homecontrol importera --exempelhem     # börja om med exempelhemmet
+docker compose restart core                                        # efter en import
+```
+
+Filen kontrolleras innan något ändras, så en trasig fil lämnar hemmet som det
+var, och felmeddelandet säger var i filen felet finns. En egen hemfil
+innehåller din planlösning, så lägg den inte i repot eller på nätet.
+
+Så läser du filen:
+
+- Alla mått är i meter, räknat från övre vänstra hörnet av ritningen: `x`
+  växer åt höger och `y` nedåt. En punkt skrivs `[x, y]`.
+- `id` är ett kort namn som programmet använder. Det får bara innehålla
+  små bokstäver a–z, siffror, `-` och `_` (alltså inte å, ä, ö). `name` är
+  namnet som visas och får vara vad som helst.
+- `level` är våningsplanet: `0` är entréplanet, `1` en trappa upp och `-1`
+  källaren.
+- Ett rum är en yta med hörnen i `polygon`. `walls` har en vägg per sida:
+  den första väggen går från första till andra hörnet, den andra från
+  andra till tredje, och den sista tillbaka till första hörnet. En vägg är
+  `gips`, `betong`, `trä`, `glas` eller `dörröppning`. Två rum som delar en
+  vägg måste ange samma sort. Byter väggen sort på vägen läggs ett extra
+  hörn där.
+- `settings` per rum: under `dark_below_lux` räknas rummet som mörkt, och
+  lamporna släcks när rummet har varit tomt i `off_after_empty_seconds`
+  sekunder.
+- `zones` är delar av ett rum: `vanlig`, `stillhet` (soffa, säng),
+  `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr).
+- `nodes` är rumskorten: var de sitter (`position`), monteringshöjd i
+  meter (`height`), åt vilket håll radarn tittar i grader medurs där 0 är
+  åt höger (`rotation`), om kortet sitter upp och ned (`mirrored`) och vad
+  det kan mäta (`radar`, `csi`, `lux`).
+- `signal_sources` är routrar och andra Wi-Fi-sändare.
+- `lamps` har en plats, kan höra till en zon (`zone_id`) och har en
+  `profile` som säger hur lampan styrs (`generisk` eller `ikea-tradfri`).
+
+Zonerna, lampornas zon och profil, `bright_above_lux` och rumskortens
+placering sparas redan men används först i kommande versioner.
+
+Livevyn kräver ingen inloggning än, så alla i hemnätverket som når
+Homecontrol kan se planlösningen. Vill du att bara den här datorn ska nå den
+sätter du `BIND_ADDRESS=127.0.0.1` i `.env`.
+
 ### Stoppa och uppdatera
 
 ```sh
@@ -105,6 +159,14 @@ uv run ruff check .. && uv run ruff format --check .. && uv run mypy
 HOMECONTROL_WEB_DIR=../web/dist uv run homecontrol
 ```
 
+Utan `HOMECONTROL_DATABASE` visar kärnan exempelhemmet och sparar inget.
+Testerna av databasdelen behöver en Postgres och hoppas annars över:
+
+```sh
+HOMECONTROL_TEST_DATABASE="host=localhost dbname=homecontrol_test user=homecontrol" \
+  uv run pytest tests
+```
+
 Webbgränssnittet (kräver Node 22):
 
 ```sh
@@ -122,6 +184,13 @@ närvarobedömningen avgör vilka rum som är upptagna, regelmotorn
 (`rules.evaluate`, en ren funktion) ger lampkommandon med förklaringar och
 lamputgångar (`connectors.LampOutput`) tar emot dem. Simuleringen
 (`simulation.py`) är både en källa och en utgång.
+
+Hemmodellen finns i `home.py` och kontrolleras där. `homefile.py` gör om den
+till och från ett JSON-dokument, och `store.py` sparar samma dokument i
+Postgres (tabellerna skapas av `migrations/`). Formen beskrivs alltså bara i
+`home.py`, och filen och databasen har samma version. Exempelhemmet är
+`example_home.json`. Kärnan läser hemmet när den startar; en import kräver
+därför en omstart. Kärnan startar inte utan databasen.
 
 Scenariotester skrivs som läsbara steg med `homecontrol.scenario.Scenario`
 och körs med en styrd klocka, så att minuter av väntan tar ingen tid. Se

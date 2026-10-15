@@ -11,8 +11,14 @@ services:
     restart: unless-stopped
     environment:
       HOMECONTROL_ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      # Hemmodellen sparas i databasen. Lösenordet läses från PGPASSWORD.
+      HOMECONTROL_DATABASE: host=db dbname=homecontrol user=homecontrol
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD saknas – kopiera .env.example till .env och fyll i}
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
   db:
     image: timescale/timescaledb:2.30.2-pg17

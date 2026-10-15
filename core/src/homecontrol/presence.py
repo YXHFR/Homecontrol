@@ -7,7 +7,7 @@ olika. Här räcker det att någon av dem ser någon.
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from homecontrol.home import Home, Point
+from homecontrol.home import Home, Point, Room, Target
 
 
 @dataclass(frozen=True)
@@ -28,20 +28,26 @@ def initial_presence(home: Home, now: float) -> dict[str, RoomPresence]:
 
 def assess(
     home: Home,
-    targets_by_source: Mapping[str, tuple[Point, ...]],
+    targets_by_source: Mapping[str, tuple[Target, ...]],
     previous: Mapping[str, RoomPresence],
     now: float,
 ) -> dict[str, RoomPresence]:
     targets = [target for targets in targets_by_source.values() for target in targets]
     result: dict[str, RoomPresence] = {}
-    for room in home.rooms:
-        if any(room.contains(target) for target in targets):
-            result[room.id] = RoomPresence(vacant_since=None)
-        else:
-            # Ett rum som redan var tomt behåller sin tidpunkt, annars blev det tomt nu.
-            before = previous.get(room.id)
-            if before is not None and before.vacant_since is not None:
-                result[room.id] = before
-            else:
-                result[room.id] = RoomPresence(vacant_since=now)
+    for floor in home.floors:
+        on_floor = [target.position for target in targets if target.floor_id == floor.id]
+        for room in floor.rooms:
+            result[room.id] = _assess_room(room, on_floor, previous, now)
     return result
+
+
+def _assess_room(
+    room: Room, targets: list[Point], previous: Mapping[str, RoomPresence], now: float
+) -> RoomPresence:
+    if any(room.contains(target) for target in targets):
+        return RoomPresence(vacant_since=None)
+    # Ett rum som redan var tomt behåller sin tidpunkt, annars blev det tomt nu.
+    before = previous.get(room.id)
+    if before is not None and before.vacant_since is not None:
+        return before
+    return RoomPresence(vacant_since=now)

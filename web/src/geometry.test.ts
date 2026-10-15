@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { fitTransform, MARGIN_METERS, parkingSpot } from "./geometry";
-import { parseServerMessage } from "./protocol";
+import { corners, fitTransform, MARGIN_METERS, parkingSpot, wallSegments } from "./geometry";
+import { parseServerMessage, type Room } from "./protocol";
 
-const room = { id: "r", name: "R", x: 0, y: 0, width: 5, height: 4 };
+const room: Room = {
+  id: "r",
+  name: "R",
+  polygon: [
+    [0, 0],
+    [5, 0],
+    [5, 4],
+    [0, 4],
+  ],
+  walls: ["betong", "glas", "gips", "dörröppning"],
+};
+const width = 5;
 
 describe("fitTransform", () => {
   it("får plats med rummet och marginalen", () => {
@@ -26,12 +37,51 @@ describe("parkingSpot", () => {
   it("ligger utanför rummet men innanför marginalen", () => {
     const spot = parkingSpot([room]);
 
-    expect(spot.x).toBeGreaterThan(room.width);
-    expect(spot.x).toBeLessThan(room.width + MARGIN_METERS);
+    expect(spot.x).toBeGreaterThan(width);
+    expect(spot.x).toBeLessThan(width + MARGIN_METERS);
+  });
+});
+
+describe("wallSegments", () => {
+  it("ger en vägg per sida, där sista sidan går tillbaka till första hörnet", () => {
+    const walls = wallSegments(room);
+
+    expect(walls).toHaveLength(4);
+    expect(walls[0]).toEqual({ from: { x: 0, y: 0 }, to: { x: 5, y: 0 }, kind: "betong" });
+    expect(walls[3]).toEqual({ from: { x: 0, y: 4 }, to: { x: 0, y: 0 }, kind: "dörröppning" });
+  });
+});
+
+describe("fitTransform med ett L-format rum", () => {
+  it("räknar gränserna från alla hörn", () => {
+    const lShape: Room = {
+      ...room,
+      polygon: [
+        [1, 1],
+        [7, 1],
+        [7, 3],
+        [3, 3],
+        [3, 6],
+        [1, 6],
+      ],
+    };
+    const t = fitTransform([lShape], 1000, 1000);
+
+    expect(corners(lShape)).toHaveLength(6);
+    expect(t.scale).toBe(1000 / (6 + 2 * MARGIN_METERS));
+    expect(t.toScreen({ x: 1 - MARGIN_METERS, y: 1 - MARGIN_METERS })).toEqual({ x: 0, y: 0 });
   });
 });
 
 describe("parseServerMessage", () => {
+  it("känner igen hemmet med minst en våning", () => {
+    const text = JSON.stringify({ type: "home", name: "H", floors: [{ id: "f" }] });
+
+    expect(parseServerMessage(text)?.type).toBe("home");
+    expect(parseServerMessage('{"type":"home","name":"H","floors":[]}')).toBeNull();
+    expect(parseServerMessage('{"type":"home","rooms":[],"lamps":[]}')).toBeNull();
+  });
+
   it("känner igen läget och avvisar annat", () => {
     expect(parseServerMessage('{"type":"state","targets":[],"rooms":[],"lamps":[]}')).toEqual({
       type: "state",

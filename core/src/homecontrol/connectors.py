@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from homecontrol.home import Point
+from homecontrol.home import Target
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ class TargetsObserved:
     """
 
     source_id: str
-    targets: tuple[Point, ...]
+    targets: tuple[Target, ...]
 
 
 @dataclass(frozen=True)

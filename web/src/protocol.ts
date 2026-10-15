@@ -1,6 +1,6 @@
 /**
  * Meddelandena i realtidsströmmen mellan kärnan och livevyn (se core/src/homecontrol/live.py).
- * Koordinater är meter i hemmets plan.
+ * Koordinater är meter i en vånings plan, med origo uppe till vänster och y nedåt.
  */
 
 export interface Point {
@@ -8,13 +8,16 @@ export interface Point {
   y: number;
 }
 
+/** Vad en vägg är gjord av, eller att den är en dörröppning. */
+export type WallKind = "gips" | "betong" | "trä" | "glas" | "dörröppning";
+
 export interface Room {
   id: string;
   name: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  /** Hörnen i ordning som [x, y]. */
+  polygon: [number, number][];
+  /** En vägg per sida: väggen från hörn i till hörn i + 1. */
+  walls: WallKind[];
 }
 
 export interface Lamp {
@@ -25,15 +28,29 @@ export interface Lamp {
   y: number;
 }
 
-export interface HomeMessage {
-  type: "home";
+export interface Floor {
+  id: string;
+  name: string;
+  /** 0 är entréplanet, 1 en trappa upp och -1 källaren. */
+  level: number;
   rooms: Room[];
   lamps: Lamp[];
 }
 
+export interface HomeMessage {
+  type: "home";
+  name: string;
+  floors: Floor[];
+}
+
+/** En person som någon källa ser, på en viss våning. */
+export interface Target extends Point {
+  floor_id: string;
+}
+
 export interface StateMessage {
   type: "state";
-  targets: Point[];
+  targets: Target[];
   rooms: { id: string; occupied: boolean; lux: number | null }[];
   lamps: { id: string; on: boolean; explanation: string }[];
 }
@@ -41,7 +58,7 @@ export interface StateMessage {
 export type ServerMessage = HomeMessage | StateMessage;
 
 export type ClientMessage =
-  | { type: "move_person"; x: number; y: number }
+  | { type: "move_person"; floor_id: string; x: number; y: number }
   | { type: "remove_person" }
   | { type: "set_light_level"; room_id: string; lux: number };
 
@@ -56,8 +73,14 @@ export function parseServerMessage(text: string): ServerMessage | null {
   if (typeof data !== "object" || data === null) {
     return null;
   }
-  const message = data as { type?: unknown; rooms?: unknown; lamps?: unknown; targets?: unknown };
-  if (message.type === "home" && Array.isArray(message.rooms) && Array.isArray(message.lamps)) {
+  const message = data as {
+    type?: unknown;
+    floors?: unknown;
+    rooms?: unknown;
+    lamps?: unknown;
+    targets?: unknown;
+  };
+  if (message.type === "home" && Array.isArray(message.floors) && message.floors.length > 0) {
     return data as HomeMessage;
   }
   if (

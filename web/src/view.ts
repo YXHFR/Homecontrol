@@ -1,15 +1,15 @@
 import Konva from "konva";
-import { fitTransform, parkingSpot, type Transform } from "./geometry";
-import type { HomeMessage, Point, StateMessage } from "./protocol";
+import { corners, fitTransform, parkingSpot, wallSegments, type Transform } from "./geometry";
+import type { Floor, Point, StateMessage, WallKind } from "./protocol";
 
 export interface LiveViewCallbacks {
   /** Låtsaspersonen har dragits till en ny plats, i hemmets meter. */
   onMovePerson(position: Point): void;
 }
 
-/** Ritytan i livevyn. Den ritar bara det kärnan har skickat. */
+/** Ritytan i livevyn. Den ritar en våning åt gången, och bara det kärnan har skickat. */
 export interface LiveView {
-  setHome(home: HomeMessage): void;
+  setFloor(floor: Floor): void;
   setState(state: StateMessage): void;
   destroy(): void;
 }
@@ -41,22 +41,70 @@ const COLORS = {
   text: "#222222",
 };
 
-function drawRooms(layer: Konva.Layer, t: Transform, home: HomeMessage, state: StateMessage | null) {
-  for (const room of home.rooms) {
+/** Hur varje sorts vägg ser ut: färg och tjocklek i pixlar. Dörröppningar streckas. */
+const WALLS: Record<WallKind, { color: string; width: number; dash?: number[] }> = {
+  gips: { color: "#4a4a4a", width: 4 },
+  betong: { color: "#111111", width: 6 },
+  trä: { color: "#a0652c", width: 4 },
+  glas: { color: "#4bb3d6", width: 3 },
+  dörröppning: { color: "#e08a00", width: 2, dash: [6, 4] },
+};
+
+function drawRoomFloors(
+  layer: Konva.Layer,
+  t: Transform,
+  floor: Floor,
+  state: StateMessage | null,
+) {
+  for (const room of floor.rooms) {
     const occupied = state?.rooms.find((r) => r.id === room.id)?.occupied ?? false;
-    const corner = t.toScreen({ x: room.x, y: room.y });
     layer.add(
-      new Konva.Rect({
-        ...corner,
-        width: room.width * t.scale,
-        height: room.height * t.scale,
+      new Konva.Line({
+        points: corners(room).flatMap((p) => {
+          const screen = t.toScreen(p);
+          return [screen.x, screen.y];
+        }),
+        closed: true,
         fill: occupied ? COLORS.occupied : COLORS.floor,
-        stroke: COLORS.wall,
-        strokeWidth: 4,
       }),
+    );
+  }
+}
+
+/**
+ * Grannrum delar väggar. Dörröppningar ritas sist så att de syns även om
+ * grannrummet har en hel vägg på samma ställe, och alla väggar ritas åt
+ * samma håll så att två likadana dörröppningar får strecken på samma ställe.
+ */
+function drawWalls(layer: Konva.Layer, t: Transform, floor: Floor) {
+  const walls = floor.rooms.flatMap(wallSegments);
+  const ordered = [
+    ...walls.filter((wall) => wall.kind !== "dörröppning"),
+    ...walls.filter((wall) => wall.kind === "dörröppning"),
+  ];
+  for (const wall of ordered) {
+    const [a, b] = [t.toScreen(wall.from), t.toScreen(wall.to)];
+    const [from, to] = a.x < b.x || (a.x === b.x && a.y <= b.y) ? [a, b] : [b, a];
+    const style = WALLS[wall.kind];
+    layer.add(
+      new Konva.Line({
+        points: [from.x, from.y, to.x, to.y],
+        stroke: style.color,
+        strokeWidth: style.width,
+        dash: style.dash,
+        lineCap: "round",
+      }),
+    );
+  }
+}
+
+function drawRoomNames(layer: Konva.Layer, t: Transform, floor: Floor) {
+  for (const room of floor.rooms) {
+    const points = corners(room).map((p) => t.toScreen(p));
+    layer.add(
       new Konva.Text({
-        x: corner.x + 8,
-        y: corner.y + 8,
+        x: Math.min(...points.map((p) => p.x)) + 8,
+        y: Math.min(...points.map((p) => p.y)) + 8,
         text: room.name,
         fontSize: 16,
         fill: COLORS.text,
@@ -65,8 +113,8 @@ function drawRooms(layer: Konva.Layer, t: Transform, home: HomeMessage, state: S
   }
 }
 
-function drawLamps(layer: Konva.Layer, t: Transform, home: HomeMessage, state: StateMessage | null) {
-  for (const lamp of home.lamps) {
+function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
+  for (const lamp of floor.lamps) {
     const on = state?.lamps.find((l) => l.id === lamp.id)?.on ?? false;
     const center = t.toScreen(lamp);
     if (on) {
@@ -115,7 +163,7 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
   });
   personLayer.add(person);
 
-  let home: HomeMessage | null = null;
+  let shownFloor: Floor | null = null;
   let state: StateMessage | null = null;
   /** Senaste omräkningen mellan meter och pixlar; behövs när personen dras. */
   let transform: Transform | null = null;
@@ -143,35 +191,39 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
   person.on("mouseenter", () => (stage.container().style.cursor = "grab"));
   person.on("mouseleave", () => (stage.container().style.cursor = ""));
 
-  const placePerson = (t: Transform, rooms: HomeMessage["rooms"]) => {
+  const placePerson = (t: Transform, shown: Floor) => {
     if (dragging || performance.now() < settledAt) {
       return;
     }
-    // Kärnans bild av var personen är gäller; utan mål står den och väntar utanför.
-    person.position(t.toScreen(state?.targets[0] ?? parkingSpot(rooms)));
+    // Kärnans bild av var personen är gäller. Är den inte på den här
+    // våningen står den och väntar utanför rummen.
+    const target = state?.targets.find((candidate) => candidate.floor_id === shown.id);
+    person.position(t.toScreen(target ?? parkingSpot(shown.rooms)));
   };
 
   const render = () => {
-    if (home === null) {
+    if (shownFloor === null) {
       return;
     }
     const width = Math.min(container.clientWidth || MAX_WIDTH, MAX_WIDTH);
     const height = Math.round(width * ASPECT);
     stage.size({ width, height });
-    transform = fitTransform(home.rooms, width, height);
+    transform = fitTransform(shownFloor.rooms, width, height);
 
     roomLayer.destroyChildren();
-    drawRooms(roomLayer, transform, home, state);
-    drawLamps(roomLayer, transform, home, state);
-    placePerson(transform, home.rooms);
+    drawRoomFloors(roomLayer, transform, shownFloor, state);
+    drawWalls(roomLayer, transform, shownFloor);
+    drawRoomNames(roomLayer, transform, shownFloor);
+    drawLamps(roomLayer, transform, shownFloor, state);
+    placePerson(transform, shownFloor);
   };
 
   const onResize = () => render();
   window.addEventListener("resize", onResize);
 
   return {
-    setHome(next) {
-      home = next;
+    setFloor(next) {
+      shownFloor = next;
       render();
     },
     setState(next) {

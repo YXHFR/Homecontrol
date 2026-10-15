@@ -16,6 +16,12 @@ class Settings:
     web_dir: Path
     allowed_hosts: frozenset[str] = frozenset()
     """Värdnamn utöver localhost och IP-adresser som livevyn får nås på."""
+    database: str | None = None
+    """Anslutningen till Postgres, till exempel "host=db dbname=homecontrol user=homecontrol".
+
+    Lösenordet står inte här utan läses av databasbiblioteket från PGPASSWORD.
+    Utan databas används exempelhemmet, och inget sparas.
+    """
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -28,4 +34,5 @@ class Settings:
                 for name in os.environ.get("HOMECONTROL_ALLOWED_HOSTS", "").split(",")
                 if name.strip()
             ),
+            database=os.environ.get("HOMECONTROL_DATABASE", "").strip() or None,
         )

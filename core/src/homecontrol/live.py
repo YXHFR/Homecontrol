@@ -2,12 +2,13 @@
 
 Protokollet är JSON. Kärnan skickar:
 
-* ``{"type": "home", ...}`` en gång vid anslutning: rummen och lamporna.
+* ``{"type": "home", ...}`` en gång vid anslutning: våningarna med sina rum,
+  väggar och lampor. Punkter är ``[x, y]`` i meter med origo uppe till vänster.
 * ``{"type": "state", ...}`` vid anslutning och efter varje ändring.
 
 Livevyn skickar kommandon till låtsaskällan:
 
-* ``{"type": "move_person", "x": 1.0, "y": 2.0}``
+* ``{"type": "move_person", "floor_id": "entreplan", "x": 1.0, "y": 2.0}``
 * ``{"type": "remove_person"}``
 * ``{"type": "set_light_level", "room_id": "vardagsrum", "lux": 10}``
 
@@ -23,6 +24,8 @@ from collections.abc import Set
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
+import anyio
+import anyio.abc
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
@@ -42,6 +45,7 @@ Coordinate = Annotated[float, Field(ge=-_MAX_COORDINATE, le=_MAX_COORDINATE, all
 
 class MovePerson(BaseModel):
     type: Literal["move_person"]
+    floor_id: str = Field(max_length=64)
     x: Coordinate
     y: Coordinate
 
@@ -64,26 +68,34 @@ _client_message: TypeAdapter[MovePerson | RemovePerson | SetLightLevel] = TypeAd
 def home_message(home: Home) -> dict[str, Any]:
     return {
         "type": "home",
-        "rooms": [
+        "name": home.name,
+        "floors": [
             {
-                "id": room.id,
-                "name": room.name,
-                "x": room.x,
-                "y": room.y,
-                "width": room.width,
-                "height": room.height,
+                "id": floor.id,
+                "name": floor.name,
+                "level": floor.level,
+                "rooms": [
+                    {
+                        "id": room.id,
+                        "name": room.name,
+                        "polygon": [list(point) for point in room.polygon],
+                        "walls": [kind.value for kind in room.walls],
+                    }
+                    for room in floor.rooms
+                ],
+                "lamps": [
+                    {
+                        "id": lamp.id,
+                        "name": lamp.name,
+                        "room_id": room.id,
+                        "x": lamp.position.x,
+                        "y": lamp.position.y,
+                    }
+                    for room in floor.rooms
+                    for lamp in room.lamps
+                ],
             }
-            for room in home.rooms
-        ],
-        "lamps": [
-            {
-                "id": lamp.id,
-                "name": lamp.name,
-                "room_id": lamp.room_id,
-                "x": lamp.position.x,
-                "y": lamp.position.y,
-            }
-            for lamp in home.lamps
+            for floor in home.floors
         ],
     }
 
@@ -91,7 +103,9 @@ def home_message(home: Home) -> dict[str, Any]:
 def state_message(snapshot: Snapshot) -> dict[str, Any]:
     return {
         "type": "state",
-        "targets": [{"x": target.x, "y": target.y} for target in snapshot.targets],
+        "targets": [
+            {"floor_id": t.floor_id, "x": t.position.x, "y": t.position.y} for t in snapshot.targets
+        ],
         "rooms": [
             {"id": room.room_id, "occupied": room.occupied, "lux": room.lux}
             for room in snapshot.rooms
@@ -131,25 +145,24 @@ def create_live_router(
                 changed.clear()
                 await websocket.send_json(state_message(controller.snapshot()))
 
-        async def receive_commands() -> None:
-            while True:
-                _handle(source, await websocket.receive_text())
+        async def receive_commands(group: anyio.abc.TaskGroup) -> None:
+            try:
+                while True:
+                    _handle(source, await websocket.receive_text())
+            except WebSocketDisconnect:
+                # Att klienten går är det normala slutet; då behövs inga fler lägen.
+                group.cancel_scope.cancel()
 
-        tasks = [asyncio.create_task(send_states()), asyncio.create_task(receive_commands())]
+        # En anyio-grupp, inte lösa asyncio-uppgifter, så att Starlettes egen
+        # avbrytning (när servern eller testklienten stänger) når båda uppgifterna.
         try:
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                # Att klienten går är det normala slutet; allt annat ska synas.
-                with contextlib.suppress(WebSocketDisconnect):
-                    task.result()
+            async with anyio.create_task_group() as group:
+                group.start_soon(send_states)
+                group.start_soon(receive_commands, group)
+        except* WebSocketDisconnect:
+            pass  # klienten hann gå medan ett läge skickades
         finally:
             unsubscribe()
-            for task in tasks:
-                task.cancel()
-            # Inte gather: om vi själva avbryts medan vi väntar här, kastar gather
-            # en deluppgifts CancelledError i stället för vår egen. Då känner servern
-            # (anyio) inte igen sitt eget avbrott och låter felet gå vidare.
-            await asyncio.wait(tasks)
 
     return router
 
@@ -187,8 +200,8 @@ def _handle(source: SimulatedSource | None, text: str) -> None:
         logger.warning("Ogiltigt meddelande från livevyn ignoreras")
         return
     match message:
-        case MovePerson(x=x, y=y):
-            source.move_person(Point(x, y))
+        case MovePerson(floor_id=floor_id, x=x, y=y):
+            source.move_person(floor_id, Point(x, y))
         case RemovePerson():
             source.remove_person()
         case SetLightLevel(room_id=room_id, lux=lux):

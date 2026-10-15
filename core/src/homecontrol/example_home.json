@@ -1,0 +1,328 @@
+{
+  "format": "homecontrol-hem",
+  "version": 1,
+  "home": {
+    "name": "Exempelhemmet",
+    "floors": [
+      {
+        "id": "entreplan",
+        "name": "Entréplan",
+        "level": 0,
+        "rooms": [
+          {
+            "id": "hall",
+            "name": "Hall",
+            "polygon": [
+              [1.0, 1.0],
+              [4.0, 1.0],
+              [4.0, 5.0],
+              [1.0, 5.0]
+            ],
+            "walls": ["betong", "dörröppning", "dörröppning", "betong"],
+            "settings": {
+              "dark_below_lux": 30.0,
+              "bright_above_lux": 100.0,
+              "off_after_empty_seconds": 180.0
+            },
+            "zones": [
+              {
+                "id": "ytterdorr",
+                "name": "Ytterdörr",
+                "kind": "entré",
+                "polygon": [
+                  [1.0, 3.5],
+                  [2.0, 3.5],
+                  [2.0, 5.0],
+                  [1.0, 5.0]
+                ]
+              }
+            ],
+            "nodes": [
+              {
+                "id": "nod-hall",
+                "name": "Rumskort hall",
+                "position": [1.1, 1.1],
+                "height": 2.2,
+                "rotation": 45.0,
+                "mirrored": false,
+                "capabilities": ["radar", "csi", "lux"]
+              }
+            ],
+            "lamps": [
+              {
+                "id": "hall-tak",
+                "name": "Taklampa",
+                "position": [2.5, 3.0],
+                "zone_id": null,
+                "profile": "generisk"
+              }
+            ]
+          },
+          {
+            "id": "vardagsrum",
+            "name": "Vardagsrum",
+            "polygon": [
+              [4.0, 1.0],
+              [10.0, 1.0],
+              [10.0, 6.0],
+              [7.0, 6.0],
+              [4.0, 6.0],
+              [4.0, 5.0]
+            ],
+            "walls": ["betong", "glas", "betong", "gips", "gips", "dörröppning"],
+            "settings": {
+              "dark_below_lux": 30.0,
+              "bright_above_lux": 100.0,
+              "off_after_empty_seconds": 180.0
+            },
+            "zones": [
+              {
+                "id": "soffa",
+                "name": "Soffa",
+                "kind": "stillhet",
+                "polygon": [
+                  [7.0, 4.0],
+                  [9.5, 4.0],
+                  [9.5, 5.5],
+                  [7.0, 5.5]
+                ]
+              }
+            ],
+            "nodes": [
+              {
+                "id": "nod-vardagsrum",
+                "name": "Rumskort vardagsrum",
+                "position": [4.1, 1.1],
+                "height": 2.2,
+                "rotation": 45.0,
+                "mirrored": false,
+                "capabilities": ["radar", "csi", "lux"]
+              }
+            ],
+            "lamps": [
+              {
+                "id": "vardagsrum-tak",
+                "name": "Taklampa",
+                "position": [7.0, 3.5],
+                "zone_id": null,
+                "profile": "ikea-tradfri"
+              },
+              {
+                "id": "laslampa",
+                "name": "Läslampa",
+                "position": [8.2, 4.6],
+                "zone_id": "soffa",
+                "profile": "ikea-tradfri"
+              }
+            ]
+          },
+          {
+            "id": "kok",
+            "name": "Kök",
+            "polygon": [
+              [1.0, 5.0],
+              [4.0, 5.0],
+              [4.0, 6.0],
+              [7.0, 6.0],
+              [7.0, 9.0],
+              [1.0, 9.0]
+            ],
+            "walls": ["dörröppning", "gips", "gips", "gips", "betong", "betong"],
+            "settings": {
+              "dark_below_lux": 50.0,
+              "bright_above_lux": 100.0,
+              "off_after_empty_seconds": 180.0
+            },
+            "zones": [
+              {
+                "id": "flakt",
+                "name": "Köksfläkt",
+                "kind": "ignorera",
+                "polygon": [
+                  [5.5, 6.0],
+                  [7.0, 6.0],
+                  [7.0, 6.6],
+                  [5.5, 6.6]
+                ]
+              }
+            ],
+            "nodes": [
+              {
+                "id": "nod-kok",
+                "name": "Rumskort kök",
+                "position": [6.9, 8.9],
+                "height": 2.2,
+                "rotation": 225.0,
+                "mirrored": true,
+                "capabilities": ["radar", "csi", "lux"]
+              }
+            ],
+            "lamps": [
+              {
+                "id": "kok-tak",
+                "name": "Taklampa",
+                "position": [4.0, 7.5],
+                "zone_id": null,
+                "profile": "generisk"
+              },
+              {
+                "id": "bankbelysning",
+                "name": "Bänkbelysning",
+                "position": [2.0, 8.6],
+                "zone_id": null,
+                "profile": "generisk"
+              }
+            ]
+          }
+        ],
+        "signal_sources": [
+          {
+            "id": "router",
+            "name": "Router",
+            "position": [9.5, 5.5],
+            "height": 1.0
+          }
+        ]
+      },
+      {
+        "id": "ovanvaning",
+        "name": "Övervåning",
+        "level": 1,
+        "rooms": [
+          {
+            "id": "sovrum",
+            "name": "Sovrum",
+            "polygon": [
+              [1.0, 1.0],
+              [6.0, 1.0],
+              [6.0, 5.0],
+              [1.0, 5.0]
+            ],
+            "walls": ["betong", "trä", "dörröppning", "betong"],
+            "settings": {
+              "dark_below_lux": 30.0,
+              "bright_above_lux": 100.0,
+              "off_after_empty_seconds": 180.0
+            },
+            "zones": [
+              {
+                "id": "sang",
+                "name": "Säng",
+                "kind": "stillhet",
+                "polygon": [
+                  [2.0, 1.5],
+                  [4.0, 1.5],
+                  [4.0, 3.7],
+                  [2.0, 3.7]
+                ]
+              }
+            ],
+            "nodes": [
+              {
+                "id": "nod-sovrum",
+                "name": "Rumskort sovrum",
+                "position": [5.9, 4.9],
+                "height": 2.0,
+                "rotation": 225.0,
+                "mirrored": false,
+                "capabilities": ["radar", "csi", "lux"]
+              }
+            ],
+            "lamps": [
+              {
+                "id": "sovrum-tak",
+                "name": "Taklampa",
+                "position": [3.5, 3.0],
+                "zone_id": null,
+                "profile": "generisk"
+              }
+            ]
+          },
+          {
+            "id": "badrum",
+            "name": "Badrum",
+            "polygon": [
+              [6.0, 1.0],
+              [9.0, 1.0],
+              [9.0, 5.0],
+              [6.0, 5.0]
+            ],
+            "walls": ["betong", "betong", "dörröppning", "trä"],
+            "settings": {
+              "dark_below_lux": 30.0,
+              "bright_above_lux": 100.0,
+              "off_after_empty_seconds": 300.0
+            },
+            "zones": [],
+            "nodes": [
+              {
+                "id": "nod-badrum",
+                "name": "Rumskort badrum",
+                "position": [8.9, 1.1],
+                "height": 2.2,
+                "rotation": 135.0,
+                "mirrored": false,
+                "capabilities": ["radar", "lux"]
+              }
+            ],
+            "lamps": [
+              {
+                "id": "badrum-tak",
+                "name": "Taklampa",
+                "position": [7.5, 3.0],
+                "zone_id": null,
+                "profile": "generisk"
+              }
+            ]
+          },
+          {
+            "id": "trapphall",
+            "name": "Trapphall",
+            "polygon": [
+              [1.0, 5.0],
+              [6.0, 5.0],
+              [9.0, 5.0],
+              [9.0, 7.0],
+              [1.0, 7.0]
+            ],
+            "walls": ["dörröppning", "dörröppning", "betong", "betong", "betong"],
+            "settings": {
+              "dark_below_lux": 30.0,
+              "bright_above_lux": 100.0,
+              "off_after_empty_seconds": 180.0
+            },
+            "zones": [],
+            "nodes": [
+              {
+                "id": "nod-trapphall",
+                "name": "Rumskort trapphall",
+                "position": [1.1, 6.9],
+                "height": 2.2,
+                "rotation": 315.0,
+                "mirrored": false,
+                "capabilities": ["radar", "csi", "lux"]
+              }
+            ],
+            "lamps": [
+              {
+                "id": "trapphall-tak",
+                "name": "Taklampa",
+                "position": [5.0, 6.0],
+                "zone_id": null,
+                "profile": "generisk"
+              }
+            ]
+          }
+        ],
+        "signal_sources": [
+          {
+            "id": "accesspunkt",
+            "name": "Accesspunkt",
+            "position": [5.0, 6.8],
+            "height": 2.4
+          }
+        ]
+      }
+    ]
+  }
+}

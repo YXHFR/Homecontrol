@@ -1,5 +1,5 @@
 import { LiveConnection, liveUrl, type ConnectionHandlers, type ConnectionStatus } from "./connection";
-import type { ClientMessage, HomeMessage, StateMessage } from "./protocol";
+import type { ClientMessage, Floor, HomeMessage, StateMessage } from "./protocol";
 import { createKonvaView, type ViewFactory } from "./view";
 
 export interface Connection {
@@ -36,7 +36,15 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-/** Ritar upp livevyn: ett rum, en virtuell lampa och en låtsasperson att dra omkring. */
+/** Våningen som visas först: entréplanet om det finns, annars den första. */
+export function startFloor(home: HomeMessage): Floor {
+  return home.floors.find((floor) => floor.level === 0) ?? home.floors[0];
+}
+
+/**
+ * Ritar upp livevyn: hemmet en våning åt gången, de virtuella lamporna och
+ * en låtsasperson att dra omkring.
+ */
 export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDependencies): void {
   const status = element("p", { className: "status" }, STATUS_TEXT.connecting);
   const stageContainer = element("div", { className: "stage" });
@@ -48,9 +56,11 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     value: String(DEFAULT_LUX),
   });
   const luxValue = element("output", {}, `${DEFAULT_LUX} lux`);
-  const luxLabel = element("label", {}, "Ljusnivå i rummet ", lux, " ", luxValue);
+  const luxLabel = element("label", {}, "Ljusnivå i rummen ", lux, " ", luxValue);
   const removePerson = element("button", { type: "button" }, "Låt personen gå hemifrån");
   const explanations = element("ul", { className: "explanations" });
+  const floorPicker = element("nav", { className: "floors", hidden: true });
+  floorPicker.setAttribute("aria-label", "Våningar");
 
   root.replaceChildren(
     element("h1", {}, "Homecontrol – livevy"),
@@ -58,9 +68,10 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     element(
       "p",
       { className: "help" },
-      "Dra den röda pricken in i rummet. När det är mörkt tänds lampan. " +
-        "När rummet har varit tomt i 3 minuter släcks den igen.",
+      "Dra den röda pricken in i ett rum. När det är mörkt tänds lampan. " +
+        "När rummet har varit tomt en stund släcks den igen.",
     ),
+    floorPicker,
     stageContainer,
     element("div", { className: "controls" }, luxLabel, removePerson),
     element("h2", {}, "Varför lamporna är som de är"),
@@ -68,33 +79,95 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   );
 
   let home: HomeMessage | null = null;
+  let shownFloor: Floor | null = null;
+  let lastState: StateMessage | null = null;
   const view = deps.createView(stageContainer, {
-    onMovePerson: (position) => connection.send({ type: "move_person", ...position }),
+    onMovePerson: (position) => {
+      if (shownFloor !== null) {
+        connection.send({ type: "move_person", floor_id: shownFloor.id, ...position });
+      }
+    },
   });
 
-  const sendLightLevel = () => {
-    const room = home?.rooms[0];
-    if (room !== undefined) {
-      connection.send({ type: "set_light_level", room_id: room.id, lux: Number(lux.value) });
+  /** Rum som redan har fått reglagets värde för att kärnan inte visste något. */
+  const roomsGivenSliderLux = new Set<string>();
+
+  const sendLightLevel = (roomIds: string[]) => {
+    for (const roomId of roomIds) {
+      connection.send({ type: "set_light_level", room_id: roomId, lux: Number(lux.value) });
     }
   };
 
-  const showState = (state: StateMessage) => {
-    view.setState(state);
-    const roomLux = state.rooms[0]?.lux;
-    if (roomLux === null) {
-      // Kärnan vet inte hur ljust det är; ge den reglagets värde.
-      sendLightLevel();
-    } else if (roomLux !== undefined && document.activeElement !== lux) {
+  /** Samma ljusnivå i alla rum, som dagsljuset ute. */
+  const sendLightLevelEverywhere = () => {
+    sendLightLevel(home?.floors.flatMap((floor) => floor.rooms.map((room) => room.id)) ?? []);
+  };
+
+  const showExplanations = () => {
+    const lamps = shownFloor?.lamps ?? [];
+    const states = new Map(lastState?.lamps.map((lamp) => [lamp.id, lamp]));
+    explanations.replaceChildren(
+      ...lamps.flatMap((lamp) => {
+        const lampState = states.get(lamp.id);
+        return lampState === undefined
+          ? []
+          : [element("li", {}, `${lamp.name}: ${lampState.explanation}`)];
+      }),
+    );
+  };
+
+  /** Reglaget visar ljusnivån i första rummet på våningen som visas. */
+  const showLux = () => {
+    if (document.activeElement === lux) {
+      return; // användaren drar i reglaget just nu
+    }
+    const shownRoom = shownFloor?.rooms[0]?.id;
+    const roomLux = lastState?.rooms.find((room) => room.id === shownRoom)?.lux;
+    if (roomLux !== undefined && roomLux !== null) {
       lux.value = String(roomLux);
       luxValue.textContent = `${roomLux} lux`;
     }
-    const names = new Map(home?.lamps.map((lamp) => [lamp.id, lamp.name]));
-    explanations.replaceChildren(
-      ...state.lamps.map((lamp) =>
-        element("li", {}, `${names.get(lamp.id) ?? lamp.id}: ${lamp.explanation}`),
-      ),
+  };
+
+  const showFloor = (next: Floor) => {
+    shownFloor = next;
+    for (const button of floorPicker.querySelectorAll("button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.floor === next.id));
+    }
+    view.setFloor(next);
+    showLux();
+    showExplanations();
+  };
+
+  const showHome = (next: HomeMessage) => {
+    home = next;
+    // Ny anslutning: kärnan kan ha startat om och glömt ljusnivåerna.
+    roomsGivenSliderLux.clear();
+    floorPicker.replaceChildren(
+      ...next.floors.map((floor) => {
+        const button = element("button", { type: "button" }, floor.name);
+        button.dataset.floor = floor.id;
+        button.addEventListener("click", () => showFloor(floor));
+        return button;
+      }),
     );
+    // Gränssnittet visar en våning åt gången; väljaren behövs bara om det finns flera.
+    floorPicker.hidden = next.floors.length < 2;
+    const same = next.floors.find((floor) => floor.id === shownFloor?.id);
+    showFloor(same ?? startFloor(next));
+  };
+
+  const showState = (state: StateMessage) => {
+    lastState = state;
+    view.setState(state);
+    // Kärnan vet inte hur ljust det är i de här rummen; ge dem reglagets värde.
+    const unknown = state.rooms
+      .filter((room) => room.lux === null && !roomsGivenSliderLux.has(room.id))
+      .map((room) => room.id);
+    unknown.forEach((roomId) => roomsGivenSliderLux.add(roomId));
+    sendLightLevel(unknown);
+    showLux();
+    showExplanations();
   };
 
   const connection = deps.connect({
@@ -104,8 +177,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     },
     onMessage: (message) => {
       if (message.type === "home") {
-        home = message;
-        view.setHome(message);
+        showHome(message);
       } else {
         showState(message);
       }
@@ -114,7 +186,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
 
   lux.addEventListener("input", () => {
     luxValue.textContent = `${lux.value} lux`;
-    sendLightLevel();
+    sendLightLevelEverywhere();
   });
   removePerson.addEventListener("click", () => connection.send({ type: "remove_person" }));
 
