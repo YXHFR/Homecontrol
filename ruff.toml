@@ -1,0 +1,16 @@
+# Gemensam lint- och formatinställning för all Python i repot.
+line-length = 100
+target-version = "py313"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+# Svensk text använder tankstreck (–), det är avsiktligt.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S101", "S104", "S603", "S607"]
+# Skriptet anropar git med fasta argument.
+"scripts/classify_change.py" = ["S603", "S607"]
+
+[lint.isort]
+known-first-party = ["homecontrol", "classify_change"]
