@@ -4,8 +4,11 @@ Närvarostyrd belysning för hemmet. Radar (LD2450) och Wi-Fi-CSI på ESP32
 känner av var någon befinner sig, och lamporna (IKEA via Zigbee2MQTT) tänds
 och släcks efter det.
 
-> Projektet är i ett tidigt skede. Just nu startar grunden: kärnan, databasen,
-> MQTT och Zigbee2MQTT. Själva närvarostyrningen kommer i senare steg.
+> Projektet är i ett tidigt skede. Grunden startar (kärnan, databasen, MQTT och
+> Zigbee2MQTT) och det finns en första livevy med ett låtsasrum: dra en
+> låtsasperson in i rummet så tänds en virtuell lampa när det är mörkt, och
+> den släcks när rummet har varit tomt i 3 minuter. Riktiga sensorer och
+> lampor kopplas in i senare steg.
 
 ## Snabbstart
 
@@ -32,12 +35,15 @@ Första gången tar det några minuter. Därefter finns:
 
 | Vad                                   | Adress                       |
 | ------------------------------------- | ---------------------------- |
-| Homecontrol                           | http://localhost:8000        |
+| Homecontrol (livevyn)                 | http://localhost:8000        |
 | Sida som visar att kärnan är igång    | http://localhost:8000/health |
 | Zigbee2MQTT (lösenord: `ZIGBEE2MQTT_AUTH_TOKEN` i `.env`) | http://localhost:8080 |
 
 Surfar du från en annan enhet, byt `localhost` mot datorns adress i
 hemnätet. Den hittar du till exempel i routerns lista över anslutna enheter.
+Använder du ett namn i stället för adressen, till exempel
+`homecontrol.local`, skriv in det som `ALLOWED_HOSTS` i `.env`. Annars
+kopplas livevyn bort.
 
 ### Zigbee-adapter
 
@@ -109,7 +115,17 @@ npm run dev    # utvecklingsserver som skickar API-anrop till kärnan
 ```
 
 Nya API-vägar i kärnan läggs under `/api/...` så att de inte krockar med
-webbgränssnittets filer.
+webbgränssnittets filer. Livevyn får sin realtidsström från `/api/live`.
+
+Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
+närvarobedömningen avgör vilka rum som är upptagna, regelmotorn
+(`rules.evaluate`, en ren funktion) ger lampkommandon med förklaringar och
+lamputgångar (`connectors.LampOutput`) tar emot dem. Simuleringen
+(`simulation.py`) är både en källa och en utgång.
+
+Scenariotester skrivs som läsbara steg med `homecontrol.scenario.Scenario`
+och körs med en styrd klocka, så att minuter av väntan tar ingen tid. Se
+`core/tests/test_scenarios.py`.
 
 ### Granskning
 

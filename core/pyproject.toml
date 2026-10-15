@@ -8,6 +8,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.143.2",
     "uvicorn>=0.54.0",
+    "websockets>=15",
 ]
 
 [build-system]
@@ -31,7 +32,9 @@ homecontrol = "homecontrol.__main__:main"
 strict = true
 files = ["src", "tests", "../scripts"]
 explicit_package_bases = true
-mypy_path = "src:../scripts"
+mypy_path = "src:tests:../scripts"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Scenarioramverket (tests/scenario.py) importeras av testerna.
+pythonpath = ["tests"]

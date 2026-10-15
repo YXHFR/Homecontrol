@@ -6,7 +6,12 @@ from homecontrol.config import Settings
 
 
 def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("HOMECONTROL_HOST", "HOMECONTROL_PORT", "HOMECONTROL_WEB_DIR"):
+    for name in (
+        "HOMECONTROL_HOST",
+        "HOMECONTROL_PORT",
+        "HOMECONTROL_WEB_DIR",
+        "HOMECONTROL_ALLOWED_HOSTS",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     settings = Settings.from_env()
@@ -22,3 +27,11 @@ def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings.from_env()
 
     assert settings == Settings(host="0.0.0.0", port=9000, web_dir=Path("/srv/web"))
+
+
+def test_reads_allowed_hosts_as_lowercase_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_ALLOWED_HOSTS", " Hemma.local, ,homecontrol.lan ")
+
+    settings = Settings.from_env()
+
+    assert settings.allowed_hosts == {"hemma.local", "homecontrol.lan"}
