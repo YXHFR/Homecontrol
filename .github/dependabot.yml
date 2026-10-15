@@ -24,6 +24,10 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # Bara LTS-versioner av Node (jämna nummer). Udda versioner är korttidsversioner.
+      - dependency-name: node
+        versions: ["23.x", "25.x", "27.x", "29.x"]
   - package-ecosystem: docker-compose
     directory: /
     schedule:
