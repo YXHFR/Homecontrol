@@ -9,3 +9,14 @@ secrets.yaml
 *.local.*
 .env
 .env.*
+!.env.example
+
+# Bygg- och verktygsfiler
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
