@@ -23,6 +23,8 @@ from collections.abc import Set
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
+import anyio
+import anyio.abc
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
@@ -131,22 +133,24 @@ def create_live_router(
                 changed.clear()
                 await websocket.send_json(state_message(controller.snapshot()))
 
-        async def receive_commands() -> None:
-            while True:
-                _handle(source, await websocket.receive_text())
+        async def receive_commands(group: anyio.abc.TaskGroup) -> None:
+            try:
+                while True:
+                    _handle(source, await websocket.receive_text())
+            except WebSocketDisconnect:
+                # Att klienten går är det normala slutet; då behövs inga fler lägen.
+                group.cancel_scope.cancel()
 
-        tasks = [asyncio.create_task(send_states()), asyncio.create_task(receive_commands())]
+        # En anyio-grupp, inte lösa asyncio-uppgifter, så att Starlettes egen
+        # avbrytning (när servern eller testklienten stänger) når båda uppgifterna.
         try:
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                # Att klienten går är det normala slutet; allt annat ska synas.
-                with contextlib.suppress(WebSocketDisconnect):
-                    task.result()
+            async with anyio.create_task_group() as group:
+                group.start_soon(send_states)
+                group.start_soon(receive_commands, group)
+        except* WebSocketDisconnect:
+            pass  # klienten hann gå medan ett läge skickades
         finally:
             unsubscribe()
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
 
     return router
 
