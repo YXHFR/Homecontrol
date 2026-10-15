@@ -26,7 +26,8 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+import tomllib
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 MAX_LINES = 200
@@ -68,13 +69,11 @@ SENSITIVE_WORDS = [
     "planritning",
 ]
 
-PYTHON_REQUIREMENT = re.compile(
-    r'^\s*"([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*([<>=~!;].*)?",?\s*$'
-)
-NPM_DEPENDENCY = re.compile(r'^\s*"(@?[A-Za-z0-9][\w.\-/]*)"\s*:\s*"[\^~<>=*\d]')
-DOCKER_FROM = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*([^\s:@]+)", re.IGNORECASE)
-DOCKER_COPY_FROM = re.compile(r"^\s*COPY\s+--from=([^\s:@]+)[:@]", re.IGNORECASE)
+REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+DOCKER_STAGE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*\S+\s+AS\s+(\S+)", re.IGNORECASE)
+DOCKER_IMAGE = re.compile(r"^\s*(?:FROM\s+(?:--\S+\s+)*|COPY\s+--from=)([^\s:@]+)", re.IGNORECASE)
 COMPOSE_IMAGE = re.compile(r"^\s*image:\s*['\"]?([^\s:@'\"]+)")
+NPM_SECTIONS = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
 
 
 @dataclass
@@ -83,8 +82,8 @@ class FileChange:
     added: int
     deleted: int
     status: str  # A = ny, M = ändrad, D = borttagen (flyttar räknas som D + A)
-    added_lines: list[str] = field(default_factory=list)
-    deleted_lines: list[str] = field(default_factory=list)
+    before: str = ""  # filens innehåll före ändringen
+    after: str = ""  # filens innehåll efter ändringen
 
 
 @dataclass
@@ -118,30 +117,59 @@ def is_new_module(change: FileChange, existing_top_dirs: set[str]) -> bool:
     return is_web_source and ".test." not in path.name
 
 
-def dependency_names(path: str, lines: list[str]) -> set[str]:
+def python_dependencies(text: str) -> set[str]:
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return set()
+    project = data.get("project", {})
+    requirements = list(project.get("dependencies", []))
+    for group in project.get("optional-dependencies", {}).values():
+        requirements += group
+    for group in data.get("dependency-groups", {}).values():
+        requirements += [r for r in group if isinstance(r, str)]
+    names = (REQUIREMENT_NAME.match(r) for r in requirements)
+    return {m.group(1).lower().replace("_", "-") for m in names if m}
+
+
+def npm_dependencies(text: str) -> set[str]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return set()
+    return {name for section in NPM_SECTIONS for name in data.get(section, {})}
+
+
+def docker_images(text: str) -> set[str]:
+    lines = text.splitlines()
+    # "FROM node AS web" namnger ett eget byggsteg; "FROM web" senare är inget beroende.
+    stages = {m.group(1).lower() for line in lines if (m := DOCKER_STAGE.match(line))}
+    images = {m.group(1).lower() for line in lines if (m := DOCKER_IMAGE.match(line))}
+    return images - stages
+
+
+def compose_images(text: str) -> set[str]:
+    return {m.group(1).lower() for line in text.splitlines() if (m := COMPOSE_IMAGE.match(line))}
+
+
+def dependencies(path: str, text: str) -> set[str]:
     name = PurePosixPath(path).name
-    patterns: list[re.Pattern[str]] = []
     if name == "pyproject.toml":
-        patterns = [PYTHON_REQUIREMENT]
+        found = python_dependencies(text)
     elif name == "package.json":
-        patterns = [NPM_DEPENDENCY]
+        found = npm_dependencies(text)
     elif "Dockerfile" in name:
-        patterns = [DOCKER_FROM, DOCKER_COPY_FROM]
+        found = docker_images(text)
     elif name.startswith(("compose", "docker-compose")) and name.endswith((".yaml", ".yml")):
-        patterns = [COMPOSE_IMAGE]
-    found = set()
-    for line in lines:
-        for pattern in patterns:
-            match = pattern.match(line)
-            if match:
-                found.add(match.group(1).lower())
-    return found
+        found = compose_images(text)
+    else:
+        return set()
+    # Avbilder som projektet bygger självt är inga externa beroenden.
+    return {d for d in found if not d.startswith("homecontrol")}
 
 
 def new_dependencies(change: FileChange) -> set[str]:
-    added = dependency_names(change.path, change.added_lines)
-    removed = dependency_names(change.path, change.deleted_lines)
-    return added - removed
+    return dependencies(change.path, change.after) - dependencies(change.path, change.before)
 
 
 def classify(changes: list[FileChange], existing_top_dirs: set[str]) -> Verdict:
@@ -158,19 +186,7 @@ def classify(changes: list[FileChange], existing_top_dirs: set[str]) -> Verdict:
     if new_modules:
         reasons.append("ny modul: " + ", ".join(sorted(new_modules)))
 
-    # "FROM ... AS web" namnger ett eget byggsteg; senare "FROM web" är inget beroende.
-    stage_names = {
-        m.group(1).lower()
-        for c in changes
-        for line in c.added_lines
-        if (m := re.match(r"^\s*FROM\s+\S+\s+AS\s+(\S+)", line, re.IGNORECASE))
-    }
-    deps = sorted(
-        d
-        for d in {d for c in changes for d in new_dependencies(c)} - stage_names
-        # Avbilder som projektet bygger självt är inga externa beroenden.
-        if not d.startswith("homecontrol")
-    )
+    deps = sorted({d for c in changes for d in new_dependencies(c)})
     if deps:
         reasons.append("nytt beroende: " + ", ".join(deps))
 
@@ -185,30 +201,26 @@ def classify(changes: list[FileChange], existing_top_dirs: set[str]) -> Verdict:
 
 
 def git(*args: str) -> str:
-    result = subprocess.run(["git", *args], capture_output=True, text=True, check=True)
+    # quotepath=off gör att sökvägar med å, ä och ö skrivs ut som de är.
+    result = subprocess.run(
+        ["git", "-c", "core.quotepath=off", *args], capture_output=True, text=True, check=True
+    )
     return result.stdout
 
 
-def parse_patch(patch: str) -> dict[str, tuple[list[str], list[str]]]:
-    """Plockar ut tillagda och borttagna rader per fil ur en unified diff."""
-    lines_by_file: dict[str, tuple[list[str], list[str]]] = {}
-    current: tuple[list[str], list[str]] | None = None
-    in_header = False
-    for line in patch.splitlines():
-        if line.startswith("diff --git "):
-            in_header, current = True, None
-        elif in_header and line.startswith(("--- ", "+++ ")):
-            name = line[4:]
-            if name != "/dev/null":
-                path = name[2:] if name[:2] in ("a/", "b/") else name
-                current = lines_by_file.setdefault(path, ([], []))
-        elif line.startswith("@@"):
-            in_header = False
-        elif not in_header and current is not None and line.startswith("+"):
-            current[0].append(line[1:])
-        elif not in_header and current is not None and line.startswith("-"):
-            current[1].append(line[1:])
-    return lines_by_file
+def read_text(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def read_at(revision: str, path: str) -> str:
+    try:
+        return git("show", f"{revision}:{path}")
+    except (subprocess.CalledProcessError, UnicodeDecodeError):
+        return ""
 
 
 def collect_changes(base: str) -> tuple[list[FileChange], set[str]]:
@@ -221,33 +233,29 @@ def collect_changes(base: str) -> tuple[list[FileChange], set[str]]:
 
     statuses: dict[str, str] = {}
     for line in git("diff", "--name-status", "--no-renames", merge_base).splitlines():
-        parts = line.split("\t")
-        statuses[parts[-1]] = parts[0][0]
+        status, path = line.split("\t", 1)
+        statuses[path] = status[0]
 
-    changes: dict[str, FileChange] = {}
+    changes: list[FileChange] = []
     for line in git("diff", "--numstat", "--no-renames", merge_base).splitlines():
         added, deleted, path = line.split("\t", 2)
-        changes[path] = FileChange(
-            path=path,
-            added=int(added) if added != "-" else 0,
-            deleted=int(deleted) if deleted != "-" else 0,
-            status=statuses.get(path, "M"),
+        status = statuses.get(path, "M")
+        changes.append(
+            FileChange(
+                path=path,
+                added=int(added) if added != "-" else 0,
+                deleted=int(deleted) if deleted != "-" else 0,
+                status=status,
+                before="" if status == "A" else read_at(merge_base, path),
+                after="" if status == "D" else read_text(path),
+            )
         )
 
-    for path, (plus, minus) in parse_patch(git("diff", "-U0", "--no-renames", merge_base)).items():
-        if path in changes:
-            changes[path].added_lines = plus
-            changes[path].deleted_lines = minus
-
     for path in git("ls-files", "--others", "--exclude-standard").splitlines():
-        try:
-            with open(path, encoding="utf-8") as handle:
-                content = handle.read().splitlines()
-        except (OSError, UnicodeDecodeError):
-            content = []
-        changes[path] = FileChange(path, len(content), 0, "A", added_lines=content)
+        content = read_text(path)
+        changes.append(FileChange(path, len(content.splitlines()), 0, "A", after=content))
 
-    return list(changes.values()), existing_top_dirs
+    return changes, existing_top_dirs
 
 
 def main(argv: list[str] | None = None) -> int:
