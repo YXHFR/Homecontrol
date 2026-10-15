@@ -82,6 +82,7 @@ git pull && docker compose up -d --build   # uppdatera
 | ------------ | ---------------------------------------------------------- |
 | `core/`      | Kärnan i Python. Svarar på `/health` och serverar webbgränssnittet. |
 | `web/`       | Webbgränssnittet i TypeScript.                             |
+| `firmware/` | ESPHome-firmware för rumskorten och webbinstalleraren, se [firmware/README.md](firmware/README.md). |
 | `mosquitto/` | Inställningar för MQTT-brokern.                            |
 | `scripts/`   | Hjälpskript, t.ex. för att klassa ändringar inför granskning. |
 | `.claude/agents/` | Granskningsagenter för Claude Code.                   |
@@ -135,3 +136,7 @@ läsbarhet.
 ## Licens
 
 [Apache-2.0](LICENSE)
+
+Undantag: firmware-binären för rumskorten innehåller ESPectre och ESPHome
+och blir därför GPL-3.0. Konfigurationen i `firmware/` är Apache-2.0. Se
+[firmware/README.md](firmware/README.md#licens).

@@ -1,0 +1,155 @@
+name: Firmware
+
+# Validerar och bygger rumskortens firmware. På main publiceras dessutom
+# webbinstalleraren på GitHub Pages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - firmware/**
+      - scripts/firmware_site.py
+      - .github/workflows/firmware.yml
+  pull_request:
+    paths:
+      - firmware/**
+      - scripts/firmware_site.py
+      - .github/workflows/firmware.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firmware-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ESP Web Tools läggs på samma sida i stället för att laddas från ett CDN.
+  ESP_WEB_TOOLS_VERSION: 10.4.0
+  ESP_WEB_TOOLS_SHA256: f18da75335d2f0dca044c4bb052848c0696e7b03cc23d61d8530dd6eba0a9008
+
+jobs:
+  validate:
+    name: Validera ESPHome-paketet
+    runs-on: ubuntu-latest
+    outputs:
+      rooms: ${{ steps.rooms.outputs.rooms }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: firmware/requirements.txt
+      - run: pip install --require-hashes -r firmware/requirements.txt
+      - name: Rum att bygga
+        id: rooms
+        run: |
+          rooms=$(python3 scripts/firmware_site.py rooms)
+          # I en PR räcker det att bygga ett rum.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            rooms=$(echo "$rooms" | jq -c '.[:1]')
+          fi
+          echo "rooms=$rooms" >> "$GITHUB_OUTPUT"
+      - name: Validera konfigurationen
+        # "ci-test" är bara ett rumsnamn för valideringen.
+        run: esphome -s rum ci-test config firmware/homecontrol.yaml > resolved.yaml
+      - name: Kontrollera viktiga inställningar
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          grep -qE '^\s+baud_rate: 256000$' resolved.yaml || fail "LD2450 ska köra 256000 baud"
+          ! grep -q throttle resolved.yaml || fail "Radarns strypfilter ska vara borttaget"
+          ! grep -qE '^(esp32_ble|esp32_ble_tracker|bluetooth_proxy|ble_client):' resolved.yaml \
+            || fail "Bluetooth ska vara avstängt"
+          grep -q 'CONFIG_BT_ENABLED: n' resolved.yaml || fail "Bluetooth ska vara avstängt i ESP-IDF"
+          grep -qE '^  encryption: \{\}$' resolved.yaml || fail "API:t ska vara krypterat utan inbyggd nyckel"
+          ! grep -qE '^(web_server|captive_portal):' resolved.yaml \
+            || fail "Ingen webbserver eller captive portal (de tar emot firmware utan lösenord)"
+          ! grep -qE '^\s+- platform: (esphome|web_server)$' resolved.yaml \
+            || fail "OTA får bara hämtas av kortet självt (platform: http_request)"
+          grep -qE '^\s+verify_ssl: true$' resolved.yaml || fail "Uppdateringar ska hämtas med kontrollerat https"
+          grep -qE '^\s+follow_redirects: false$' resolved.yaml || fail "Uppdateringar ska inte följa omdirigeringar"
+          ! grep -qE '^\s+(password|key|psk):' resolved.yaml || fail "Hemligheter hör inte hemma i paketet"
+
+  build:
+    name: Bygg firmware (${{ matrix.room }})
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        room: ${{ fromJSON(needs.validate.outputs.rooms) }}
+    env:
+      ROOM: ${{ matrix.room }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: firmware/requirements.txt
+      - run: pip install --require-hashes -r firmware/requirements.txt
+      - name: Cacha ESP-IDF och verktyg
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/esphome
+          key: esphome-${{ hashFiles('firmware/requirements.txt') }}
+      - name: Bygg
+        run: |
+          esphome -s rum "$ROOM" -s firmware_version "git-${GITHUB_SHA::7}" \
+            compile firmware/homecontrol.yaml
+          mkdir -p out
+          build="firmware/.esphome/build/homecontrol-$ROOM/build"
+          cp "$build/firmware.factory.bin" "out/$ROOM.factory.bin"
+          cp "$build/firmware.ota.bin" "out/$ROOM.ota.bin"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ matrix.room }}
+          path: out/
+          retention-days: 7
+          if-no-files-found: error
+
+  pages:
+    name: Publicera webbinstalleraren
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: firmware-*
+          merge-multiple: true
+          path: builds
+      - name: Bygg sidan
+        run: |
+          python3 scripts/firmware_site.py site --builds builds --out site \
+            --version "git-${GITHUB_SHA::7}" \
+            --source "${{ github.server_url }}/${{ github.repository }}/tree/${GITHUB_SHA}/firmware"
+      - name: Lägg till ESP Web Tools
+        run: |
+          archive="esp-web-tools-${ESP_WEB_TOOLS_VERSION}.tgz"
+          curl -sSfLO "https://registry.npmjs.org/esp-web-tools/-/${archive}"
+          echo "${ESP_WEB_TOOLS_SHA256}  ${archive}" | sha256sum --check
+          tar -xzf "${archive}"
+          cp -r package/dist/web site/esp-web-tools
+          cp package/LICENSE site/esp-web-tools/LICENSE
+      - name: Lägg till GPL-3.0-licensen
+        run: |
+          # Samma ESPectre-commit som firmware byggs med.
+          ref=$(grep -oP '^\s+ref: \K[0-9a-f]{40}$' firmware/homecontrol.yaml)
+          curl -sSfL "https://raw.githubusercontent.com/francescopace/espectre/${ref}/LICENSE" \
+            -o site/LICENSE-GPL-3.0.txt
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5

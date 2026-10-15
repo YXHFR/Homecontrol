@@ -1,0 +1,5 @@
+# Byggfiler från ESPHome.
+/.esphome/
+# Ifall någon bygger lokalt med egna hemligheter. Annars skapar ESPHome
+# den här filen själv vid första bygget.
+/secrets.yaml

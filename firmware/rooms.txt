@@ -1,0 +1,14 @@
+# Rum som får en färdig firmware i webbinstalleraren.
+# Ett rum per rad. Bara a–z, 0–9 och bindestreck, högst 19 tecken.
+# Namnet blir värdnamnet homecontrol-<rum> och syns för alla i nätverket.
+# Andra rum kan byggas själv, se firmware/README.md.
+vardagsrum
+kok
+hall
+sovrum
+sovrum-2
+sovrum-3
+barnrum
+kontor
+badrum
+tvattstuga
