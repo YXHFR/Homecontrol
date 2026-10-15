@@ -13,4 +13,4 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 "scripts/classify_change.py" = ["S603", "S607"]
 
 [lint.isort]
-known-first-party = ["homecontrol", "classify_change"]
+known-first-party = ["homecontrol", "classify_change", "scenario"]

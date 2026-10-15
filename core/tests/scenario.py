@@ -16,6 +16,8 @@ scenariot säger till. Tre minuters väntan tar därför ingen tid alls.
 
 Varje steg returnerar scenariot, så stegen kan kedjas. Ett misslyckat
 `expect_...` säger vad som hände och lampans egen förklaring.
+
+Ramverket hör till testerna och följer inte med i den körbara kärnan.
 """
 
 from collections.abc import Iterable
@@ -47,8 +49,13 @@ class Scenario:
         self.source.move_person(self.home.room(self._room_id(room)).center)
         return self
 
-    def person_moves_to(self, x: float, y: float) -> Self:
+    def person_moves_to(self, *, x: float, y: float) -> Self:
         self.source.move_person(Point(x, y))
+        return self
+
+    def source_lost(self) -> Self:
+        """Låtsaskällan tappar kontakten, som en radar utan ström."""
+        self.source.stop()
         return self
 
     def person_leaves(self) -> Self:
@@ -66,7 +73,10 @@ class Scenario:
             self.clock.advance_to(max(wake_at, self.clock.now()))
             self.controller.tick()
             if self.controller.wake_at == wake_at:
-                raise RuntimeError(f"Kärnan vill väckas vid {wake_at} igen efter att ha väckts")
+                raise RuntimeError(
+                    f"Regeln bad om att väckas vid {wake_at} s, men när den väcktes bad den "
+                    "om samma tid igen. Scenariot skulle fastna, så det avbryts."
+                )
         self.clock.advance_to(until)
         self.controller.tick()
         return self
@@ -78,6 +88,14 @@ class Scenario:
 
     def expect_lamp_off(self, lamp: str | None = None) -> Self:
         return self._expect_lamp(lamp, on=False)
+
+    def expect_lamp_switches(self, *switches: bool, lamp: str | None = None) -> Self:
+        """Lampan har tänts (True) och släckts (False) i exakt den här ordningen."""
+        lamp_id = self._lamp_view(lamp).lamp_id
+        actual = tuple(c.on for c in self.lamps.history if c.lamp_id == lamp_id)
+        if actual != switches:
+            raise AssertionError(f"{lamp_id} slogs om {actual}, väntade {switches}")
+        return self
 
     def expect_explanation(self, text: str, lamp: str | None = None) -> Self:
         view = self._lamp_view(lamp)
