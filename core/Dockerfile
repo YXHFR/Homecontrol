@@ -2,7 +2,8 @@
 # Alla basavbilder finns för både linux/amd64 och linux/arm64.
 
 # --- Webbgränssnittet (TypeScript) byggs till statiska filer ---
-FROM node:22-alpine AS web
+# Resultatet är statiska filer, så steget körs alltid på byggdatorns egen arkitektur.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci

@@ -7,7 +7,7 @@ license = "Apache-2.0"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.143.2",
-    "uvicorn[standard]>=0.54.0",
+    "uvicorn>=0.54.0",
 ]
 
 [build-system]
@@ -25,6 +25,8 @@ dev = [
 [project.scripts]
 homecontrol = "homecontrol.__main__:main"
 
+# Skripten i ../scripts använder bara standardbiblioteket men typkontrolleras
+# och testas med kärnans verktyg, så att repot bara har en Python-miljö.
 [tool.mypy]
 strict = true
 files = ["src", "tests", "../scripts"]

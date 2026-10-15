@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from homecontrol import __version__
@@ -33,7 +34,10 @@ def test_health_wins_over_web_ui(tmp_path: Path) -> None:
     assert client.get("/health").json()["status"] == "ok"
 
 
-def test_without_web_dir_root_is_not_found(tmp_path: Path) -> None:
+def test_missing_web_dir_warns_and_root_is_not_found(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     client = TestClient(create_app(tmp_path / "saknas"))
 
     assert client.get("/").status_code == 404
+    assert "Hittar inte webbgränssnittet" in caplog.text
