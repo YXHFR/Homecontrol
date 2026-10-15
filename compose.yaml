@@ -13,7 +13,7 @@ services:
       - "${BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
 
   db:
-    image: timescale/timescaledb:2.22.1-pg17
+    image: timescale/timescaledb:2.30.2-pg17
     restart: unless-stopped
     environment:
       POSTGRES_DB: homecontrol
@@ -55,7 +55,7 @@ services:
       start_interval: 2s
 
   zigbee2mqtt:
-    image: koenkk/zigbee2mqtt:2.6.2
+    image: koenkk/zigbee2mqtt:2.14.2
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Europe/Stockholm}
