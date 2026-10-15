@@ -146,7 +146,10 @@ def create_live_router(
             unsubscribe()
             for task in tasks:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Inte gather: om vi själva avbryts medan vi väntar här, kastar gather
+            # en deluppgifts CancelledError i stället för vår egen. Då känner servern
+            # (anyio) inte igen sitt eget avbrott och låter felet gå vidare.
+            await asyncio.wait(tasks)
 
     return router
 
