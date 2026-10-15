@@ -8,6 +8,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.143.2",
     "uvicorn>=0.54.0",
+    "websockets>=15",
 ]
 
 [build-system]
