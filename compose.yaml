@@ -1,0 +1,86 @@
+# Startar hela Homecontrol: docker compose up
+# Alla avbilder finns för linux/amd64 och linux/arm64 (t.ex. Raspberry Pi 4/5).
+# Hemligheter och inställningar läses från .env (kopiera .env.example).
+
+services:
+  core:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    image: homecontrol-core:local
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
+
+  db:
+    image: timescale/timescaledb:2.22.1-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: homecontrol
+      POSTGRES_USER: homecontrol
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD saknas – kopiera .env.example till .env och fyll i}
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U homecontrol -d homecontrol"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    restart: unless-stopped
+    entrypoint: ["sh", "/homecontrol/entrypoint.sh"]
+    command: ["mosquitto", "-c", "/homecontrol/mosquitto.conf"]
+    environment:
+      MQTT_USER: ${MQTT_USER:?MQTT_USER saknas – kopiera .env.example till .env och fyll i}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD saknas – kopiera .env.example till .env och fyll i}
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${MQTT_PORT:-1883}:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/homecontrol/mosquitto.conf:ro
+      - ./mosquitto/entrypoint.sh:/homecontrol/entrypoint.sh:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mosquitto_sub -h 127.0.0.1 -u "$$MQTT_USER" -P "$$MQTT_PASSWORD" -t '$$SYS/broker/uptime' -C 1 -W 3
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:2.6.2
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Stockholm}
+      # Vid första start visas en guide på Zigbee2MQTT-porten där du väljer
+      # adaptertyp. MQTT är redan ifyllt härifrån.
+      ZIGBEE2MQTT_CONFIG_MQTT_SERVER: mqtt://mosquitto:1883
+      ZIGBEE2MQTT_CONFIG_MQTT_USER: ${MQTT_USER:?MQTT_USER saknas – kopiera .env.example till .env och fyll i}
+      ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD saknas – kopiera .env.example till .env och fyll i}
+      ZIGBEE2MQTT_CONFIG_SERIAL_PORT: ${ZIGBEE_SERIAL_PORT:-/dev/zigbee}
+      # Webbsidan kräver inloggning med den här nyckeln.
+      ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED: "true"
+      ZIGBEE2MQTT_CONFIG_FRONTEND_AUTH_TOKEN: ${ZIGBEE2MQTT_AUTH_TOKEN:?ZIGBEE2MQTT_AUTH_TOKEN saknas – kopiera .env.example till .env och fyll i}
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${ZIGBEE2MQTT_PORT:-8080}:8080"
+    devices:
+      # Utan USB-adapter pekar detta på /dev/null; Zigbee2MQTT startar då
+      # men kan inte prata med några lampor förrän ZIGBEE_ADAPTER är satt.
+      - "${ZIGBEE_ADAPTER:-/dev/null}:/dev/zigbee"
+    volumes:
+      - zigbee2mqtt-data:/app/data
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+volumes:
+  db-data:
+  mosquitto-data:
+  zigbee2mqtt-data:

@@ -1,0 +1,37 @@
+[project]
+name = "homecontrol"
+version = "0.1.0"
+description = "Närvarostyrd belysning – kärnan"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.143.2",
+    "uvicorn>=0.54.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13.1",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]
+
+[project.scripts]
+homecontrol = "homecontrol.__main__:main"
+
+# Skripten i ../scripts använder bara standardbiblioteket men typkontrolleras
+# och testas med kärnans verktyg, så att repot bara har en Python-miljö.
+[tool.mypy]
+strict = true
+files = ["src", "tests", "../scripts"]
+explicit_package_bases = true
+mypy_path = "src:../scripts"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
