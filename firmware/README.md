@@ -69,6 +69,8 @@ måste korten raderas och installeras om på samma sätt.
   en ny version och visar det i entiteten `Firmware`. Uppdateringen startar
   bara när kärnan ber om det (efter att du har godkänt). Kortet hämtar då
   själv filen över https. Det tar inte emot firmware från någon annan.
+  Adressen är `yxhfr.github.io`, så GitHub-kontot **YXHFR får inte byta
+  namn**. Då kan någon annan ta namnet och skicka firmware till korten.
 - **Över USB:** kör webbinstalleraren igen och lämna **Erase device** tom.
   Kortet behåller Wi-Fi och nyckeln.
 

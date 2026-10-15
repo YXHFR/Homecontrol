@@ -69,6 +69,7 @@ jobs:
           ! grep -qE '^\s+- platform: (esphome|web_server)$' resolved.yaml \
             || fail "OTA får bara hämtas av kortet självt (platform: http_request)"
           grep -qE '^\s+verify_ssl: true$' resolved.yaml || fail "Uppdateringar ska hämtas med kontrollerat https"
+          grep -qE '^\s+follow_redirects: false$' resolved.yaml || fail "Uppdateringar ska inte följa omdirigeringar"
           ! grep -qE '^\s+(password|key|psk):' resolved.yaml || fail "Hemligheter hör inte hemma i paketet"
 
   build:

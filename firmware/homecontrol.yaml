@@ -21,6 +21,8 @@ substitutions:
   rum: rum
   firmware_version: dev
   # Var kortet hämtar uppdateringar (webbinstalleraren på GitHub Pages).
+  # Adressen innehåller GitHub-kontots namn. Byts namnet kan någon annan ta
+  # det och skicka firmware till korten, så kontot får inte byta namn.
   update_source: https://yxhfr.github.io/Homecontrol
   # LD2450 (radar) på hårdvaru-UART.
   ld2450_tx_pin: GPIO17
@@ -95,6 +97,8 @@ api:
 # Firmware-entiteten via det krypterade API:t (kärnan frågar användaren).
 http_request:
   verify_ssl: true
+  # Följ inga omdirigeringar, så att en hämtning aldrig hamnar på vanlig http.
+  follow_redirects: false
 
 ota:
   - platform: http_request
