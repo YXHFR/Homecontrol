@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Homecontrol – installera rumskort</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fafafa;
+        --fg: #1b1b1b;
+        --muted: #5b5b5b;
+        --card: #ffffff;
+        --border: #d9d9d9;
+        --accent: #1f6feb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #141414;
+          --fg: #ececec;
+          --muted: #a8a8a8;
+          --card: #1e1e1e;
+          --border: #3a3a3a;
+          --accent: #58a6ff;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.5 system-ui, sans-serif;
+      }
+      main {
+        max-width: 40rem;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+      }
+      h1 { margin-top: 0; }
+      label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+      select { font: inherit; padding: 0.4rem; min-width: 12rem; }
+      a { color: var(--accent); }
+      .muted { color: var(--muted); font-size: 0.9rem; }
+      esp-web-install-button { display: inline-block; margin-top: 1rem; }
+    </style>
+    <script type="module" src="esp-web-tools/install-button.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>Installera ett rumskort</h1>
+      <p>
+        Den här sidan lägger Homecontrol-firmware på ett ESP32-S3-kort och
+        ställer sedan in Wi-Fi. Du behöver Chrome eller Edge på en dator och
+        en USB-kabel som klarar data.
+      </p>
+
+      <section>
+        <label for="room">1. Välj rum</label>
+        <select id="room"></select>
+        <p class="muted">
+          Kortet får namnet <code id="hostname">homecontrol-…</code> i nätverket.
+        </p>
+
+        <p><strong>2. Anslut kortet</strong> med USB-kabeln. Har kortet två
+          USB-uttag: använd det som är märkt <strong>USB</strong>, inte
+          <strong>UART</strong>. Tryck sedan på <strong>Connect</strong>, välj
+          kortet i listan och sedan <strong>Install</strong>.</p>
+        <esp-web-install-button id="install">
+          <span slot="unsupported">
+            Webbläsaren kan inte prata med USB-enheter. Använd Chrome eller Edge
+            på en dator.
+          </span>
+          <span slot="not-allowed">Sidan måste öppnas över https.</span>
+        </esp-web-install-button>
+
+        <p><strong>3. Ställ in Wi-Fi</strong> när installationen är klar. Sidan
+          frågar efter nätverk och lösenord. De skickas bara till kortet.</p>
+
+        <p><strong>4. Starta Homecontrol</strong> och koppla kortet där så snart
+          som möjligt. Det gör kopplingen mellan kortet och Homecontrol säker.</p>
+      </section>
+
+      <section>
+        <h2>Bra att veta</h2>
+        <ul>
+          <li>Första gången: kryssa i <strong>Erase device</strong>. Vid en
+            uppdatering ska rutan vara tom, så behåller kortet Wi-Fi och
+            kopplingen till Homecontrol.</li>
+          <li>Kortet kan också uppdateras över nätverket från Homecontrol.</li>
+          <li>Rumsnamnet syns för alla i hemnätet.</li>
+          <li>Rummet finns inte i listan?
+            <a href="https://github.com/YXHFR/Homecontrol/blob/main/firmware/README.md#rummet-finns-inte-i-listan">Så bygger du ett eget</a>.</li>
+        </ul>
+      </section>
+
+      <p class="muted">
+        <span id="error" hidden><strong>Kunde inte läsa rumslistan. Ladda om sidan.</strong><br /></span>
+        Version <span id="version">–</span>.
+        Firmware-filen innehåller <a href="https://github.com/francescopace/espectre">ESPectre</a>
+        och <a href="https://esphome.io">ESPHome</a> och sprids därför under
+        <a href="LICENSE-GPL-3.0.txt">GPL-3.0</a>.
+        <a id="source" href="https://github.com/YXHFR/Homecontrol">Källkoden för just den här versionen</a>.
+        Installationssidan använder <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>
+        (Apache-2.0).
+      </p>
+    </main>
+
+    <script type="module">
+      const select = document.getElementById("room");
+      const button = document.getElementById("install");
+      const hostname = document.getElementById("hostname");
+
+      function choose(room) {
+        button.setAttribute("manifest", `manifest-${room}.json`);
+        hostname.textContent = `homecontrol-${room}`;
+      }
+
+      try {
+        const response = await fetch("info.json");
+        if (!response.ok) throw new Error(response.statusText);
+        const info = await response.json();
+        for (const room of info.rooms) {
+          select.append(new Option(room, room));
+        }
+        document.getElementById("version").textContent = info.version;
+        document.getElementById("source").href = info.source;
+        choose(select.value);
+        select.addEventListener("change", () => choose(select.value));
+      } catch {
+        document.getElementById("error").hidden = false;
+      }
+    </script>
+  </body>
+</html>
