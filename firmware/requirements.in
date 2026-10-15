@@ -1,0 +1,4 @@
+# ESPHome-versionen som firmware byggs med. requirements.txt skapas av
+#   uv pip compile requirements.in --universal --python-version 3.13 --generate-hashes -o requirements.txt
+# och låser hela kedjan med hashar. Höj då även min_version i homecontrol.yaml.
+esphome==2026.9.1
