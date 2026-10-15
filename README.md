@@ -18,7 +18,11 @@ cd Homecontrol
 cp .env.example .env
 ```
 
-Öppna `.env` och byt ut alla `byt-mig` mot egna lösenord. Starta sedan:
+Öppna filen `.env` och byt ut alla `byt-mig` mot egna lösenord. Filnamnet
+börjar med en punkt, så den kan vara dold i filhanteraren. Öppna den till
+exempel med `nano .env` (spara med Ctrl+O och avsluta med Ctrl+X).
+
+Starta sedan:
 
 ```sh
 docker compose up -d
@@ -26,29 +30,49 @@ docker compose up -d
 
 Första gången tar det några minuter. Därefter finns:
 
-| Vad                 | Adress                       |
-| ------------------- | ---------------------------- |
-| Homecontrol         | http://localhost:8000        |
-| Hälsokontroll       | http://localhost:8000/health |
-| Zigbee2MQTT         | http://localhost:8080        |
+| Vad                                   | Adress                       |
+| ------------------------------------- | ---------------------------- |
+| Homecontrol                           | http://localhost:8000        |
+| Sida som visar att kärnan är igång    | http://localhost:8000/health |
+| Zigbee2MQTT (lösenord: `ZIGBEE2MQTT_AUTH_TOKEN` i `.env`) | http://localhost:8080 |
 
-Byt `localhost` mot datorns adress om du surfar från en annan enhet.
+Surfar du från en annan enhet, byt `localhost` mot datorns adress i
+hemnätet. Den hittar du till exempel i routerns lista över anslutna enheter.
 
 ### Zigbee-adapter
 
-Koppla in Zigbee-adaptern och skriv in dess sökväg i `.env`, till exempel:
+Koppla in Zigbee-adaptern (USB-stickan) och ta reda på dess sökväg:
+
+```sh
+ls /dev/serial/by-id/
+```
+
+Skriv in hela sökvägen i `.env`, till exempel:
 
 ```sh
 ZIGBEE_ADAPTER=/dev/serial/by-id/usb-...
 ```
 
+Har du en adapter som ansluts via nätverket i stället sätter du
+`ZIGBEE_SERIAL_PORT` (se `.env.example`).
+
 Starta om med `docker compose up -d`. Öppna sedan Zigbee2MQTT i webbläsaren
 och följ guiden. MQTT-uppgifterna är redan ifyllda.
+
+### Om något inte fungerar
+
+```sh
+docker compose ps      # alla fyra ska stå som "Up", de flesta även "healthy"
+docker compose logs    # visar vad tjänsterna skriver, leta efter fel
+```
+
+Ett vanligt fel är att `.env` saknas eller att ett värde är tomt. Då säger
+`docker compose up` vilken inställning som saknas.
 
 ### Stoppa och uppdatera
 
 ```sh
-docker compose down            # stoppa (data sparas)
+docker compose down                        # stoppa (data sparas)
 git pull && docker compose up -d --build   # uppdatera
 ```
 
@@ -56,7 +80,7 @@ git pull && docker compose up -d --build   # uppdatera
 
 | Mapp         | Innehåll                                                   |
 | ------------ | ---------------------------------------------------------- |
-| `core/`      | Kärnan i Python. Hälsokontroll och serverar webbgränssnittet. |
+| `core/`      | Kärnan i Python. Svarar på `/health` och serverar webbgränssnittet. |
 | `web/`       | Webbgränssnittet i TypeScript.                             |
 | `mosquitto/` | Inställningar för MQTT-brokern.                            |
 | `scripts/`   | Hjälpskript, t.ex. för att klassa ändringar inför granskning. |
@@ -82,6 +106,9 @@ npm ci
 npm run lint && npm test && npm run build
 npm run dev    # utvecklingsserver som skickar API-anrop till kärnan
 ```
+
+Nya API-vägar i kärnan läggs under `/api/...` så att de inte krockar med
+webbgränssnittets filer.
 
 ### Granskning
 
