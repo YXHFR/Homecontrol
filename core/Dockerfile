@@ -3,7 +3,7 @@
 
 # --- Webbgränssnittet (TypeScript) byggs till statiska filer ---
 # Resultatet är statiska filer, så steget körs alltid på byggdatorns egen arkitektur.
-FROM --platform=$BUILDPLATFORM node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM node:25-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
