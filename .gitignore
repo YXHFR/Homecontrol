@@ -1,0 +1,11 @@
+# Lokal dokumentation och agentinstruktioner – commitas aldrig
+docs/
+CLAUDE.md
+.claude/*
+!.claude/agents/
+
+# Personlig konfiguration och hemligheter
+secrets.yaml
+*.local.*
+.env
+.env.*
