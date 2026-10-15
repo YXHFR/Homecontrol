@@ -41,6 +41,9 @@ Första gången tar det några minuter. Därefter finns:
 
 Surfar du från en annan enhet, byt `localhost` mot datorns adress i
 hemnätet. Den hittar du till exempel i routerns lista över anslutna enheter.
+Använder du ett namn i stället för adressen, till exempel
+`homecontrol.local`, skriv in det som `ALLOWED_HOSTS` i `.env`. Annars
+kopplas livevyn bort.
 
 ### Zigbee-adapter
 

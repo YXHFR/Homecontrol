@@ -3,7 +3,7 @@ import math
 import pytest
 
 from homecontrol.clock import ManualClock
-from homecontrol.connectors import LightLevelObserved, TargetsObserved
+from homecontrol.connectors import LampCommand, LightLevelObserved, SourceLost, TargetsObserved
 from homecontrol.controller import Controller
 from homecontrol.home import Home, Lamp, Point, Room, demo_home
 from homecontrol.simulation import SimulatedLampOutput
@@ -25,6 +25,43 @@ def test_targets_from_several_sources_are_combined() -> None:
 
     assert snapshot.targets == (Point(9, 9),)
     assert not snapshot.rooms[0].occupied
+
+
+def test_lost_source_forgets_its_targets() -> None:
+    controller, _, _ = make()
+    controller.observe(TargetsObserved("a", (Point(1, 1),)))
+
+    controller.observe(SourceLost("a"))
+
+    assert controller.snapshot().targets == ()
+    assert not controller.snapshot().rooms[0].occupied
+
+
+class BrokenOutput:
+    def send(self, command: LampCommand) -> None:
+        raise ConnectionError("borta")
+
+
+def test_broken_output_does_not_stop_the_others(caplog: pytest.LogCaptureFixture) -> None:
+    lamps = SimulatedLampOutput()
+    controller = Controller(demo_home(), ManualClock(), [BrokenOutput(), lamps])
+
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+    controller.observe(TargetsObserved("sim", (Point(1, 1),)))
+
+    assert lamps.states == {"taklampa": True}
+    assert "kunde inte ta emot" in caplog.text
+
+
+def test_log_says_which_lamp_but_not_where_someone_is(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("INFO", logger="homecontrol.controller")
+    controller, _, _ = make()
+
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+    controller.observe(TargetsObserved("sim", (Point(1, 1),)))
+
+    assert "Tänder taklampa" in caplog.text
+    assert "Vardagsrum" not in caplog.text
 
 
 @pytest.mark.parametrize("lux", [-1.0, math.nan, math.inf])

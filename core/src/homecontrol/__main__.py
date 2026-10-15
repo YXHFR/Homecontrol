@@ -9,7 +9,7 @@ from homecontrol.config import Settings
 def main() -> None:
     settings = Settings.from_env()
     uvicorn.run(
-        create_app(settings.web_dir),
+        create_app(settings.web_dir, allowed_hosts=settings.allowed_hosts),
         host=settings.host,
         port=settings.port,
         # Livevyns meddelanden är små; större meddelanden avvisas.

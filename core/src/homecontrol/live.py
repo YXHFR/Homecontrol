@@ -12,11 +12,14 @@ Livevyn skickar kommandon till låtsaskällan:
 * ``{"type": "set_light_level", "room_id": "vardagsrum", "lux": 10}``
 
 Kommandona går in i kärnan genom Simulering, precis som en riktig källa.
+Utan simulering ignoreras de, men läget strömmas ändå.
 """
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
+from collections.abc import Set
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
@@ -100,14 +103,19 @@ def state_message(snapshot: Snapshot) -> dict[str, Any]:
     }
 
 
-def create_live_router(controller: Controller, source: SimulatedSource) -> APIRouter:
+def create_live_router(
+    controller: Controller,
+    source: SimulatedSource | None,
+    allowed_hosts: Set[str] = frozenset(),
+) -> APIRouter:
+    """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som livevyn får nås på."""
     router = APIRouter()
 
     @router.websocket("/api/live")
     async def live(websocket: WebSocket) -> None:
-        # Webbläsaren skickar alltid Origin. Utan kontrollen kunde vilken
-        # webbsida som helst som någon i hemmet besöker styra simuleringen.
-        if not _same_origin(websocket):
+        # Utan kontrollerna kunde vilken webbsida som helst som någon i hemmet
+        # besöker läsa strömmen och styra simuleringen.
+        if not _trusted(websocket, allowed_hosts):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         await websocket.accept()
@@ -143,15 +151,33 @@ def create_live_router(controller: Controller, source: SimulatedSource) -> APIRo
     return router
 
 
-def _same_origin(websocket: WebSocket) -> bool:
+def _trusted(websocket: WebSocket, allowed_hosts: Set[str]) -> bool:
+    host = websocket.headers.get("host")
+    if host is None or not _known_host(host, allowed_hosts):
+        # Skyddar mot DNS rebinding: en främmande sida som pekar sitt eget
+        # namn på kärnans adress har ett namn som inte står i listan.
+        return False
     origin = websocket.headers.get("origin")
-    if origin is None:
-        # Inte en webbläsare, till exempel ett skript på samma dator.
+    # Webbläsare skickar alltid Origin; saknas den är det t.ex. ett skript.
+    return origin is None or urlsplit(origin).netloc.lower() == host.lower()
+
+
+def _known_host(host: str, allowed_hosts: Set[str]) -> bool:
+    hostname = urlsplit(f"//{host}").hostname
+    if hostname is None:
+        return False
+    if hostname == "localhost" or hostname in allowed_hosts:
         return True
-    return urlsplit(origin).netloc == websocket.headers.get("host")
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return True
 
 
-def _handle(source: SimulatedSource, text: str) -> None:
+def _handle(source: SimulatedSource | None, text: str) -> None:
+    if source is None:
+        return
     try:
         message = _client_message.validate_json(text)
     except ValidationError:
@@ -180,6 +206,10 @@ async def run_timer(controller: Controller, clock: Clock) -> None:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(changed.wait(), timeout)
             changed.clear()
-            controller.tick()
+            try:
+                controller.tick()
+            except Exception:
+                # Timern måste leva vidare, annars släcks inga tomma rum.
+                logger.exception("Fel när kärnan väcktes")
     finally:
         unsubscribe()

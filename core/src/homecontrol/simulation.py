@@ -8,6 +8,7 @@ from homecontrol.connectors import (
     LampCommand,
     LightLevelObserved,
     ObservationSink,
+    SourceLost,
     TargetsObserved,
 )
 from homecontrol.home import Point
@@ -34,6 +35,8 @@ class SimulatedSource:
         self._emit_targets()
 
     def stop(self) -> None:
+        if self._sink is not None:
+            self._sink(SourceLost(self._source_id))
         self._sink = None
 
     def move_person(self, position: Point) -> None:

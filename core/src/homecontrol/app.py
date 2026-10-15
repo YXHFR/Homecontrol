@@ -6,7 +6,7 @@ Nya API-vägar läggs under /api så att de aldrig krockar med webbgränssnittet
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Set
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -22,7 +22,11 @@ from homecontrol.simulation import SimulatedLampOutput, SimulatedSource
 logger = logging.getLogger(__name__)
 
 
-def create_app(web_dir: Path | None = None, clock: Clock | None = None) -> FastAPI:
+def create_app(
+    web_dir: Path | None = None,
+    clock: Clock | None = None,
+    allowed_hosts: Set[str] = frozenset(),
+) -> FastAPI:
     clock = clock if clock is not None else SystemClock()
     # Än så länge finns bara Simulering: ett hårdkodat rum, en låtsasperson
     # och en virtuell lampa. Riktiga kopplingar ansluts på samma sätt.
@@ -55,7 +59,7 @@ def create_app(web_dir: Path | None = None, clock: Clock | None = None) -> FastA
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    app.include_router(create_live_router(controller, source))
+    app.include_router(create_live_router(controller, source, allowed_hosts))
 
     # Webbgränssnittet monteras sist så att API-vägarna ovan har företräde.
     if web_dir is not None:

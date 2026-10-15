@@ -13,7 +13,13 @@ from dataclasses import dataclass
 
 from homecontrol import presence, rules
 from homecontrol.clock import Clock
-from homecontrol.connectors import LampOutput, LightLevelObserved, Observation, TargetsObserved
+from homecontrol.connectors import (
+    LampOutput,
+    LightLevelObserved,
+    Observation,
+    SourceLost,
+    TargetsObserved,
+)
 from homecontrol.home import Home, Point
 
 logger = logging.getLogger(__name__)
@@ -74,9 +80,10 @@ class Controller:
         match observation:
             case TargetsObserved(source_id=source_id, targets=targets):
                 self._targets[source_id] = targets
-                self._presence = presence.assess(
-                    self._home, self._all_targets(), self._presence, self._clock.now()
-                )
+                self._assess_presence()
+            case SourceLost(source_id=source_id):
+                self._targets.pop(source_id, None)
+                self._assess_presence()
             case LightLevelObserved(room_id=room_id, lux=lux):
                 if room_id not in self._room_ids:
                     logger.warning("Ljusnivå för okänt rum %r ignoreras", room_id)
@@ -112,6 +119,11 @@ class Controller:
             ),
         )
 
+    def _assess_presence(self) -> None:
+        self._presence = presence.assess(
+            self._home, self._targets, self._presence, self._clock.now()
+        )
+
     def _all_targets(self) -> tuple[Point, ...]:
         return tuple(target for targets in self._targets.values() for target in targets)
 
@@ -122,10 +134,16 @@ class Controller:
         }
         result = rules.evaluate(self._home, room_states, self._lamps_on, self._clock.now())
         for command in result.commands:
-            logger.info("%s: %s", command.lamp_id, command.reason)
+            # Förklaringen säger var någon är, så den loggas bara när man felsöker.
+            logger.info("%s %s", "Tänder" if command.on else "Släcker", command.lamp_id)
+            logger.debug("%s: %s", command.lamp_id, command.reason)
             self._lamps_on[command.lamp_id] = command.on
             for output in self._outputs:
-                output.send(command)
+                # En trasig utgång får inte hindra de andra eller stoppa kärnan.
+                try:
+                    output.send(command)
+                except Exception:
+                    logger.exception("Lamputgången kunde inte ta emot %s", command)
         self._explanations = dict(result.explanations)
         self._wake_at = result.wake_at
 

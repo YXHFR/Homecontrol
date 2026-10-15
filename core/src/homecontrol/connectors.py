@@ -6,6 +6,11 @@ observationer till kärnan genom en `ObservationSink`. En *lamputgång*
 
 Kärnan vet inget om vilken koppling som sitter i andra änden. Simuleringen
 använder exakt samma ingång och utgång som de riktiga kopplingarna.
+
+Kärnan körs i asyncios händelseloop och har inga lås. `ObservationSink` och
+`LampOutput.send` anropas därför alltid från loopens tråd. En koppling som
+har en egen tråd (till exempel ett MQTT-bibliotek) lämnar över med
+`loop.call_soon_threadsafe`.
 """
 
 from collections.abc import Callable
@@ -36,12 +41,23 @@ class LightLevelObserved:
     lux: float
 
 
-Observation = TargetsObserved | LightLevelObserved
+@dataclass(frozen=True)
+class SourceLost:
+    """Källan har tappat kontakten eller stoppats. Det den såg senast gäller inte längre."""
+
+    source_id: str
+
+
+Observation = TargetsObserved | LightLevelObserved | SourceLost
 ObservationSink = Callable[[Observation], None]
 
 
 class Source(Protocol):
-    """En källkoppling. Den lämnar observationer till `sink` tills den stoppas."""
+    """En källkoppling. Den lämnar observationer till `sink` tills den stoppas.
+
+    När källan tappar kontakten, eller stoppas, skickar den `SourceLost` så att
+    ingen blir kvar i ett rum bara för att källan tystnade.
+    """
 
     @property
     def source_id(self) -> str: ...

@@ -1,10 +1,10 @@
 """Minimal närvarobedömning: ett rum är upptaget om någon källa ser ett mål i det.
 
-Senare vägs flera källor samman med osäkerhet. Gränssnittet är redan det
-som behövs då: in går alla mål som källorna ser, ut går ett läge per rum.
+Målen kommer per källa, så att en senare sammanvägning kan väga källorna
+olika. Här räcker det att någon av dem ser någon.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from homecontrol.home import Home, Point
@@ -28,11 +28,11 @@ def initial_presence(home: Home, now: float) -> dict[str, RoomPresence]:
 
 def assess(
     home: Home,
-    targets: Iterable[Point],
+    targets_by_source: Mapping[str, tuple[Point, ...]],
     previous: Mapping[str, RoomPresence],
     now: float,
 ) -> dict[str, RoomPresence]:
-    targets = tuple(targets)
+    targets = [target for targets in targets_by_source.values() for target in targets]
     result: dict[str, RoomPresence] = {}
     for room in home.rooms:
         if any(room.contains(target) for target in targets):
@@ -40,8 +40,8 @@ def assess(
         else:
             # Ett rum som redan var tomt behåller sin tidpunkt, annars blev det tomt nu.
             before = previous.get(room.id)
-            vacant_since = before.vacant_since if before is not None else None
-            result[room.id] = RoomPresence(
-                vacant_since=now if vacant_since is None else vacant_since
-            )
+            if before is not None and before.vacant_since is not None:
+                result[room.id] = before
+            else:
+                result[room.id] = RoomPresence(vacant_since=now)
     return result

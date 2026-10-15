@@ -9,6 +9,8 @@ services:
       dockerfile: core/Dockerfile
     image: homecontrol-core:local
     restart: unless-stopped
+    environment:
+      HOMECONTROL_ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
 

@@ -55,40 +55,54 @@ def evaluate(
         state = rooms[room.id]
         is_on = lamps_on.get(lamp.id, False)
         vacant_since = state.presence.vacant_since
-
         if vacant_since is None:
-            if is_on:
-                explanations[lamp.id] = f"Tänd: någon är i {room.name}."
-            elif state.lux is None:
-                explanations[lamp.id] = f"Släckt: ljusnivån i {room.name} är okänd."
-            elif state.lux < DARK_BELOW_LUX:
-                reason = (
-                    f"Tänd: någon är i {room.name} och det är mörkt "
-                    f"({state.lux:g} lux, under {DARK_BELOW_LUX:g})."
-                )
-                commands.append(LampCommand(lamp.id, on=True, reason=reason))
-                explanations[lamp.id] = reason
-            else:
-                explanations[lamp.id] = (
-                    f"Släckt: någon är i {room.name} men det är ljust nog ({state.lux:g} lux)."
-                )
-        elif not is_on:
-            explanations[lamp.id] = f"Släckt: {room.name} är tomt."
-        elif now - vacant_since >= OFF_AFTER_EMPTY_SECONDS:
-            reason = f"Släckt: {room.name} har varit tomt i {_minutes(OFF_AFTER_EMPTY_SECONDS)}."
-            commands.append(LampCommand(lamp.id, on=False, reason=reason))
-            explanations[lamp.id] = reason
+            decision = _occupied_room(room.name, state.lux, is_on)
         else:
-            wake_times.append(vacant_since + OFF_AFTER_EMPTY_SECONDS)
-            explanations[lamp.id] = (
-                f"Tänd: {room.name} är tomt och släcks när det varit tomt i "
-                f"{_minutes(OFF_AFTER_EMPTY_SECONDS)}."
-            )
+            decision = _vacant_room(room.name, vacant_since, is_on, now)
+
+        explanations[lamp.id] = decision.explanation
+        if decision.switch_on is not None:
+            commands.append(LampCommand(lamp.id, decision.switch_on, decision.explanation))
+        if decision.wake_at is not None:
+            wake_times.append(decision.wake_at)
 
     return RuleResult(
         commands=tuple(commands),
         explanations=explanations,
         wake_at=min(wake_times, default=None),
+    )
+
+
+@dataclass(frozen=True)
+class _Decision:
+    explanation: str
+    switch_on: bool | None = None
+    """True tänder, False släcker, None låter lampan vara."""
+    wake_at: float | None = None
+
+
+def _occupied_room(name: str, lux: float | None, is_on: bool) -> _Decision:
+    if is_on:
+        return _Decision(f"Tänd: någon är i {name}.")
+    if lux is None:
+        return _Decision(f"Släckt: ljusnivån i {name} är okänd.")
+    if lux < DARK_BELOW_LUX:
+        return _Decision(
+            f"Tänd: någon är i {name} och det är mörkt ({lux:g} lux, under {DARK_BELOW_LUX:g}).",
+            switch_on=True,
+        )
+    return _Decision(f"Släckt: någon är i {name} men det är ljust nog ({lux:g} lux).")
+
+
+def _vacant_room(name: str, vacant_since: float, is_on: bool, now: float) -> _Decision:
+    delay = _minutes(OFF_AFTER_EMPTY_SECONDS)
+    if not is_on:
+        return _Decision(f"Släckt: {name} är tomt.")
+    if now - vacant_since >= OFF_AFTER_EMPTY_SECONDS:
+        return _Decision(f"Släckt: {name} har varit tomt i {delay}.", switch_on=False)
+    return _Decision(
+        f"Tänd: {name} är tomt och släcks när det varit tomt i {delay}.",
+        wake_at=vacant_since + OFF_AFTER_EMPTY_SECONDS,
     )
 
 

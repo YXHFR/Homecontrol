@@ -14,6 +14,8 @@ class Settings:
     host: str
     port: int
     web_dir: Path
+    allowed_hosts: frozenset[str] = frozenset()
+    """Värdnamn utöver localhost och IP-adresser som livevyn får nås på."""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -21,4 +23,9 @@ class Settings:
             host=os.environ.get("HOMECONTROL_HOST", "127.0.0.1"),
             port=int(os.environ.get("HOMECONTROL_PORT", "8000")),
             web_dir=Path(os.environ.get("HOMECONTROL_WEB_DIR", "web")),
+            allowed_hosts=frozenset(
+                name.strip().lower()
+                for name in os.environ.get("HOMECONTROL_ALLOWED_HOSTS", "").split(",")
+                if name.strip()
+            ),
         )
