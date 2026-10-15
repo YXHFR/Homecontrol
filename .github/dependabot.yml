@@ -1,0 +1,38 @@
+# Dependabot föreslår uppdateringar av beroenden en gång i veckan.
+# Commit-meddelandena följer conventional commits så att release-please
+# kan läsa dem.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /core
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      web-dev:
+        dependency-type: development
+  - package-ecosystem: docker
+    directory: /core
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(deps)"
