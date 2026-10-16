@@ -68,7 +68,7 @@ class Scenario:
         """
         self.home = home if home is not None else one_room_home()
         self.clock = ManualClock()
-        self.lamps = SimulatedLampOutput()
+        self.lamps = SimulatedLampOutput(now=self.clock.now)
         self.controller = Controller(self.home, self.clock, [self.lamps], wall_clock=self.clock.now)
         self.controller.on_calibrated(self._save_calibration)
         if lamps_report:
@@ -112,6 +112,14 @@ class Scenario:
 
     def lamp_stops_responding(self, lamp: str | None = None) -> Self:
         self.controller.observe(LampStateReported(self._lamp_view(lamp).lamp_id, on=None))
+        return self
+
+    def lamp_responds_again(self, lamp: str | None = None) -> Self:
+        """Lampan svarar igen och säger hur den är: som den virtuella lampan senast blev."""
+        lamp_id = self._lamp_view(lamp).lamp_id
+        on = self.lamps.states.get(lamp_id, False)
+        brightness = self.lamps.brightness.get(lamp_id, 100)
+        self.controller.observe(LampStateReported(lamp_id, on=on, brightness=brightness))
         return self
 
     def lamp_changed_with_remote(self, on: bool, lamp: str | None = None) -> Self:
@@ -394,6 +402,14 @@ class Scenario:
             raise AssertionError(
                 f"{lamp_id} skulle ha bidraget {lux:g} lux men har {saved.lux_contribution:g}"
             )
+        return self
+
+    def expect_lamp_warning(self, warning: bool = True, lamp: str | None = None) -> Self:
+        """Kartan varnar för att lampan inte svarar."""
+        view = self._lamp_view(lamp)
+        if view.responding == warning:
+            wanted = "inte svarar" if warning else "svarar"
+            raise AssertionError(f"Kartan skulle visa att {view.lamp_id} {wanted}")
         return self
 
     def expect_explanation(self, text: str, lamp: str | None = None) -> Self:

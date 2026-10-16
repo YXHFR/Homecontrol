@@ -256,7 +256,8 @@ inte i de grupperna själv; Homecontrol håller dem i takt med kartan.
 
 Tänder, släcker eller dimrar du en lampa med en fjärrkontroll eller i en app
 räknas det som manuell styrning, precis som ett klick i livevyn. En lampa som
-inte svarar (till exempel när strömbrytaren är av) visas med ⚠ på kartan.
+inte svarar (till exempel när strömbrytaren är av) visas med ⚠ på kartan, och
+rummet får läget okänt tills lampan svarar igen.
 
 När den första riktiga lampan är placerad stängs simuleringsläget av. Så länge
 riktiga lampor är placerade kan tiden inte gå fortare än vanligt, så att de
@@ -438,7 +439,8 @@ Tappar radarn någon räknas personen som kvar en stund, beroende på var:
 En person som hålls kvar visas som en streckad ring i livevyn. Under
 **Just nu** står om varje rum är upptaget, tomt eller okänt. Okänt betyder att
 radarn på ett rumskort i rummet har slutat svara, eller Wi-Fi-mätningen när
-rummet använder Wi-Fi (vikten är över 0); då lämnas lamporna som de är.
+rummet använder Wi-Fi (vikten är över 0), eller en av rummets lampor; då
+lämnas lamporna som de är.
 Wi-Fi-mätningen kalibrerar sig några minuter efter att kortet har startat,
 och under tiden räknas den som tyst.
 
@@ -466,8 +468,9 @@ Värdena inom parentes är standard och ändras per rum i kartredigeraren.
 - **Släck vid dagsljus** när någon är i rummet men det har varit ljust (över
   100 lux) i 10 minuter i sträck. Blir det mörkare emellan börjar tiden om.
 - **Rum utan fönster** räknas alltid som mörka och behöver ingen ljussensor.
-- **Okänt läge**: har ett rumskort slutat svara görs ingenting med lamporna
-  i rummet; de lämnas som de är.
+- **Okänt läge**: har ett rumskort eller en lampa slutat svara görs
+  ingenting med lamporna i rummet; de lämnas som de är. När lampan eller
+  kortet svarar igen tar automatiken över.
 
 Ljusnivån som reglerna använder är den uppmätta minus det ljus som rummets
 tända lampor själva ger vid ljussensorn (mindre när de är dimrade). Därför
@@ -659,6 +662,16 @@ webbsidor. Det gäller även lampstyrningen och uppdateringen av korten. Det hin
 webbsida som någon i hemmet besöker styr lamporna eller läser kartan genom
 webbläsaren. Program och skript i nätverket släpps däremot in, eftersom det
 inte finns några konton.
+
+Varje lampa tar emot högst fem kommandon i rad och sedan ett i sekunden, så
+att ett trasigt eller elakt program i nätverket inte kan få lamporna att
+blinka. Det märks aldrig när automatiken, lampkalibreringen eller någon som
+klickar i livevyn styr lamporna. Kommandon utöver gränsen skjuts upp, och
+lampan får till slut det senaste. Kärnans logg säger när kommandon till en
+lampa skjuts upp.
+
+Kärnans logg säger inte när lamporna tänds och släcks, eftersom det ungefär
+säger när någon kom och gick.
 
 ## Om något inte fungerar
 

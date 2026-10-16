@@ -25,6 +25,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import time
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Set
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ from homecontrol.connectors import (
     SourceLost,
 )
 from homecontrol.home import Capability, Home, Node, Point, Room, Target
+from homecontrol.lamplimit import LampLimit
 from homecontrol.rules import FULL_BRIGHTNESS
 
 logger = logging.getLogger(__name__)
@@ -282,23 +284,64 @@ class SimulatedLampOutput:
     inte virtuella, så den här utgången varken rapporterar eller styr dem.
 
     Simuleringen låter lampornas ljus nå de simulerade sensorerna (se `light_by_room`).
+
+    Lamporna har samma styrgräns som riktiga lampor (se `LampLimit`), räknat
+    med `now`, kärnans klocka. Ett kommando som gränsen stoppar skjuts upp
+    och utförs så fort lampan får styras igen och någon frågar hur lamporna är.
     """
 
-    def __init__(self, real_lamps: Callable[[Home], Set[str]] = lambda _: frozenset()) -> None:
+    def __init__(
+        self,
+        real_lamps: Callable[[Home], Set[str]] = lambda _: frozenset(),
+        now: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._real_lamps = real_lamps
         self._real: Set[str] = frozenset()
-        self.states: dict[str, bool] = {}
-        self.brightness: dict[str, int] = {}
+        self._states: dict[str, bool] = {}
+        self._brightness: dict[str, int] = {}
+        self._limit = LampLimit(now)
+        self._held: dict[str, LampCommand] = {}
+        """Kommandon som styrgränsen har skjutit upp, det senaste per lampa."""
         # De senaste kommandona, för scenariotesterna. Begränsat så att
         # förklaringarna (var någon har varit) inte samlas i minnet för alltid.
         self.history: deque[LampCommand] = deque(maxlen=MAX_HISTORY)
 
+    @property
+    def states(self) -> Mapping[str, bool]:
+        """Om varje virtuell lampa är tänd. Uppskjutna kommandon som får utföras utförs först."""
+        self._release_held()
+        return self._states
+
+    @property
+    def brightness(self) -> Mapping[str, int]:
+        """Ljusstyrkan i procent som varje virtuell lampa senast fick.
+
+        Uppskjutna kommandon som får utföras utförs först.
+        """
+        self._release_held()
+        return self._brightness
+
     def send(self, command: LampCommand) -> None:
         if command.lamp_id in self._real:
             return
-        self.states[command.lamp_id] = command.on
-        self.brightness[command.lamp_id] = command.brightness
+        # Ett nytt kommando ersätter ett som har skjutits upp.
+        self._held.pop(command.lamp_id, None)
+        self._release_held()
+        if self._limit.allow(command.lamp_id):
+            self._apply(command)
+        else:
+            self._held[command.lamp_id] = command
+
+    def _apply(self, command: LampCommand) -> None:
+        self._states[command.lamp_id] = command.on
+        self._brightness[command.lamp_id] = command.brightness
         self.history.append(command)
+
+    def _release_held(self) -> None:
+        """Utför de uppskjutna kommandona till lampor som får styras igen."""
+        for lamp_id in list(self._held):
+            if self._limit.allow(lamp_id):
+                self._apply(self._held.pop(lamp_id))
 
     def light_by_room(self, home: Home) -> dict[str, float]:
         """Hur mycket de tända virtuella lamporna lyser upp varje rums ljussensor, i lux.
@@ -306,6 +349,7 @@ class SimulatedLampOutput:
         Ljuset mäts vid rummets första rumskort med ljussensor, eller mitt i
         rummet om det inte har något. Lampor närmare än en meter räknas som en meter bort.
         """
+        self._release_held()
         light = {}
         for room in home.rooms:
             sensor = next(
@@ -314,10 +358,10 @@ class SimulatedLampOutput:
             )
             total = 0.0
             for lamp in room.lamps:
-                if self.states.get(lamp.id) is not True:
+                if self._states.get(lamp.id) is not True:
                     continue
                 distance = max(1.0, math.dist(lamp.position, sensor))
-                share = self.brightness.get(lamp.id, FULL_BRIGHTNESS) / FULL_BRIGHTNESS
+                share = self._brightness.get(lamp.id, FULL_BRIGHTNESS) / FULL_BRIGHTNESS
                 total += LAMP_LUX_AT_ONE_METER * share / distance**2
             light[room.id] = total
         return light
@@ -332,10 +376,13 @@ class SimulatedLampOutput:
         # En lampa som har tagits bort glöms, så att den rapporteras igen om den läggs tillbaka.
         self._real = self._real_lamps(home)
         lamp_ids = {lamp.id for lamp in home.lamps if lamp.id not in self._real}
-        self.states = {lamp_id: on for lamp_id, on in self.states.items() if lamp_id in lamp_ids}
+        self._states = {lamp_id: on for lamp_id, on in self._states.items() if lamp_id in lamp_ids}
+        self._held = {
+            lamp_id: command for lamp_id, command in self._held.items() if lamp_id in lamp_ids
+        }
         for lamp in home.lamps:
-            if lamp.id in lamp_ids and lamp.id not in self.states:
-                self.states[lamp.id] = False
+            if lamp.id in lamp_ids and lamp.id not in self._states:
+                self._states[lamp.id] = False
                 sink(LampStateReported(lamp.id, on=False))
 
 

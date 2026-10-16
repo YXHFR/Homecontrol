@@ -8,6 +8,11 @@ köras i realtid av servern och i snabbspolad tid av scenariotester.
 Manuell styrning (ett klick på en lampa i livevyn) kommer in via `set_lamp`.
 En lampa som ändras utanför kärnan, med fjärrkontroll eller app, räknas också
 som manuell styrning (`LampStateReported.external`).
+
+Hälsa: ett rum där en källa har tappat kontakten är okänt (se fusion.py), och
+detsamma gäller ett rum där en lampa inte svarar. Automatiken lämnar då
+rummet orört, och när lampan svarar igen tar den över.
+
 Varje beslut som ändrar något sparas som en händelse med klockslag, för
 listan "Varför hände det?" i livevyn. Händelserna finns bara i minnet.
 
@@ -36,7 +41,7 @@ from homecontrol.connectors import (
     RadarTargetsObserved,
     SourceLost,
 )
-from homecontrol.fusion import Fusion, Occupancy, Track
+from homecontrol.fusion import Fusion, Occupancy, Presence, Track
 from homecontrol.home import Home, Room
 
 logger = logging.getLogger(__name__)
@@ -127,8 +132,8 @@ class Controller:
         self._fusion = Fusion(home, clock.now())
         # Kärnan vet inte hur lamporna är förrän de rapporterar eller den själv styr dem.
         self._lamps: dict[str, rules.LampState] = {}
-        # Lamporna som lamputgången senast sa inte svarar.
-        self._not_responding: set[str] = set()
+        # Lamporna som lamputgången senast sa inte svarar, och sedan när.
+        self._not_responding: dict[str, float] = {}
         self._memory: dict[str, rules.Memory] = {}
         self._explanations: dict[str, str] = {}
         self._events: deque[Event] = deque(maxlen=MAX_EVENTS)
@@ -193,10 +198,7 @@ class Controller:
                     logger.warning("Ogiltig ljusstyrka %r ignoreras", brightness)
                     return
                 state = rules.LampState(on, brightness)
-                if on is None:
-                    self._not_responding.add(lamp_id)
-                else:
-                    self._not_responding.discard(lamp_id)
+                self._lamp_responding(lamp_id, responding=on is not None, now=now)
                 if observation.external and on is not None:
                     self._changed_outside(lamp_id, state)
                 self._lamps[lamp_id] = state
@@ -347,7 +349,7 @@ class Controller:
         view = calibration.view()
         self._calibration_view = view
         room_id = calibration.room_id
-        known = {lamp.id for lamp in self._home.lamps} - self._not_responding - {touched}
+        known = {lamp.id for lamp in self._home.lamps} - set(self._not_responding) - {touched}
         for command in calibration.restore_commands():
             if command.lamp_id in known:
                 self._switch(command)
@@ -356,6 +358,32 @@ class Controller:
         self._log_event(room_id, view.text)
         if view.phase is Phase.DONE:
             self._unsaved_results = dict(view.results)
+
+    def _lamp_responding(self, lamp_id: str, *, responding: bool, now: float) -> None:
+        """Håller reda på om lampan svarar. Rummet är okänt så länge en av dess lampor inte gör det.
+
+        Bara ändringen sparas som en händelse, eftersom utgången kan säga samma sak flera gånger.
+        """
+        was_responding = lamp_id not in self._not_responding
+        if responding == was_responding:
+            return
+        room = self._home.room_of(lamp_id)
+        lamp = next(lamp for lamp in room.lamps if lamp.id == lamp_id)
+        if responding:
+            del self._not_responding[lamp_id]
+            text = f"{lamp.name} svarar igen."
+            if not any(other.id in self._not_responding for other in room.lamps):
+                text += f" Automatiken i {room.name} tar över igen."
+        else:
+            self._not_responding[lamp_id] = now
+            text = (
+                f"{lamp.name} svarar inte. Läget i {room.name} är okänt, och automatiken "
+                "lämnar rummets lampor som de är tills lampan svarar igen."
+            )
+        # En lampa som slutar svara har ofta slagits av med strömbrytaren, vilket
+        # säger att någon är hemma, så det loggas bara när man felsöker.
+        logger.debug("%s %s", lamp_id, "svarar igen" if responding else "svarar inte")
+        self._log_event(room.id, text)
 
     def _changed_outside(self, lamp_id: str, state: rules.LampState) -> None:
         """En lampa ändrades med fjärrkontroll eller app: det räknas som manuell styrning."""
@@ -417,7 +445,9 @@ class Controller:
             room_id: memory for room_id, memory in self._memory.items() if room_id in self._room_ids
         }
         self._lamps = {lamp_id: state for lamp_id, state in self._lamps.items() if lamp_id in kept}
-        self._not_responding &= kept
+        self._not_responding = {
+            lamp_id: since for lamp_id, since in self._not_responding.items() if lamp_id in kept
+        }
         self._fusion.replace_home(home, self._clock.now())
         self._evaluate()
         self._notify()
@@ -437,7 +467,7 @@ class Controller:
         return lambda: self._listeners.remove(listener)
 
     def snapshot(self) -> Snapshot:
-        rooms = self._fusion.rooms()
+        rooms = self._presence()
         zones = self._fusion.zones()
         return Snapshot(
             tracks=self._fusion.tracks(),
@@ -481,11 +511,34 @@ class Controller:
         # Källan som mätte senast ligger sist, eftersom den läggs in på nytt varje gång.
         return next(reversed(by_source.values()), None) if by_source else None
 
+    def _presence(self) -> dict[str, Presence]:
+        """Läget i varje rum: sammanvägningens, men okänt där en lampa inte svarar."""
+        presence = dict(self._fusion.rooms())
+        for room in self._home.rooms:
+            silent_since = [
+                since
+                for lamp in room.lamps
+                if (since := self._not_responding.get(lamp.id)) is not None
+            ]
+            if not silent_since:
+                continue
+            fused = presence[room.id]
+            if fused.status is Occupancy.UNKNOWN:
+                silent_since.append(fused.since)
+            # Läget har varit okänt sedan det första felet.
+            presence[room.id] = Presence(Occupancy.UNKNOWN, min(silent_since))
+        return presence
+
     def _evaluate(self) -> None:
-        presence = self._fusion.rooms()
+        presence = self._presence()
         room_states = {
             room.id: rules.RoomState(
-                presence[room.id], self._room_lux(room.id), self._memory.get(room.id, {})
+                presence[room.id],
+                self._room_lux(room.id),
+                self._memory.get(room.id, {}),
+                not_responding=tuple(
+                    lamp.name for lamp in room.lamps if lamp.id in self._not_responding
+                ),
             )
             for room in self._home.rooms
         }
@@ -499,13 +552,13 @@ class Controller:
         self._wake_at = result.wake_at
 
     def _switch(self, command: LampCommand) -> None:
-        # Förklaringen säger var någon är, så den loggas bara när man felsöker.
+        # Tänd, släck och dimra säger ungefär när någon kom och gick, och
+        # förklaringen säger var någon är, så de loggas bara när man felsöker.
         if not command.on:
-            logger.info("Släcker %s", command.lamp_id)
+            logger.debug("Släcker %s", command.lamp_id)
         elif command.brightness == rules.FULL_BRIGHTNESS:
-            logger.info("Tänder %s", command.lamp_id)
+            logger.debug("Tänder %s", command.lamp_id)
         else:
-            # En dimring säger när ett rum blev tomt, så den loggas bara när man felsöker.
             logger.debug("Dimrar %s till %d %%", command.lamp_id, command.brightness)
         logger.debug("%s: %s", command.lamp_id, command.reason)
         self._lamps[command.lamp_id] = rules.LampState(command.on, command.brightness)

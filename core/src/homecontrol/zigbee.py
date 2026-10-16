@@ -31,8 +31,10 @@ med `LampStateReported`.
 * **Lampprofiler.** Hur kommandot ser ut avgörs av lampans profil (se
   `Profile`), till exempel IKEA TRÅDFRI:s egenheter.
 
-Inga gränser för hur ofta lamporna får styras finns än; alla kommandon går
-ut genom `ZigbeeOutput._set`, där en sådan gräns i så fall läggs in.
+* **Styrgräns.** Varje lampa får bara ett fåtal kommandon i sekunden (se
+  `LampLimit`). Ett kommando som gränsen stoppar skjuts upp och skickas från
+  `tick` så fort lampan får styras igen; kommer ett nyare kommando till samma
+  lampa under tiden gäller det i stället.
 
 Utgången arbetar i kärnans händelseloop. Meddelanden från brokern lämnas till
 `ZigbeeOutput.handle` och meddelanden ut läggs i en kö som skickas i
@@ -57,6 +59,7 @@ from homecontrol.config import MqttSettings
 from homecontrol.connectors import Defer, LampCommand, LampStateReported, ObservationSink
 from homecontrol.home import Home, LampProfile
 from homecontrol.lampdevices import FoundLamp
+from homecontrol.lamplimit import LampLimit
 
 logger = logging.getLogger(__name__)
 
@@ -469,6 +472,9 @@ class ZigbeeOutput:
         """De placerade lamporna, efter id i hemmet."""
         self._pending: dict[str, _Pending] = {}
         self._flush_scheduled = False
+        self._limit = LampLimit(now)
+        self._held: dict[str, _Pending] = {}
+        """Kommandon som styrgränsen har skjutit upp, det senaste per lampa."""
         self._place_lamps(home)
 
     # --- Det kärnan anropar ---
@@ -600,6 +606,7 @@ class ZigbeeOutput:
         self._transactions.clear()
         self._later.clear()
         self._pending.clear()
+        self._held.clear()
         for lamp_id in self._lamps:
             self._gone(lamp_id)
 
@@ -630,6 +637,7 @@ class ZigbeeOutput:
         for _, topic, payload in due:
             if self._publish is not None:
                 self._publish(topic, payload)
+        self._release_held()
         self._sync_groups()
         self._ask_lamps()
 
@@ -797,6 +805,9 @@ class ZigbeeOutput:
             external = on != status.on or (
                 on and abs(level - status.brightness) > BRIGHTNESS_TOLERANCE
             )
+        if external:
+            # Den som ändrade lampan vill ha den så; ett uppskjutet kommando gäller inte längre.
+            self._held.pop(lamp_id, None)
         status.gone = False
         status.on = on
         status.brightness = level
@@ -842,6 +853,8 @@ class ZigbeeOutput:
         status = self._lamps[lamp_id]
         status.state_known = False
         status.expected = None
+        # Kärnan räknar om och skickar det som behövs när läget har lästs igen.
+        self._held.pop(lamp_id, None)
         if ask_again_now:
             status.asked_at = None
         if status.gone:
@@ -921,9 +934,33 @@ class ZigbeeOutput:
         )
 
     def _flush(self) -> None:
-        """Skickar de väntande kommandona, med ett gruppkommando per rum där det går."""
+        """Skickar de väntande kommandona som styrgränsen släpper igenom. Resten skjuts upp."""
         self._flush_scheduled = False
         pending, self._pending = self._pending, {}
+        allowed = {}
+        for lamp_id, item in pending.items():
+            # Ett nytt kommando ersätter ett som har skjutits upp.
+            self._held.pop(lamp_id, None)
+            if self._limit.allow(lamp_id):
+                allowed[lamp_id] = item
+            else:
+                self._held[lamp_id] = item
+        self._send_now(allowed)
+
+    def _release_held(self) -> None:
+        """Skickar de uppskjutna kommandona till lampor som får styras igen."""
+        released = {}
+        for lamp_id in list(self._held):
+            status = self._lamps.get(lamp_id)
+            if status is not None and not status.state_known:
+                # Som i `send`: kärnan räknar om när lampans läge har lästs.
+                del self._held[lamp_id]
+            elif self._limit.allow(lamp_id):
+                released[lamp_id] = self._held.pop(lamp_id)
+        self._send_now(released)
+
+    def _send_now(self, pending: Mapping[str, _Pending]) -> None:
+        """Skickar kommandona, med ett gruppkommando per rum där det går."""
         by_room: dict[str, dict[str, _Pending]] = {}
         for lamp_id, item in pending.items():
             by_room.setdefault(item.room_id, {})[lamp_id] = item
@@ -941,10 +978,7 @@ class ZigbeeOutput:
     def _set(self, target: str, profile: Profile, setting: Setting, lamp_ids: list[str]) -> None:
         """Skickar en inställning till en lampa eller grupp. Alla lampkommandon går ut här.
 
-        En gräns för hur ofta lamporna får styras läggs in här. Kärnan skickar
-        inte om ett beslut som inte har ändrats, så gränsen måste skjuta upp
-        det senaste kommandot per lampa eller grupp (och skicka det från
-        `tick`), inte tappa det; annars fastnar lampan i fel läge.
+        Styrgränsen har redan släppt igenom kommandot (se `_flush`).
         """
         if self._publish is None:
             return

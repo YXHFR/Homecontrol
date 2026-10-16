@@ -12,8 +12,8 @@ standardvärden; varje rum har egna i sina inställningar.
 
 1. **Lampkalibrering.** Medan lampornas eget ljus mäts (se calibration.py)
    pausar automatiken i rummet, och kalibreringen styr lamporna.
-2. **Okänt läge.** När en sensor i rummet har slutat svara lämnas lamporna som
-   de är, så att ingen blir lämnad i mörker på grund av ett fel.
+2. **Okänt läge.** När en sensor eller lampa i rummet har slutat svara lämnas
+   lamporna som de är, så att ingen blir lämnad i mörker på grund av ett fel.
 3. **Manuell styrning.** Har någon styrt en lampa för hand pausar automatiken
    i rummet tills det har varit tomt i hela släckfördröjningen.
 4. **Dagsljus.** Släck när någon är i rummet och den justerade ljusnivån har
@@ -87,6 +87,11 @@ class RoomState:
     """Senast uppmätta ljusnivå, eller None om ingen källa har mätt den än."""
     memory: Memory = field(default_factory=dict)
     """Det regelmotorn minns om rummet sedan förra beslutet (se `RuleResult.memory`)."""
+    not_responding: tuple[str, ...] = ()
+    """Namnen på rummets lampor som inte svarar, så att förklaringen kan nämna dem.
+
+    Läget (`presence`) är då redan okänt; fältet används bara till texten.
+    """
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,8 @@ class Situation:
     """Läget för var och en av rummets lampor."""
     memory: Memory
     now: float
+    not_responding: tuple[str, ...] = ()
+    """Namnen på rummets lampor som inte svarar."""
 
     @property
     def settings(self) -> RoomSettings:
@@ -217,9 +224,11 @@ class UnknownRoom:
     def decide(self, situation: Situation) -> Verdict:
         if situation.presence.status is not Occupancy.UNKNOWN:
             return NO_OPINION
+        lamps = situation.not_responding
+        cause = f"{_join(lamps)} inte svarar" if lamps else "en sensor inte svarar"
         return Verdict(
             Decision(
-                f"Läget i {situation.room.name} är okänt eftersom en sensor inte svarar, "
+                f"Läget i {situation.room.name} är okänt eftersom {cause}, "
                 "så lamporna lämnas som de är."
             )
         )
@@ -432,6 +441,7 @@ def evaluate(
             lamps={lamp.id: lamps.get(lamp.id, UNKNOWN_LAMP) for lamp in room.lamps},
             memory=state.memory,
             now=now,
+            not_responding=state.not_responding,
         )
         decision: Decision | None = None
         remembered = dict(state.memory)
@@ -556,6 +566,13 @@ def duration(seconds: float) -> str:
     if rest or not minutes:
         parts.append("1 sekund" if rest == 1 else f"{rest} sekunder")
     return " och ".join(parts)
+
+
+def _join(names: Sequence[str]) -> str:
+    """Namnen uppräknade: "Taklampa", "Taklampa och Golvlampa", "A, B och C"."""
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} och {names[-1]}"
 
 
 def _format_lux(value: float) -> str:

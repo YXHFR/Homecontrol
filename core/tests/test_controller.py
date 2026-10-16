@@ -86,15 +86,29 @@ def test_broken_output_does_not_stop_the_others(caplog: pytest.LogCaptureFixture
     assert "kunde inte ta emot" in caplog.text
 
 
-def test_log_says_which_lamp_but_not_where_someone_is(caplog: pytest.LogCaptureFixture) -> None:
+def test_switching_is_not_logged_at_info(caplog: pytest.LogCaptureFixture) -> None:
+    """Tänd och släck säger ungefär när någon kom och gick, så de syns inte på INFO."""
     caplog.set_level("INFO", logger="homecontrol.controller")
+    controller, clock, lamps = make()
+
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+    controller.observe(radar_sees((1, 1)))
+    controller.observe(radar_sees())
+    clock.advance_to(10 * 60)
+    controller.tick()
+
+    assert lamps.history[-1].on is False
+    assert caplog.text == ""
+
+
+def test_switching_is_logged_when_debugging(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("DEBUG", logger="homecontrol.controller")
     controller, _, _ = make()
 
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
     controller.observe(radar_sees((1, 1)))
 
-    assert "Tänder taklampa" in caplog.text
-    assert "Vardagsrum" not in caplog.text
+    assert caplog.records[0].getMessage() == "Tänder taklampa"
 
 
 @pytest.mark.parametrize("lux", [-1.0, math.nan, math.inf])

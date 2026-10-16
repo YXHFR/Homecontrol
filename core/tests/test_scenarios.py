@@ -12,7 +12,14 @@ import pytest
 
 from homecontrol.connectors import LampStateReported
 from homecontrol.home import RoomSettings, ZoneKind
-from homes import home_with_settings, home_with_zones, side_by_side_home, two_floor_home, zone
+from homes import (
+    home_with_settings,
+    home_with_zones,
+    side_by_side_home,
+    two_floor_home,
+    two_lamp_home,
+    zone,
+)
 from scenario import Scenario
 
 SOFA = zone("soffa", ZoneKind.STILL, 0.5, 2.5, 2, 1.5)
@@ -667,3 +674,70 @@ def test_lamp_dimmed_with_a_remote_is_not_turned_up_by_presence() -> None:
     scenario.controller.observe(LampStateReported("taklampa", on=True, brightness=30))
     scenario.wait(minutes=5)
     assert len(scenario.lamps.history) == 1  # inga nya kommandon efter rapporten
+
+
+def test_a_lamp_that_stops_responding_makes_the_room_unknown_until_it_responds() -> None:
+    """En lampa slutar svara: rummet blir okänt och automatiken lämnar det orört.
+
+    Kartan varnar för lampan. När lampan svarar igen tar automatiken över, och
+    rummet som har varit tomt hela tiden släcks.
+    """
+    (
+        Scenario()
+        .light_level(10)
+        .person_enters()
+        .expect_lamp_on()
+        .lamp_stops_responding()
+        .expect_room("okänt")
+        .expect_lamp_warning()
+        .expect_explanation("Taklampa inte svarar")
+        .expect_event("Taklampa svarar inte")
+        .person_leaves()
+        .wait(minutes=10)
+        .expect_room("okänt")
+        .expect_lamp_switches(True)
+        .lamp_responds_again()
+        .expect_room("tomt")
+        .expect_lamp_warning(False)
+        .expect_event("Taklampa svarar igen. Automatiken i Vardagsrum tar över igen.")
+        .expect_lamp_off()
+    )
+
+
+def test_a_lamp_that_responds_again_is_lit_when_someone_is_in_the_dark_room() -> None:
+    """Medan lampan inte svarar tänds den inte. När den svarar igen tänds den."""
+    (
+        Scenario()
+        .light_level(10)
+        .lamp_stops_responding()
+        .person_enters()
+        .wait(seconds=30)
+        .expect_room("okänt")
+        .expect_lamp_switches()
+        .lamp_responds_again()
+        .expect_room("upptaget")
+        .expect_lamp_on()
+    )
+
+
+def test_the_room_stays_unknown_while_any_of_its_lamps_is_silent() -> None:
+    (
+        Scenario(two_lamp_home())
+        .light_level(10)
+        .lamp_stops_responding("taklampa")
+        .lamp_stops_responding("golvlampa")
+        .expect_explanation("Taklampa och Golvlampa inte svarar", "taklampa")
+        .lamp_responds_again("taklampa")
+        .expect_room("okänt")
+        .expect_explanation("Golvlampa inte svarar", "taklampa")
+        .lamp_responds_again("golvlampa")
+        .expect_room("tomt")
+    )
+
+
+def test_clicking_a_lamp_now_and_then_is_never_stopped() -> None:
+    """Klick i livevyn med en sekunds mellanrum går alltid fram, hur många det än blir."""
+    scenario = Scenario().light_level(10)
+    for i in range(20):
+        scenario.switch_lamp(i % 2 == 0).wait(seconds=1)
+    scenario.expect_lamp_switches(*(i % 2 == 0 for i in range(20)))
