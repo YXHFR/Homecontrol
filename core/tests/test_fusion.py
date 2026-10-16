@@ -10,7 +10,7 @@ import math
 import pytest
 
 from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved
-from homecontrol.fusion import HOLD_SECONDS, STILL_HOLD_MAX_SECONDS, Fusion, Occupancy
+from homecontrol.fusion import HOLD_SECONDS, STILL_HOLD_MAX_SECONDS, Fusion, Occupancy, Presence
 from homecontrol.home import Home, Point, ZoneKind
 from homes import home_with_zones, one_room_home, radar_sees, room, side_by_side_home, zone
 
@@ -250,3 +250,52 @@ def test_unknown_nodes_are_warned_about_once_each_and_not_without_end(
 
 def home_with_sofa() -> Home:
     return home_with_zones(zone("soffa", ZoneKind.STILL, 0.5, 2.5, 2, 1.5))
+
+
+@pytest.mark.parametrize("doorway", [True, False])
+def test_track_lost_for_a_moment_is_not_taken_through_a_wall(doorway: bool) -> None:
+    """Radarn i A tappar Anna en kort stund, när Bo står en halvmeter bort i B.
+
+    Genom en vägg kan Bo inte ta över Annas spår. Genom en dörröppning kan
+    han det, men då finns Anna kvar i A så snart radarn ser henne igen.
+    """
+    home = side_by_side_home(doorway=doorway)
+    fusion = Fusion(home, now=0)
+    fusion.radar(seen_from(home, "nod-a", (4.8, 2)), now=0)
+    fusion.radar(seen_from(home, "nod-a"), now=0.1)  # ett kort avbrott
+
+    fusion.radar(seen_from(home, "nod-b", (5.3, 2)), now=0.2)
+    if not doorway:
+        assert fusion.rooms()["a"].status is Occupancy.OCCUPIED
+    fusion.radar(seen_from(home, "nod-a", (4.8, 2)), now=0.3)
+
+    assert fusion.rooms()["a"].status is Occupancy.OCCUPIED
+    assert fusion.rooms()["b"].status is Occupancy.OCCUPIED
+
+
+def test_weaker_wifi_motion_releases_the_sofa_from_now_and_not_before() -> None:
+    """Rörelsen blir för svag för att hålla kvar spåret. Rummet är tomt från då, inte före."""
+    home = home_with_sofa()
+    fusion = Fusion(home, now=0)
+    fusion.motion(MotionObserved("sim", NODE.id, True, score=0.9), now=0)
+    fusion.radar(radar_sees((1, 3), home=home), now=0)
+    fusion.radar(radar_sees(home=home), now=1)
+
+    fusion.motion(MotionObserved("sim", NODE.id, True, score=0.3), now=600)
+
+    assert fusion.tracks() == ()
+    assert fusion.rooms()[ROOM.id] == Presence(Occupancy.VACANT, 600)
+
+
+def test_wifi_from_a_lost_source_releases_the_sofa_from_then() -> None:
+    """Wi-Fi-mätningen kommer från en annan källa än radarn och tystnar."""
+    home = home_with_sofa()
+    fusion = Fusion(home, now=0)
+    fusion.motion(MotionObserved("wifi", NODE.id, True), now=0)
+    fusion.radar(radar_sees((1, 3), home=home), now=0)
+    fusion.radar(radar_sees(home=home), now=1)
+
+    fusion.source_lost("wifi", now=600)
+
+    assert fusion.tracks() == ()
+    assert fusion.rooms()[ROOM.id].since == 600

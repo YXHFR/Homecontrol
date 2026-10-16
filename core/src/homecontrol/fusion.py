@@ -113,6 +113,8 @@ class _Track:
     velocity: Point
     seen_at: float
     lost_at: float | None = None
+    wifi_held_at: float = -math.inf
+    """Senast Wi-Fi-rörelsen höll kvar spåret efter att radarn tappade det."""
 
 
 @dataclass(frozen=True)
@@ -135,8 +137,8 @@ class Fusion:
         self._lost_nodes: set[str] = set()
         self._motion: dict[str, float] = {}
         """Wi-Fi-rörelsens poäng per nod, 0 när den inte känner någon rörelse."""
-        self._motion_stopped: dict[str, float] = {}
-        """När nodens Wi-Fi-rörelse senast upphörde."""
+        self._motion_source: dict[str, str] = {}
+        """Källan som Wi-Fi-rörelsen per nod kom från. Den kan vara en annan än radarns."""
         self._warned: set[tuple[str, str]] = set()
         """Problem som det redan har varnats för, så att loggen inte fylls tio gånger i sekunden."""
         self._rooms: dict[str, Presence] = {}
@@ -186,21 +188,21 @@ class Fusion:
             )
             return
         # Rörelsen gäller från nu. Det som skulle ha släppts innan dess släpps först.
-        self._expire(now)
+        self._before_change(now)
         self._heard(observation.source_id, observation.node_id)
-        node_id = observation.node_id
-        if not observation.moving and self._motion.get(node_id, 0.0) > 0:
-            self._motion_stopped[node_id] = now
-        self._motion[node_id] = score if observation.moving else 0.0
+        self._motion[observation.node_id] = score if observation.moving else 0.0
+        self._motion_source[observation.node_id] = observation.source_id
         self._refresh(now)
 
     def source_lost(self, source_id: str, now: float) -> None:
         """Källans noder räknas som borta tills de hörs av igen. Deras spår glöms."""
-        self._expire(now)
+        self._before_change(now)
         nodes = {node_id for node_id, source in self._source_of.items() if source == source_id}
         self._lost_nodes |= nodes
-        for node_id in nodes:
-            self._motion.pop(node_id, None)
+        for node_id, source in list(self._motion_source.items()):
+            if source == source_id:
+                del self._motion_source[node_id]
+                self._motion.pop(node_id, None)
         self._tracks = [track for track in self._tracks if track.node_id not in nodes]
         self._refresh(now)
 
@@ -215,7 +217,7 @@ class Fusion:
         räknades om med den gamla placeringen. Det gör också spår som inte
         längre är i sitt rum. Noden ser dem snart igen om de finns kvar.
         """
-        self._expire(now)
+        self._before_change(now)
         before = self._placed
         self._use(home)
         kept = self._placed.keys()
@@ -233,8 +235,23 @@ class Fusion:
         self._source_of = {node: source for node, source in self._source_of.items() if node in kept}
         self._lost_nodes &= kept
         self._motion = {node: score for node, score in self._motion.items() if node in kept}
+        self._motion_source = {
+            node: source for node, source in self._motion_source.items() if node in kept
+        }
         self._warned.clear()  # en nod som just placerats kan ha varnats för förut
         self._refresh(now)
+
+    def _before_change(self, now: float) -> None:
+        """Gör klart det som gällde fram till nu, innan Wi-Fi-rörelsen eller hemmet ändras.
+
+        Det som skulle ha släppts innan nu släpps. Spår som Wi-Fi-rörelsen håller
+        kvar just nu märks med tiden, så att de hålls kvar åtminstone hit även
+        om rörelsen upphör eller blir för svag.
+        """
+        self._expire(now)
+        for track in self._held():
+            if self._held_by_wifi(track):
+                track.wifi_held_at = now
 
     def _use(self, home: Home) -> None:
         self._home = home
@@ -301,6 +318,7 @@ class Fusion:
             lambda track, detection: (
                 _distance(_predict(track, now), detection) <= _reach(track, now)
                 and _may_take_over(track, detection)
+                and _passable(track, placed.room, detection)
             ),
             now,
         )
@@ -310,8 +328,7 @@ class Fusion:
             left,
             lambda track, detection: (
                 _distance(track.position, detection) <= SAME_PERSON
-                and not track.room.blocks(track.position, detection)
-                and not placed.room.blocks(track.position, detection)
+                and _passable(track, placed.room, detection)
             ),
             now,
         )
@@ -371,18 +388,18 @@ class Fusion:
             return lost_at
         if ZoneKind.STILL in kinds:
             longest = lost_at + STILL_HOLD_MAX_SECONDS
-            if self._wifi_weighted(track.room) >= WIFI_HOLD:
+            if self._held_by_wifi(track):
                 return longest
-            # Rörelsen kan ha upphört efter att radarn tappade personen. Då räknas
-            # personen som kvar tills rörelsen upphörde, om det var mer än de vanliga
-            # 10 sekunderna efter att radarn tappade den.
-            if track.room.settings.wifi_weight >= WIFI_HOLD:  # poängen är högst 1
-                stopped = max(
-                    (self._motion_stopped.get(node.id, -math.inf) for node in track.room.nodes),
-                    default=-math.inf,
-                )
-                return min(longest, max(lost_at + HOLD_SECONDS, stopped))
+            # Wi-Fi-rörelsen kan ha hållit kvar personen en stund efter att radarn
+            # tappade den. Då räknas personen som kvar till dess, om det var mer än
+            # de vanliga 10 sekunderna.
+            return min(longest, max(lost_at + HOLD_SECONDS, track.wifi_held_at))
         return lost_at + HOLD_SECONDS
+
+    def _held_by_wifi(self, track: _Track) -> bool:
+        """Om Wi-Fi-rörelsen väger nog för att hålla kvar ett tappat spår i en stillhetszon."""
+        in_still_zone = any(zone.kind is ZoneKind.STILL for zone in _zones_at(track))
+        return in_still_zone and self._wifi_weighted(track.room) >= WIFI_HOLD
 
     def _wifi_weighted(self, room: Room) -> float:
         """Wi-Fi-rörelsen i rummet gånger rummets vikt."""
@@ -428,6 +445,13 @@ def _zones_at(track: _Track) -> list[Zone]:
     return [zone for zone in track.room.zones if zone.contains(track.position)]
 
 
+def _passable(track: _Track, room: Room, detection: Point) -> bool:
+    """Om personen kan ha gått från spåret till målet utan att gå genom en vägg."""
+    return track.room.id == room.id or not (
+        track.room.blocks(track.position, detection) or room.blocks(track.position, detection)
+    )
+
+
 def _may_take_over(track: _Track, detection: Point) -> bool:
     """Ett kvarhållet spår i en stillhetszon tas bara över av ett mål i zonen eller intill.
 
@@ -464,6 +488,7 @@ def _follow(track: _Track, detection: Point, placed: _Placed, now: float) -> Non
     if track.lost_at is not None:
         # Radarn hittade personen igen. Var den har varit under tiden vet ingen.
         track.position, track.velocity = detection, _STILL
+        track.wifi_held_at = -math.inf
     else:
         predicted = _predict(track, now)
         dx, dy = detection.x - predicted.x, detection.y - predicted.y
