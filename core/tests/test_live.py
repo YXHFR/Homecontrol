@@ -10,11 +10,12 @@ from starlette.testclient import WebSocketDenialResponse
 from starlette.websockets import WebSocketDisconnect
 
 from homecontrol.app import create_app
+from homecontrol.clock import SystemClock
 from homecontrol.connectors import LightLevelObserved, TargetsObserved
 from homecontrol.controller import Controller
 from homecontrol.home import DEFAULT_OFF_AFTER_EMPTY_SECONDS as OFF_AFTER_EMPTY_SECONDS
 from homecontrol.live import create_live_router, run_timer
-from homecontrol.simulation import SimulatedLampOutput
+from homecontrol.simulation import DEFAULT_DAYLIGHT_LUX, SimulatedLampOutput
 from homes import FLOOR, at, one_room_home
 
 
@@ -43,25 +44,66 @@ def test_streams_home_and_state_and_lights_the_lamp() -> None:
             "room_id": "vardagsrum",
             "x": 2.5,
             "y": 2.0,
+            "virtual": True,
         }
 
+        # Simuleringen börjar påslagen och mörk.
         state = ws.receive_json()
         assert state["type"] == "state"
         assert not lamp_on(state)
+        assert state["simulation"] == {
+            "enabled": True,
+            "speed": 1,
+            "daylight": DEFAULT_DAYLIGHT_LUX,
+            "persons": [],
+        }
+        assert state["rooms"][0]["lux"] == DEFAULT_DAYLIGHT_LUX
 
-        ws.send_json({"type": "set_light_level", "room_id": "vardagsrum", "lux": 10})
-        assert ws.receive_json()["rooms"][0]["lux"] == 10
+        ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 6.0, "y": 2.0})
+        state = receive_until(ws, lambda s: s["simulation"]["persons"])
+        assert state["simulation"]["persons"] == [{"id": "1", "floor_id": FLOOR, "x": 6, "y": 2}]
+        assert not lamp_on(state)
 
-        ws.send_json({"type": "move_person", "floor_id": FLOOR, "x": 2.5, "y": 2.0})
-        state = ws.receive_json()
+        ws.send_json({"type": "move_person", "person_id": "1", "floor_id": FLOOR, "x": 2.5, "y": 2})
+        state = receive_until(ws, lamp_on)
         assert state["targets"] == [{"floor_id": FLOOR, "x": 2.5, "y": 2.0}]
-        assert lamp_on(state)
         assert "mörkt" in state["lamps"][0]["explanation"]
 
-        ws.send_json({"type": "remove_person"})
-        state = ws.receive_json()
+        ws.send_json({"type": "remove_person", "person_id": "1"})
+        state = receive_until(ws, lambda s: not s["simulation"]["persons"])
         assert state["targets"] == []
         assert not state["rooms"][0]["occupied"]
+
+
+def test_daylight_speed_and_simulation_switch() -> None:
+    with TestClient(app()) as client, client.websocket_connect("/api/live") as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "set_daylight", "lux": 250})
+        state = receive_until(ws, lambda s: s["simulation"]["daylight"] == 250)
+        assert state["rooms"][0]["lux"] == 250
+
+        ws.send_json({"type": "set_speed", "speed": 60})
+        receive_until(ws, lambda s: s["simulation"]["speed"] == 60)
+
+        ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 1, "y": 1})
+        receive_until(ws, lambda s: s["targets"])
+
+        # Avslaget läge: personerna och ljusnivåerna försvinner och tiden går normalt.
+        ws.send_json({"type": "set_simulation", "enabled": False})
+        state = receive_until(ws, lambda s: not s["simulation"]["enabled"])
+        assert state["simulation"]["speed"] == 1
+        assert state["simulation"]["persons"] == []
+        assert state["targets"] == []
+        assert state["rooms"][0]["lux"] is None
+
+        # Kommandon till ett avslaget läge ignoreras.
+        ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 1, "y": 1})
+        ws.send_json({"type": "set_simulation", "enabled": True})
+        state = receive_until(ws, lambda s: s["simulation"]["enabled"])
+        assert state["simulation"]["persons"] == []
+        assert state["rooms"][0]["lux"] == 250
 
 
 def test_invalid_messages_are_ignored() -> None:
@@ -70,18 +112,32 @@ def test_invalid_messages_are_ignored() -> None:
         ws.receive_json()
         ws.receive_json()
         for bad in [
-            '{"type": "move_person", "floor_id": "plan", "x": "NaN", "y": 0}',
-            '{"type": "move_person", "x": 1, "y": 1}',
+            '{"type": "add_person", "floor_id": "plan", "x": "NaN", "y": 0}',
+            '{"type": "add_person", "x": 1, "y": 1}',
+            '{"type": "set_speed", "speed": 1000}',
+            '{"type": "set_daylight", "lux": -1}',
+            '{"type": "set_simulation", "enabled": "kanske"}',
             "inte json",
             '{"type": "?"}',
         ]:
             ws.send_text(bad)
-        ws.send_json({"type": "move_person", "floor_id": FLOOR, "x": 1e9, "y": 0})
-        ws.send_json({"type": "remove_person"})
+        ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 1e9, "y": 0})
+        ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 1, "y": 1})
 
         # Bara det sista, giltiga meddelandet har nått kärnan.
-        assert ws.receive_json()["targets"] == []
-        assert application.state.source.person is None
+        state = receive_until(ws, lambda s: s["simulation"]["persons"])
+        assert state["targets"] == [{"floor_id": FLOOR, "x": 1, "y": 1}]
+        assert state["simulation"]["speed"] == 1
+        assert state["simulation"]["daylight"] == DEFAULT_DAYLIGHT_LUX
+
+
+def receive_until(ws: Any, condition: Callable[[dict[str, Any]], Any]) -> dict[str, Any]:
+    """Läser lägen tills ett uppfyller villkoret. Kärnan kan skicka flera på vägen."""
+    for _ in range(20):
+        state: dict[str, Any] = ws.receive_json()
+        if condition(state):
+            return state
+    raise AssertionError("Läget blev aldrig det väntade")
 
 
 def test_refuses_other_origins() -> None:
@@ -124,8 +180,10 @@ def test_without_simulation_commands_are_ignored_but_state_streams() -> None:
     application.include_router(create_live_router(controller, None, {"testserver"}))
     with TestClient(application) as client, client.websocket_connect("/api/live") as ws:
         ws.receive_json()
-        ws.send_json({"type": "move_person", "floor_id": FLOOR, "x": 1, "y": 1})
-        assert ws.receive_json()["targets"] == []
+        ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 1, "y": 1})
+        state = ws.receive_json()
+        assert state["targets"] == []
+        assert state["simulation"] is None
         controller.observe(TargetsObserved("radar", (at(1, 1),)))
         assert ws.receive_json()["targets"] == [{"floor_id": FLOOR, "x": 1, "y": 1}]
 
@@ -167,14 +225,12 @@ def test_accepts_same_origin() -> None:
         assert ws.receive_json()["type"] == "home"
 
 
-class OffsetClock:
+class OffsetClock(SystemClock):
     """Riktig tid plus en förskjutning, så att testet kan hoppa nästan tre minuter."""
 
     def __init__(self) -> None:
         self.offset = 0.0
-
-    def now(self) -> float:
-        return time.monotonic() + self.offset
+        super().__init__(lambda: time.monotonic() + self.offset)
 
 
 def test_timer_survives_an_error() -> None:
@@ -230,3 +286,24 @@ def test_timer_switches_off_the_lamp_when_the_delay_is_over() -> None:
 async def _until(condition: Any) -> None:
     while not condition():
         await asyncio.sleep(0.01)
+
+
+def test_timer_follows_a_faster_clock() -> None:
+    """Vid 60× släcks ett tomt rum efter tre sekunder i stället för tre minuter."""
+
+    async def scenario() -> None:
+        clock = SystemClock()
+        lamps = SimulatedLampOutput()
+        controller = Controller(one_room_home(), clock, [lamps])
+        timer = asyncio.create_task(run_timer(controller, clock))
+        controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+        controller.observe(TargetsObserved("sim", (at(1, 1),)))
+        controller.observe(TargetsObserved("sim", ()))
+        await asyncio.sleep(0)  # timern väntar nu i tre minuter
+
+        # Takten ändras medan timern väntar; den ska räkna om sin väntan.
+        clock.set_speed(1000)
+        await asyncio.wait_for(_until(lambda: not lamps.states["taklampa"]), timeout=2)
+        timer.cancel()
+
+    asyncio.run(scenario())

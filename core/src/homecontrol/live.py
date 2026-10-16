@@ -4,16 +4,21 @@ Protokollet är JSON. Kärnan skickar:
 
 * ``{"type": "home", ...}`` en gång vid anslutning: våningarna med sina rum,
   väggar och lampor. Punkter är ``[x, y]`` i meter med origo uppe till vänster.
-* ``{"type": "state", ...}`` vid anslutning och efter varje ändring.
+  En lampa som ingen riktig lamputgång styr är ``"virtual": true``.
+* ``{"type": "state", ...}`` vid anslutning och efter varje ändring. Fältet
+  ``simulation`` visar simuleringsläget, eller är null om det inte finns.
 
-Livevyn skickar kommandon till låtsaskällan:
+Livevyn skickar kommandon till simuleringen:
 
-* ``{"type": "move_person", "floor_id": "entreplan", "x": 1.0, "y": 2.0}``
-* ``{"type": "remove_person"}``
-* ``{"type": "set_light_level", "room_id": "vardagsrum", "lux": 10}``
+* ``{"type": "set_simulation", "enabled": true}``
+* ``{"type": "add_person", "floor_id": "entreplan", "x": 1.0, "y": 2.0}``
+* ``{"type": "move_person", "person_id": "1", "floor_id": "entreplan", "x": 1.0, "y": 2.0}``
+* ``{"type": "remove_person", "person_id": "1"}``
+* ``{"type": "set_daylight", "lux": 10}``
+* ``{"type": "set_speed", "speed": 60}``
 
-Kommandona går in i kärnan genom Simulering, precis som en riktig källa.
-Utan simulering ignoreras de, men läget strömmas ändå.
+Personerna och dagsljuset går in i kärnan genom låtsaskällan, precis som en
+riktig källa. Utan simulering ignoreras kommandona, men läget strömmas ändå.
 """
 
 import asyncio
@@ -29,10 +34,10 @@ import anyio.abc
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from homecontrol.clock import Clock
+from homecontrol.clock import PacedClock
 from homecontrol.controller import Controller, Snapshot
 from homecontrol.home import Home, Point
-from homecontrol.simulation import SimulatedSource
+from homecontrol.simulation import Simulation, SimulationView, Speed
 
 logger = logging.getLogger(__name__)
 
@@ -43,29 +48,53 @@ _MAX_LUX = 200_000.0  # starkt solljus
 Coordinate = Annotated[float, Field(ge=-_MAX_COORDINATE, le=_MAX_COORDINATE, allow_inf_nan=False)]
 
 
+PersonId = Annotated[str, Field(max_length=64)]
+FloorId = Annotated[str, Field(max_length=64)]
+
+
+class SetSimulation(BaseModel):
+    type: Literal["set_simulation"]
+    enabled: bool
+
+
+class AddPerson(BaseModel):
+    type: Literal["add_person"]
+    floor_id: FloorId
+    x: Coordinate
+    y: Coordinate
+
+
 class MovePerson(BaseModel):
     type: Literal["move_person"]
-    floor_id: str = Field(max_length=64)
+    person_id: PersonId
+    floor_id: FloorId
     x: Coordinate
     y: Coordinate
 
 
 class RemovePerson(BaseModel):
     type: Literal["remove_person"]
+    person_id: PersonId
 
 
-class SetLightLevel(BaseModel):
-    type: Literal["set_light_level"]
-    room_id: str = Field(max_length=64)
+class SetDaylight(BaseModel):
+    type: Literal["set_daylight"]
     lux: float = Field(ge=0, le=_MAX_LUX, allow_inf_nan=False)
 
 
-_client_message: TypeAdapter[MovePerson | RemovePerson | SetLightLevel] = TypeAdapter(
-    Annotated[MovePerson | RemovePerson | SetLightLevel, Field(discriminator="type")]
+class SetSpeed(BaseModel):
+    type: Literal["set_speed"]
+    speed: Speed
+
+
+ClientMessage = SetSimulation | AddPerson | MovePerson | RemovePerson | SetDaylight | SetSpeed
+
+_client_message: TypeAdapter[ClientMessage] = TypeAdapter(
+    Annotated[ClientMessage, Field(discriminator="type")]
 )
 
 
-def home_message(home: Home) -> dict[str, Any]:
+def home_message(home: Home, virtual_lamps: Set[str] = frozenset()) -> dict[str, Any]:
     return {
         "type": "home",
         "name": home.name,
@@ -90,6 +119,7 @@ def home_message(home: Home) -> dict[str, Any]:
                         "room_id": room.id,
                         "x": lamp.position.x,
                         "y": lamp.position.y,
+                        "virtual": lamp.id in virtual_lamps,
                     }
                     for room in floor.rooms
                     for lamp in room.lamps
@@ -100,7 +130,7 @@ def home_message(home: Home) -> dict[str, Any]:
     }
 
 
-def state_message(snapshot: Snapshot) -> dict[str, Any]:
+def state_message(snapshot: Snapshot, simulation: SimulationView | None) -> dict[str, Any]:
     return {
         "type": "state",
         "targets": [
@@ -114,15 +144,32 @@ def state_message(snapshot: Snapshot) -> dict[str, Any]:
             {"id": lamp.lamp_id, "on": lamp.on, "explanation": lamp.explanation}
             for lamp in snapshot.lamps
         ],
+        "simulation": None if simulation is None else simulation_message(simulation),
+    }
+
+
+def simulation_message(simulation: SimulationView) -> dict[str, Any]:
+    return {
+        "enabled": simulation.enabled,
+        "speed": simulation.speed,
+        "daylight": simulation.daylight,
+        "persons": [
+            {"id": person_id, "floor_id": t.floor_id, "x": t.position.x, "y": t.position.y}
+            for person_id, t in simulation.persons.items()
+        ],
     }
 
 
 def create_live_router(
     controller: Controller,
-    source: SimulatedSource | None,
+    simulation: Simulation | None,
     allowed_hosts: Set[str] = frozenset(),
+    virtual_lamps: Set[str] = frozenset(),
 ) -> APIRouter:
-    """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som livevyn får nås på."""
+    """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som livevyn får nås på.
+
+    `virtual_lamps` är lamporna som bara finns i simuleringen, utan någon riktig lampa.
+    """
     router = APIRouter()
 
     @router.websocket("/api/live")
@@ -136,19 +183,22 @@ def create_live_router(
 
         changed = asyncio.Event()
         changed.set()
-        unsubscribe = controller.subscribe(changed.set)
+        unsubscribes = [controller.subscribe(changed.set)]
+        if simulation is not None:
+            unsubscribes.append(simulation.subscribe(changed.set))
 
         async def send_states() -> None:
-            await websocket.send_json(home_message(controller.home))
+            await websocket.send_json(home_message(controller.home, virtual_lamps))
             while True:
                 await changed.wait()
                 changed.clear()
-                await websocket.send_json(state_message(controller.snapshot()))
+                view = None if simulation is None else simulation.view()
+                await websocket.send_json(state_message(controller.snapshot(), view))
 
         async def receive_commands(group: anyio.abc.TaskGroup) -> None:
             try:
                 while True:
-                    _handle(source, await websocket.receive_text())
+                    _handle(simulation, await websocket.receive_text())
             except WebSocketDisconnect:
                 # Att klienten går är det normala slutet; då behövs inga fler lägen.
                 group.cancel_scope.cancel()
@@ -162,7 +212,8 @@ def create_live_router(
         except* WebSocketDisconnect:
             pass  # klienten hann gå medan ett läge skickades
         finally:
-            unsubscribe()
+            for unsubscribe in unsubscribes:
+                unsubscribe()
 
     return router
 
@@ -191,8 +242,8 @@ def _known_host(host: str, allowed_hosts: Set[str]) -> bool:
     return True
 
 
-def _handle(source: SimulatedSource | None, text: str) -> None:
-    if source is None:
+def _handle(simulation: Simulation | None, text: str) -> None:
+    if simulation is None:
         return
     try:
         message = _client_message.validate_json(text)
@@ -200,25 +251,32 @@ def _handle(source: SimulatedSource | None, text: str) -> None:
         logger.warning("Ogiltigt meddelande från livevyn ignoreras")
         return
     match message:
-        case MovePerson(floor_id=floor_id, x=x, y=y):
-            source.move_person(floor_id, Point(x, y))
-        case RemovePerson():
-            source.remove_person()
-        case SetLightLevel(room_id=room_id, lux=lux):
-            source.set_light_level(room_id, lux)
+        case SetSimulation(enabled=enabled):
+            simulation.set_enabled(enabled)
+        case AddPerson(floor_id=floor_id, x=x, y=y):
+            simulation.add_person(floor_id, Point(x, y))
+        case MovePerson(person_id=person_id, floor_id=floor_id, x=x, y=y):
+            simulation.move_person(person_id, floor_id, Point(x, y))
+        case RemovePerson(person_id=person_id):
+            simulation.remove_person(person_id)
+        case SetDaylight(lux=lux):
+            simulation.set_daylight(lux)
+        case SetSpeed(speed=speed):
+            simulation.set_speed(speed)
 
 
-async def run_timer(controller: Controller, clock: Clock) -> None:
+async def run_timer(controller: Controller, clock: PacedClock) -> None:
     """Anropar `controller.tick()` när klockan når `wake_at`. Körs tills den avbryts.
 
-    `clock` måste gå i takt med asyncios egen klocka, som `SystemClock` gör.
+    Väntetiden räknas om när kärnan ändras och när klockans takt ändras, så
+    att en släckning kommer i tid även när tiden går fortare.
     """
     changed = asyncio.Event()
-    unsubscribe = controller.subscribe(changed.set)
+    unsubscribes = [controller.subscribe(changed.set), clock.subscribe(changed.set)]
     try:
         while True:
             wake_at = controller.wake_at
-            timeout = None if wake_at is None else max(0.0, wake_at - clock.now())
+            timeout = None if wake_at is None else clock.real_seconds_until(wake_at)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(changed.wait(), timeout)
             changed.clear()
@@ -228,4 +286,5 @@ async def run_timer(controller: Controller, clock: Clock) -> None:
                 # Timern måste leva vidare, annars släcks inga tomma rum.
                 logger.exception("Fel när kärnan väcktes")
     finally:
-        unsubscribe()
+        for unsubscribe in unsubscribes:
+            unsubscribe()
