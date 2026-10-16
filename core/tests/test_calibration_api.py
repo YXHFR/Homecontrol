@@ -69,7 +69,7 @@ def test_start_shows_progress_and_cancel_puts_the_lamp_back() -> None:
 
         assert c.delete("/api/calibration").status_code == 204
         state = receive_until(ws, lambda s: s["calibration"]["phase"] == "avbruten")
-        assert "avbröts för hand" in state["calibration"]["text"]
+        assert "tryckte på Avbryt" in state["calibration"]["text"]
         assert state["lamps"][0]["on"] is False
 
 

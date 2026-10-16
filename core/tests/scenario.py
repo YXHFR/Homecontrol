@@ -31,7 +31,7 @@ import pytest
 
 from homecontrol.calibration import Phase, with_contributions
 from homecontrol.clock import ManualClock
-from homecontrol.connectors import LampStateReported
+from homecontrol.connectors import LampCommand, LampStateReported
 from homecontrol.controller import Controller, LampView
 from homecontrol.fusion import HOLD_SECONDS, Occupancy
 from homecontrol.home import Capability, Home, Point
@@ -59,14 +59,9 @@ class Scenario:
         self.clock = ManualClock()
         # Det som kärnan skjuter upp tills den är klar med ett beslut (se connectors.Defer).
         self._deferred: list[Callable[[], None]] = []
-        self.lamps = SimulatedLampOutput(on_change=self._lamp_changed if lamp_light else None)
-        self.controller = Controller(
-            self.home,
-            self.clock,
-            [self.lamps],
-            wall_clock=self.clock.now,
-            on_calibrated=self._save_calibration,
-        )
+        self.lamps = SimulatedLampOutput()
+        self.controller = Controller(self.home, self.clock, [self.lamps], wall_clock=self.clock.now)
+        self.controller.on_calibrated(self._save_calibration)
         if lamps_report:
             self.lamps.report_new_lamps(self.home, self.controller.observe)
         # Samma simuleringsläge som i livevyn, men med en klocka som scenariot styr.
@@ -77,6 +72,8 @@ class Scenario:
             self.clock,
             floor_ids=(floor.id for floor in self.home.floors),
             daylight=None,
+            lamps=self.lamps if lamp_light else None,
+            defer=self._deferred.append,
         )
         # Personernas namn i scenariot och deras id i låtsaskällan.
         self._persons: dict[str, str] = {}
@@ -113,8 +110,7 @@ class Scenario:
     def lamp_changed_with_remote(self, on: bool, lamp: str | None = None) -> Self:
         """Någon tänder eller släcker lampan med fjärrkontrollen."""
         lamp_id = self._lamp_view(lamp).lamp_id
-        self.lamps.states[lamp_id] = on
-        self._lamp_changed()
+        self.lamps.send(LampCommand(lamp_id, on, reason="Fjärrkontrollen"))
         self.controller.observe(LampStateReported(lamp_id, on=on, external=True))
         self._run_deferred()
         return self
@@ -405,13 +401,6 @@ class Scenario:
         return self
 
     # --- Hjälpfunktioner ---
-
-    def _lamp_changed(self) -> None:
-        if self._measure_lamp_light not in self._deferred:
-            self._deferred.append(self._measure_lamp_light)
-
-    def _measure_lamp_light(self) -> None:
-        self.source.set_lamp_light(self.lamps.light_by_room(self.controller.home))
 
     def _run_deferred(self) -> None:
         while self._deferred:

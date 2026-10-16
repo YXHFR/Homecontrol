@@ -29,7 +29,7 @@ from homecontrol.trust import trusted
 
 
 def calibration_saver(changes: HomeChanges) -> CalibratedListener:
-    """Sparar lampornas bidrag i hemmet när en kalibrering är klar (`Controller(on_calibrated=)`).
+    """Sparar lampornas bidrag i hemmet när en kalibrering är klar (`Controller.on_calibrated`).
 
     Sparandet sker i bakgrunden. Går det inte att spara visar kalibreringen det.
     """
@@ -41,7 +41,9 @@ def calibration_saver(changes: HomeChanges) -> CalibratedListener:
                 lambda home: with_contributions(home, results), changes.store.save_home
             )
         except StoreUnavailable:
-            changes.controller.calibration_not_saved()
+            changes.controller.calibration_not_saved(
+                "Databasen svarade inte. Försök igen om en stund."
+            )
 
     def start_saving(results: Mapping[str, float]) -> None:
         task = asyncio.get_running_loop().create_task(save(dict(results)))

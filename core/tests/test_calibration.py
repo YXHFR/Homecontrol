@@ -123,7 +123,7 @@ def test_light_that_never_settles_stops_the_calibration() -> None:
     scenario = Scenario(lamp_light=True).daylight(10).start_calibration()
     for second in range(0, round(STEP_TIMEOUT_SECONDS) + 10, 5):
         scenario.daylight(10 if second % 10 else 60).wait(seconds=5)
-    scenario.expect_calibration("avbruten", "blev aldrig stilla").expect_lamp_light(0)
+    scenario.expect_calibration("avbruten", "blev aldrig jämnt").expect_lamp_light(0)
 
 
 def test_losing_the_sensor_stops_the_calibration() -> None:
@@ -185,7 +185,7 @@ def test_cancelling_puts_the_lamps_back() -> None:
         .start_calibration()
         .expect_lamp_off()
         .cancel_calibration()
-        .expect_calibration("avbruten", "avbröts för hand")
+        .expect_calibration("avbruten", "tryckte på Avbryt")
         .expect_lamp_on()
     )
 

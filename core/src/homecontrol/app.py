@@ -6,7 +6,7 @@ Nya API-vägar läggs under /api så att de aldrig krockar med webbgränssnittet
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping, Set
+from collections.abc import AsyncIterator, Set
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -65,28 +65,8 @@ def create_app(
     home = home if home is not None else example_home()
     zigbee = None if mqtt is None else ZigbeeOutput(home, defer=defer_in_loop)
     real_lamps = zigbee_lamps if zigbee is not None else _nothing_real
-
-    def lamp_light_changed() -> None:
-        # Kärnan är mitt i ett beslut, så sensorerna mäter strax efteråt.
-        # Innan servern har startat finns ingen loop. Lamporna har inte tänts
-        # än, och sensorerna mäter nästa gång en lampa ändras.
-        with contextlib.suppress(RuntimeError):
-            defer_in_loop(measure_lamp_light)
-
-    def measure_lamp_light() -> None:
-        source.set_lamp_light(lamps.light_by_room(source.home))
-
-    lamps = SimulatedLampOutput(real_lamps, on_change=lamp_light_changed)
-
-    def save_calibration(results: Mapping[str, float]) -> None:
-        saver(results)
-
-    controller = Controller(
-        home,
-        clock,
-        [lamps] if zigbee is None else [lamps, zigbee],
-        on_calibrated=save_calibration,
-    )
+    lamps = SimulatedLampOutput(real_lamps)
+    controller = Controller(home, clock, [lamps] if zigbee is None else [lamps, zigbee])
     lamps.report_new_lamps(home, controller.observe)
     cards = (
         None
@@ -116,6 +96,8 @@ def create_app(
         floor_ids=(floor.id for floor in home.floors),
         enabled=not real_hardware(home),
         real_hardware=real_hardware,
+        lamps=lamps,
+        defer=defer_in_loop,
     )
     if history is not None:
         # Låtsaspersonerna ska inte hamna i historiken bland de riktiga spåren.
@@ -182,7 +164,7 @@ def create_app(
         home_store if home_store is not None else MemoryStore(),
         on_home_replaced=use_home,
     )
-    saver: Callable[[Mapping[str, float]], None] = calibration_saver(changes)
+    controller.on_calibrated(calibration_saver(changes))
     app.include_router(create_editor_router(changes, allowed_hosts))
     app.include_router(create_calibration_router(controller, allowed_hosts))
 

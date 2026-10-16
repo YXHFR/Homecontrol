@@ -540,10 +540,6 @@ def stop_calibrating(memory: Memory) -> Memory:
     return {key: value for key, value in memory.items() if key not in (CALIBRATING, BRIGHT_SINCE)}
 
 
-def is_calibrating(memory: Memory) -> bool:
-    return CALIBRATING in memory
-
-
 def is_manual(memory: Memory) -> bool:
     return MANUAL in memory
 

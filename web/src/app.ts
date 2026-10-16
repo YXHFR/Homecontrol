@@ -120,7 +120,8 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     if (shownFloor === null) {
       return;
     }
-    // Guiden jämför själv med det den visar.
+    // Guiden visar kalibreringen, som inte ingår i jämförelsen nedan, och
+    // hoppar själv över att bygga om när inget har ändrats.
     calibration.show(shownFloor, lastState?.calibration ?? null);
     const panels = JSON.stringify([shownFloor, lastState?.rooms, lastState?.lamps, lastState?.events]);
     if (panels === shownPanels) {

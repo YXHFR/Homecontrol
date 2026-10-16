@@ -115,14 +115,8 @@ class Controller:
         clock: Clock,
         outputs: Sequence[LampOutput],
         wall_clock: Callable[[], float] = time.time,
-        on_calibrated: CalibratedListener | None = None,
     ) -> None:
-        """`wall_clock` ger klockslaget som Unix-tid, bara för att visa när något hände.
-
-        `on_calibrated` får lampornas uppmätta bidrag när en lampkalibrering är
-        klar, och ska spara dem i hemmet (se `calibration.with_contributions`).
-        Kärnan använder dem när hemmet har bytts med `replace_home`.
-        """
+        """`wall_clock` ger klockslaget som Unix-tid, bara för att visa när något hände."""
         self._home = home
         self._clock = clock
         self._wall_clock = wall_clock
@@ -142,7 +136,7 @@ class Controller:
         self._wake_at: float | None = None
         self._listeners: list[Listener] = []
         self._room_ids = {room.id for room in home.rooms}
-        self._on_calibrated = on_calibrated
+        self._on_calibrated: CalibratedListener | None = None
         self._calibration: RoomCalibration | None = None
         self._calibration_view: CalibrationView | None = None
         self._unsaved_results: dict[str, float] | None = None
@@ -231,6 +225,14 @@ class Controller:
         self._evaluate()
         self._notify()
 
+    def on_calibrated(self, listener: CalibratedListener) -> None:
+        """Lämnar lampornas uppmätta bidrag till `listener` när en lampkalibrering är klar.
+
+        Den ska spara dem i hemmet (se `calibration.with_contributions`).
+        Kärnan använder dem när hemmet har bytts med `replace_home`.
+        """
+        self._on_calibrated = listener
+
     def start_calibration(self, room_id: str) -> str | None:
         """Startar lampkalibreringen i ett rum. Returnerar None, eller varför det inte går."""
         room = next((room for room in self._home.rooms if room.id == room_id), None)
@@ -276,20 +278,24 @@ class Controller:
         """Avbryter lampkalibreringen som pågår och ställer tillbaka lamporna."""
         if self._calibration is None:
             return
-        self._end_calibration(self._calibration, "den avbröts för hand", restore=True)
+        self._end_calibration(self._calibration, "någon tryckte på Avbryt", restore=True)
         self._evaluate()
         self._notify()
 
-    def calibration_not_saved(self) -> None:
-        """Lampornas bidrag från den senaste kalibreringen gick inte att spara."""
+    def calibration_not_saved(self, reason: str) -> None:
+        """Lampornas bidrag från den senaste kalibreringen gick inte att spara.
+
+        `reason` säger varför, till exempel att databasen inte svarade, som en hel mening.
+        """
         view = self._calibration_view
         if view is None or view.phase is not Phase.DONE:
             return
+        room = next((room for room in self._home.rooms if room.id == view.room_id), None)
+        name = room.name if room is not None else "rummet"
         self._calibration_view = replace(
             view,
             phase=Phase.FAILED,
-            text="Lampkalibreringen blev klar men gick inte att spara, eftersom databasen "
-            "inte svarade. Försök igen om en stund.",
+            text=f"Lampkalibreringen i {name} blev klar men gick inte att spara. {reason}",
             results={},
         )
         self._notify()
@@ -316,7 +322,7 @@ class Controller:
             for command in calibration.commands():
                 self._switch(command)
         if calibration.finished:
-            self._end_calibration(calibration, None, restore=True)
+            self._end_calibration(calibration, failure=None, restore=True)
         else:
             self._calibration_view = calibration.view()
 

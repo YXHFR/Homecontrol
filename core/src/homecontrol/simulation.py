@@ -14,9 +14,9 @@ Riktiga rumskort simuleras inte. Låtsaspersonerna syns bara för de virtuella
 radarerna, och dagsljuset sätts bara i rum utan riktiga kort, så att
 simuleringen aldrig blandas med det de riktiga korten mäter.
 
-De virtuella lamporna kan lysa upp de virtuella ljussensorerna (se
+De virtuella lamporna kan lysa upp de simulerade ljussensorerna (se
 `SimulatedLampOutput.light_by_room`), så att lampkalibreringen går att prova.
-Ljuset avtar med avståndet från lampan till rummets rumskort.
+Ljuset avtar med avståndet från lampan till rummets ljussensor.
 """
 
 import logging
@@ -29,6 +29,7 @@ from typing import Literal, get_args
 
 from homecontrol.clock import SpeedControl
 from homecontrol.connectors import (
+    Defer,
     LampCommand,
     LampStateReported,
     LightLevelObserved,
@@ -39,6 +40,7 @@ from homecontrol.connectors import (
     SourceLost,
 )
 from homecontrol.home import Capability, Home, Node, Point, Room, Target
+from homecontrol.rules import FULL_BRIGHTNESS
 
 logger = logging.getLogger(__name__)
 
@@ -278,19 +280,14 @@ class SimulatedLampOutput:
     `real_lamps` ger lamporna i ett hem som en riktig lamputgång styr. De är
     inte virtuella, så den här utgången varken rapporterar eller styr dem.
 
-    `on_change` anropas när en virtuell lampa har fått ett kommando, till
-    exempel för att låta lampornas ljus nå de simulerade sensorerna (se
-    `light_by_room`). Den anropas mitt i kärnans beslut och får därför inte
-    lämna observationer direkt, utan ska skjuta upp det (se `connectors.Defer`).
+    Den som prenumererar (`subscribe`) får veta när en virtuell lampa har fått
+    ett kommando, till exempel simuleringen, som låter lampornas ljus nå de
+    simulerade sensorerna (se `light_by_room`).
     """
 
-    def __init__(
-        self,
-        real_lamps: Callable[[Home], Set[str]] = lambda _: frozenset(),
-        on_change: Callable[[], None] | None = None,
-    ) -> None:
+    def __init__(self, real_lamps: Callable[[Home], Set[str]] = lambda _: frozenset()) -> None:
         self._real_lamps = real_lamps
-        self._on_change = on_change
+        self._listeners: list[Listener] = []
         self._real: Set[str] = frozenset()
         self.states: dict[str, bool] = {}
         self.brightness: dict[str, int] = {}
@@ -304,8 +301,16 @@ class SimulatedLampOutput:
         self.states[command.lamp_id] = command.on
         self.brightness[command.lamp_id] = command.brightness
         self.history.append(command)
-        if self._on_change is not None:
-            self._on_change()
+        for listener in list(self._listeners):
+            listener()
+
+    def subscribe(self, listener: Listener) -> Callable[[], None]:
+        """Anropar `listener` efter varje kommando till en virtuell lampa, mitt i kärnans beslut.
+
+        Returnerar en funktion som avslutar.
+        """
+        self._listeners.append(listener)
+        return lambda: self._listeners.remove(listener)
 
     def light_by_room(self, home: Home) -> dict[str, float]:
         """Hur mycket de tända virtuella lamporna lyser upp varje rums ljussensor, i lux.
@@ -324,7 +329,7 @@ class SimulatedLampOutput:
                 if self.states.get(lamp.id) is not True:
                     continue
                 distance = max(1.0, math.dist(lamp.position, sensor))
-                share = self.brightness.get(lamp.id, 100) / 100
+                share = self.brightness.get(lamp.id, FULL_BRIGHTNESS) / FULL_BRIGHTNESS
                 total += LAMP_LUX_AT_ONE_METER * share / distance**2
             light[room.id] = total
         return light
@@ -372,6 +377,10 @@ class Simulation:
 
     `floor_ids` är hemmets våningar. Personer på andra våningar avvisas. Utan
     `daylight` lämnas ljusnivån i rummen okänd tills någon ställer den.
+
+    Med `lamps` och `defer` lyser de virtuella lamporna upp de simulerade sensorerna.
+    Lamporna styrs mitt i kärnans beslut, så sensorerna mäter först när
+    `defer` kör, en gång för alla kommandon i samma beslut.
     """
 
     def __init__(
@@ -384,8 +393,15 @@ class Simulation:
         enabled: bool = True,
         daylight: float | None = DEFAULT_DAYLIGHT_LUX,
         real_hardware: Callable[[Home], bool] = lambda _: False,
+        lamps: SimulatedLampOutput | None = None,
+        defer: Defer | None = None,
     ) -> None:
         self._source = source
+        self._lamps = lamps
+        self._defer = defer
+        self._measure_scheduled = False
+        if lamps is not None and defer is not None:
+            lamps.subscribe(self._lamp_changed)
         self._real_hardware = real_hardware
         self._sink = sink
         self._clock = clock
@@ -478,6 +494,21 @@ class Simulation:
         """Anropar `listener` efter varje ändring. Returnerar en funktion som avslutar."""
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
+
+    def _lamp_changed(self) -> None:
+        if self._measure_scheduled or self._defer is None:
+            return  # sensorerna mäter redan strax
+        self._measure_scheduled = True
+        try:
+            self._defer(self._measure_lamp_light)
+        except Exception:
+            self._measure_scheduled = False  # annars mäter sensorerna aldrig mer
+            raise
+
+    def _measure_lamp_light(self) -> None:
+        self._measure_scheduled = False
+        if self._lamps is not None:
+            self._source.set_lamp_light(self._lamps.light_by_room(self._source.home))
 
     def _speed_locked(self) -> bool:
         return self._real_hardware(self._source.home)

@@ -58,7 +58,13 @@ export function createCalibrationPanel(api: CalibrationApi): CalibrationPanel {
   const start = (id: string) => {
     problem = null;
     api.start(id).catch((error: unknown) => {
-      problem = error instanceof CoreError ? error.message : "Mätningen gick inte att starta.";
+      problem = error instanceof CoreError ? error.message : "Kalibreringen gick inte att starta.";
+      render();
+    });
+  };
+  const cancel = () => {
+    api.cancel().catch((error: unknown) => {
+      problem = error instanceof CoreError ? error.message : "Kalibreringen gick inte att avbryta.";
       render();
     });
   };
@@ -99,14 +105,11 @@ export function createCalibrationPanel(api: CalibrationApi): CalibrationPanel {
         element(
           "p",
           { className: "help" },
-          "Lamporna tänds och släcks en i taget. Rör inte lamporna och stå inte i vägen för " +
-            "rumskortet. Automatiken pausar under tiden.",
+          "Lamporna tänds och släcks en i taget. Rör inte lamporna, stå inte mellan lamporna " +
+            "och rumskortet och skugga inte sensorn. Automatiken pausar under tiden.",
         ),
-        element(
-          "div",
-          { className: "controls" },
-          button("Avbryt", () => void api.cancel().catch(() => undefined), "cancel"),
-        ),
+        ...(problem === null ? [] : [element("p", { className: "problem" }, problem)]),
+        element("div", { className: "controls" }, button("Avbryt", cancel, "cancel")),
       );
       return;
     }
@@ -155,7 +158,7 @@ export function createCalibrationPanel(api: CalibrationApi): CalibrationPanel {
             ),
           ]
         : [element("p", { className: latest.phase === "avbruten" ? "problem" : "" }, latest.text)];
-    const startLabel = latest === null ? "Starta mätningen" : latest.phase === "klar" ? "Kalibrera igen" : "Försök igen";
+    const startLabel = latest === null ? "Starta kalibreringen" : latest.phase === "klar" ? "Kalibrera igen" : "Försök igen";
     body.replaceChildren(
       ...intro,
       ...(results === null ? [] : [results]),
@@ -185,9 +188,15 @@ export function createCalibrationPanel(api: CalibrationApi): CalibrationPanel {
   };
 }
 
+/**
+ * Ungefär hur lång tid en mätning tar: lampans övergång och den tid ljuset ska
+ * vara jämnt (SETTLE_SECONDS och STABLE_SECONDS i kärnan), plus en halv
+ * sensormätning i snitt.
+ */
+const SECONDS_PER_MEASUREMENT = 3 + 12 + 2.5;
+
 /** Ungefär hur länge kalibreringen tar: en mätning utan lampor och två per lampa. */
 function minutes(lamps: number): string {
-  // Varje mätning tar ungefär en kvarts minut (se STABLE_SECONDS i kärnan).
-  const total = Math.max(1, Math.round(((1 + 2 * lamps) * 17) / 60));
+  const total = Math.max(1, Math.round(((1 + 2 * lamps) * SECONDS_PER_MEASUREMENT) / 60));
   return total === 1 ? "en minut" : `${total} minuter`;
 }

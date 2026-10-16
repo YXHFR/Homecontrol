@@ -270,9 +270,9 @@ Värdena inom parentes är standard och ändras per rum i kartredigeraren.
 Ljusnivån som reglerna använder är den uppmätta minus det ljus som rummets
 tända lampor själva ger vid ljussensorn (mindre när de är dimrade). Därför
 släcker en lampa aldrig sig själv för att den lyser upp rummet. Hur mycket
-varje lampa lyser upp sensorn mäts av lampkalibreringen, som kommer i ett
-senare steg; tills dess är bidraget 0. Under **Just nu** står båda värdena
-när de skiljer sig.
+varje lampa lyser upp sensorn mäts av lampkalibreringen (knappen **Mät
+lampornas ljus** under **Just nu**); innan en lampa är mätt är bidraget 0.
+Under **Just nu** står båda värdena när de skiljer sig.
 
 Kärnan antar inte att lamporna är släckta när den startar. Tills en lampa
 har berättat hur den är, eller kärnan själv har styrt den, är läget okänt.

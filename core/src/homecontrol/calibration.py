@@ -9,7 +9,7 @@ den uppmätta ljusnivån (se `rules.adjusted_lux`).
 
 Varje mätning väntar först ut lampans övergång, och sedan tills sensorn har
 visat samma ljusnivå en stund. Mätningen avbryts om ljusnivån aldrig blir
-stilla, om dagsljuset ändras kraftigt mellan två mätningar med lamporna
+jämnt, om dagsljuset ändras kraftigt mellan två mätningar med lamporna
 släckta (till exempel av ett moln), om sensorn tappas eller om en lampa
 slutar svara.
 
@@ -40,7 +40,7 @@ Rumskortets ljussensor mäter var femte sekund, så det blir minst två mätning
 STEP_TIMEOUT_SECONDS = 90.0
 """Har ljusnivån inte legat still efter så här lång tid avbryts kalibreringen."""
 STEADY_LUX = 2.0
-"""Så mycket ljusnivån får skifta under en mätning, i lux, och ändå räknas som stilla."""
+"""Så mycket ljusnivån får skifta under en mätning, i lux, och ändå räknas som jämn."""
 STEADY_SHARE = 0.05
 """Som `STEADY_LUX`, men som andel av ljusnivån. Den större gränsen gäller."""
 DRIFT_LUX = 10.0
@@ -207,12 +207,13 @@ class RoomCalibration:
         if value is None:
             if now >= self._measurement.gives_up_at:
                 self.fail(
-                    "ljusnivån blev aldrig stilla. Försök igen när ljuset är jämnare, "
+                    "ljuset blev aldrig jämnt. Försök igen när ljuset är stadigare, "
                     "gärna när det är mörkt ute"
                 )
             return False
         self._measured.append(value)
-        if self._steps[self._index].lamp_id is None and len(self._measured) > 1:
+        if self._steps[self._index].lamp_id is None and self._index > 0:
+            # Jämför med förra mätningen med släckta lampor, två mätningar bakåt.
             before, after = self._measured[-3], value
             if not _steady(after, before, DRIFT_LUX, DRIFT_SHARE):
                 self.fail(
@@ -281,11 +282,6 @@ class RoomCalibration:
 
     def _lamp(self, lamp_id: str) -> Lamp:
         return next(lamp for lamp in self._lamps if lamp.id == lamp_id)
-
-
-def expected_seconds(room: Room) -> float:
-    """Ungefär hur lång tid kalibreringen av rummet tar, om ljuset är stilla."""
-    return (1 + 2 * len(room.lamps)) * (SETTLE_SECONDS + STABLE_SECONDS + 2.5)
 
 
 def with_contributions(home: Home, results: Mapping[str, float]) -> Home:

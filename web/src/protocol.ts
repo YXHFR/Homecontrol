@@ -187,7 +187,7 @@ export interface Calibration {
   phase: "pågår" | "klar" | "avbruten";
   /** Vad som händer just nu, varför kalibreringen avbröts eller vad den kom fram till. */
   text: string;
-  /** Mätningen som pågår, från 1. */
+  /** Mätningen som pågår, från 1, eller antalet mätningar när kalibreringen är klar. */
   step: number;
   steps: number;
   /** Varje lampas eget ljus vid sensorn i lux, när kalibreringen är klar. */

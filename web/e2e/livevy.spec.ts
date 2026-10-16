@@ -74,7 +74,7 @@ test("lampkalibreringen mäter hallens taklampa och visar dess ljus", async ({ p
   await hall.getByRole("button", { name: "Mät lampornas ljus" }).click();
   const guide = page.getByRole("region", { name: "Lampkalibrering" });
   await expect(guide.getByRole("heading")).toHaveText("Lampkalibrering: Hall");
-  await guide.getByRole("button", { name: "Starta mätningen" }).click();
+  await guide.getByRole("button", { name: "Starta kalibreringen" }).click();
 
   await expect(guide).toContainText("Lampkalibreringen i Hall är klar", { timeout: 15_000 });
   // Den virtuella taklampan sitter drygt två meter från hallens rumskort.
