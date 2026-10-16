@@ -48,12 +48,11 @@ services:
       - db-socket:/var/run/postgresql:ro
       # Bara kärnan har den här volymen, och bara kärnans användare kan läsa kopian.
       - core-data:/var/lib/homecontrol
-    # Kärnan startar efter db-setup, men också om db-setup misslyckas, till
-    # exempel för att databasen inte blir frisk. Då används kopian av hemmet.
+    # Kärnan startar när db-setup har lyckats. Svarar inte databasen alls
+    # lyckas db-setup ändå, och kärnan startar med sin kopia av hemmet.
     depends_on:
       db-setup:
         condition: service_completed_successfully
-        required: false
 
   # Skapar och uppdaterar databasens tabeller, ställer in hur länge historiken
   # sparas och ger kärnans roll (homecontrol_core) rätt att läsa och skriva.
@@ -82,8 +81,10 @@ services:
     # Avbildens egen hälsokontroll gäller kärnans webbsida, som inte finns här.
     healthcheck:
       disable: true
-    # Startas även när databasen inte blir frisk, så att kärnan inte blir
-    # stående; db-setup misslyckas då, och kärnan startar med sin kopia.
+    # Startas även när databasen inte kommer igång. Svarar den inte alls
+    # avslutas db-setup utan fel, så att kärnan kan starta med sin kopia av
+    # hemmet. Alla andra fel (till exempel fel lösenord eller en ogiltig
+    # inställning för historiken) stoppar kärnan som vanligt.
     depends_on:
       db:
         condition: service_healthy

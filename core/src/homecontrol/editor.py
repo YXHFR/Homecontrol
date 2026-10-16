@@ -39,7 +39,6 @@ from fastapi.responses import JSONResponse
 
 from homecontrol import homefile
 from homecontrol.controller import Controller
-from homecontrol.databaselink import DatabaseLink, Fetch
 from homecontrol.home import Floor, Home, PlanImage, Point
 from homecontrol.images import StoredImage, image_type
 from homecontrol.trust import trusted
@@ -73,6 +72,16 @@ class HomeStore(Protocol):
         """Tar bort bilden och sparar hemmet på en gång."""
 
     def load_plan_image(self, floor_id: str) -> StoredImage | None: ...
+
+
+class DatabaseConnection(Protocol):
+    """Om kärnan har kontakt med databasen (se databaselink.py)."""
+
+    @property
+    def connected(self) -> bool: ...
+
+    def mark_lost(self) -> None:
+        """Kontakten har tappats; hemmet läses om från databasen när den svarar."""
 
 
 class MemoryStore:
@@ -126,7 +135,7 @@ class HomeChanges:
         controller: Controller,
         store: HomeStore,
         on_home_replaced: Callable[[Home], None] | None = None,
-        database: DatabaseLink | None = None,
+        database: DatabaseConnection | None = None,
     ) -> None:
         self.controller = controller
         self.store = store
@@ -166,13 +175,13 @@ class HomeChanges:
                 logger.exception("Kunde inte nå lagringen")
                 if self._database is not None:
                     # Ändringen kan ha hunnit sparas; hemmet läses om från databasen.
-                    self._database.lost()
+                    self._database.mark_lost()
                 raise StoreUnavailable from error
             # Nu är hemmet sparat och har en ny revision, vad som än händer i kärnan.
-            self._use(home)
+            self._hand_over(home)
             return home
 
-    async def resync(self, fetch: Fetch) -> None:
+    async def resync(self, fetch: Callable[[Home], Home]) -> None:
         """Läser hemmet med `fetch` och lämnar det till kärnan om det har ändrats.
 
         Används när databasen svarar igen. `fetch` får hemmet som kärnan
@@ -184,9 +193,9 @@ class HomeChanges:
             home = await anyio.to_thread.run_sync(fetch, current)
             if home != current:
                 logger.info("Hemmet i databasen skiljer sig från kopian; använder databasens")
-                self._use(home)
+                self._hand_over(home)
 
-    def _use(self, home: Home) -> None:
+    def _hand_over(self, home: Home) -> None:
         """Ger hemmet en ny revision och lämnar det till kärnan."""
         self._count += 1
         self.controller.replace_home(home)

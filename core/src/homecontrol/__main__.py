@@ -12,7 +12,9 @@ Export och import kräver databasen (HOMECONTROL_DATABASE). Efter en import
 startas kärnan om för att läsa in det nya hemmet.
 
 `förbered-databasen` körs av Docker Compose före kärnan och ansluter som
-databasens ägare. Kärnans roll får lösenordet i HOMECONTROL_CORE_DATABASE_PASSWORD.
+databasens ägare. Svarar inte databasen alls avslutas den ändå utan fel, så
+att kärnan kan starta med sin kopia av hemmet. Kärnans roll får lösenordet i
+HOMECONTROL_CORE_DATABASE_PASSWORD.
 Kärnan själv (med HOMECONTROL_PREPARE_DATABASE=false) kontrollerar då bara
 att tabellerna är aktuella.
 
@@ -34,7 +36,7 @@ import uvicorn
 from homecontrol import history, store
 from homecontrol.app import create_app
 from homecontrol.config import Settings
-from homecontrol.databaselink import DatabaseLink
+from homecontrol.databaselink import DatabaseLink, Fetch
 from homecontrol.editor import HomeStore
 from homecontrol.esphome import MIN_SECRET_LENGTH
 from homecontrol.home import Home
@@ -44,9 +46,12 @@ from homecontrol.zigbee import mqtt_connect
 
 logger = logging.getLogger("homecontrol")
 
+STARTUP_ATTEMPTS = 30
+"""Så många gånger kärnan försöker nå databasen vid start när den inte har någon kopia."""
 STARTUP_ATTEMPTS_WITH_COPY = 5
-"""Så många gånger kärnan försöker nå databasen vid start, med två sekunder emellan,
-innan den startar med kopian av hemmet."""
+"""Så många gånger kärnan försöker nå databasen vid start innan den startar med kopian."""
+STARTUP_RETRY_SECONDS = 2.0
+"""Väntan mellan försöken att nå databasen vid start."""
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -105,7 +110,7 @@ def serve(settings: Settings) -> None:
             home=home,
             home_store=home_store,
             database=database,
-            history=prepare_history(settings, database),
+            history=prepare_history(settings),
             esphome_secret=secret,
             mqtt=None if settings.mqtt is None else mqtt_connect(settings.mqtt),
         ),
@@ -124,7 +129,16 @@ def prepare_database_for_core(database: str, settings: Settings) -> None:
     """
     if settings.core_database_password is None:
         sys.exit("HOMECONTROL_CORE_DATABASE_PASSWORD är inte satt, se .env.example.")
-    with store.connect(database) as conn:
+    try:
+        conn = store.connect(database)
+    except psycopg.OperationalError:
+        if store.responds(database):
+            raise  # till exempel fel lösenord: då ska kärnan inte starta
+        # Bara när databasen inte svarar alls får kärnan starta ändå, med sin
+        # kopia av hemmet. Alla andra fel stoppar den (se compose.yaml).
+        logger.warning("Databasen svarar inte. Kärnan startar ändå och ansluter när den svarar")
+        return
+    with conn:
         store.migrate(conn)
         _configure_history(conn, settings)
         store.grant_core_role(conn, settings.core_database_password)
@@ -175,83 +189,78 @@ def open_home(settings: Settings) -> tuple[Home, HomeStore | None, DatabaseLink 
     bakgrunden. Utan kopia väntar kärnan på databasen.
     """
     if settings.database is None:
-        return load_or_seed_home(settings), None, None
-    database = store.DatabaseStore(settings.database, prepare=settings.prepare_database)
-    if settings.home_copy is None:
-        return load_or_seed_home(settings), database, DatabaseLink(database.fetch_home)
-    copy = HomeCopy(settings.home_copy)
-
-    def fetch(seed: Home) -> Home:
-        home = database.fetch_home(seed)
-        copy.save(home)
-        return home
-
-    home_store = CopyingStore(database, copy)
-    saved = copy.load()
-    if saved is None:
-        # Ingen kopia än, till exempel första gången: vänta på databasen som vanligt.
-        home = load_or_seed_home(settings)
-        copy.save(home)
-        return home, home_store, DatabaseLink(fetch)
-    for attempt in range(1, STARTUP_ATTEMPTS_WITH_COPY + 1):
-        try:
-            home = fetch(saved)
-        except HomeFileError as error:
-            sys.exit(_unreadable(error))
-        except (psycopg.OperationalError, store.SchemaOutdatedError) as error:
-            if attempt < STARTUP_ATTEMPTS_WITH_COPY:
-                logger.info("Databasen svarar inte än, försöker igen (%d)", attempt)
-                time.sleep(2.0)
-                continue
-            logger.warning(
-                "Databasen svarar inte (%s). Startar med kopian av hemmet i %s (%s); "
-                "ändringar kan inte sparas förrän databasen svarar igen",
-                type(error).__name__,
-                settings.home_copy,
-                _summary(saved),
-            )
-            return saved, home_store, DatabaseLink(fetch, connected=False)
-        logger.info("Läste in hemmet från databasen (%s)", _summary(home))
-        return home, home_store, DatabaseLink(fetch)
-    raise AssertionError("unreachable")
-
-
-def load_or_seed_home(settings: Settings) -> Home:
-    if settings.database is None:
         logger.warning("Ingen databas är inställd: visar exempelhemmet och sparar inget")
-        return example_home()
-    with store.connect(settings.database) as conn:
-        _migrate_or_check(conn, settings.prepare_database)
+        return example_home(), None, None
+
+    def prepare(conn: psycopg.Connection) -> None:
+        store.migrate(conn)
+        _configure_history(conn, settings)
+
+    database_store = store.DatabaseStore(
+        settings.database, prepare=prepare if settings.prepare_database else None
+    )
+    home_store: store.DatabaseStore | CopyingStore = database_store
+    saved = None
+    if settings.home_copy is not None:
+        copy = HomeCopy(settings.home_copy)
+        home_store = CopyingStore(database_store, copy)
+        saved = copy.load()
+    home, connected = _fetch_at_startup(home_store.fetch_home, saved)
+    if connected:
+        logger.info("Läste in hemmet från databasen (%s)", _summary(home))
+    else:
+        logger.warning(
+            "Databasen svarar inte. Startar med kopian av hemmet i %s (%s); "
+            "ändringar kan inte sparas förrän databasen svarar igen",
+            settings.home_copy,
+            _summary(home),
+        )
+    return home, home_store, DatabaseLink(home_store.fetch_home, connected=connected)
+
+
+def _fetch_at_startup(fetch: Fetch, saved: Home | None) -> tuple[Home, bool]:
+    """Hemmet i databasen och True, eller kopian (`saved`) och False om databasen inte svarar.
+
+    Har databasen inget hem läggs kopian in, eller exempelhemmet första
+    gången. Utan kopia väntar kärnan en minut på databasen och ger sedan upp
+    med `psycopg.OperationalError`, så att Docker startar om den.
+    """
+    seed = example_home() if saved is None else saved
+    attempts = STARTUP_ATTEMPTS if saved is None else STARTUP_ATTEMPTS_WITH_COPY
+    for attempt in range(1, attempts):
         try:
-            home = store.load_home(conn)
-        except HomeFileError as error:
-            # Till exempel ett hem som sparades innan en kontroll skärptes.
-            # Exempelhemmet läses inte in i stället, för då skrivs hemmet över.
-            sys.exit(_unreadable(error))
-        if home is None:
-            # Första starten: börja med exempelhemmet så att det finns något att se.
-            home = example_home()
-            store.save_home(conn, home)
-            logger.info("Inget hem var sparat, så exempelhemmet lades in")
-    logger.info("Läste in hemmet från databasen (%s)", _summary(home))
-    return home
+            return _fetch_or_exit(fetch, seed), True
+        except psycopg.OperationalError:
+            logger.info("Databasen svarar inte än, försöker igen (%d/%d)", attempt, attempts)
+            time.sleep(STARTUP_RETRY_SECONDS)
+    try:
+        return _fetch_or_exit(fetch, seed), True
+    except psycopg.OperationalError:
+        if saved is None:
+            raise
+        return saved, False
 
 
-def prepare_history(
-    settings: Settings, database: DatabaseLink | None = None
-) -> history.History | None:
+def _fetch_or_exit(fetch: Fetch, seed: Home) -> Home:
+    """Som `fetch`, men avslutar kärnan med en förklaring om databasen inte går att använda."""
+    try:
+        return fetch(seed)
+    except HomeFileError as error:
+        # Till exempel ett hem som sparades innan en kontroll skärptes. Varken
+        # kopian eller exempelhemmet används i stället, för då skrivs hemmet över.
+        sys.exit(_unreadable_message(error))
+    except store.SchemaOutdatedError as error:
+        sys.exit(str(error))
+
+
+def prepare_history(settings: Settings) -> history.History | None:
     """Skrivaren av historiken. Utan databas sparas ingen historik.
 
-    Får kärnan förbereda databasen ställs också in hur länge historiken sparas;
-    annars har `förbered-databasen` redan gjort det. Det hoppas över om kärnan
-    startade utan kontakt med databasen; skrivaren försöker ändå i bakgrunden.
+    Hur länge historiken sparas ställs in av `förbered-databasen`, eller av
+    `open_home` när kärnan själv får förbereda databasen.
     """
     if settings.database is None:
         return None
-    if settings.prepare_database and (database is None or database.connected):
-        with store.connect(settings.database) as conn:
-            store.migrate(conn)
-            _configure_history(conn, settings)
     return history.History(settings.database)
 
 
@@ -277,7 +286,7 @@ def _migrate_or_check(conn: psycopg.Connection, prepare: bool) -> None:
         sys.exit(str(error))
 
 
-def _unreadable(error: HomeFileError) -> str:
+def _unreadable_message(error: HomeFileError) -> str:
     return (
         f"Det sparade hemmet går inte att läsa: {error}\n"
         "Rätta hemfilen och läs in den med 'homecontrol importera', "

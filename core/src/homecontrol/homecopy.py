@@ -23,9 +23,9 @@ import secrets
 from pathlib import Path
 
 from homecontrol import homefile
-from homecontrol.editor import HomeStore
 from homecontrol.home import Home
 from homecontrol.images import StoredImage
+from homecontrol.store import DatabaseStore
 
 logger = logging.getLogger(__name__)
 
@@ -65,17 +65,24 @@ class HomeCopy:
             return None
         try:
             return homefile.loads(text)
-        except homefile.HomeFileError as error:
-            logger.warning("Kopian av hemmet i %s går inte att läsa: %s", self.path, error)
+        except homefile.HomeFileError:
+            # Inte felet i sig: det kan citera rummens id, som kan vara personliga.
+            logger.warning("Kopian av hemmet i %s går inte att läsa och används inte", self.path)
             return None
 
 
 class CopyingStore:
-    """Sparar i `store` och skriver sedan kopian, så att den följer det som är sparat."""
+    """Läser och sparar i databasen och skriver sedan kopian, så att den följer databasen."""
 
-    def __init__(self, store: HomeStore, copy: HomeCopy) -> None:
+    def __init__(self, store: DatabaseStore, copy: HomeCopy) -> None:
         self._store = store
         self._copy = copy
+
+    def fetch_home(self, seed: Home) -> Home:
+        """Som `DatabaseStore.fetch_home`."""
+        home = self._store.fetch_home(seed)
+        self._copy.save(home)
+        return home
 
     def save_home(self, home: Home) -> None:
         self._store.save_home(home)

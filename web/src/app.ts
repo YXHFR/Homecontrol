@@ -33,7 +33,7 @@ const STATUS_TEXT: Record<ConnectionStatus, string> = {
 
 const DATABASE_DOWN =
   "⚠ Databasen svarar inte. Lamporna styrs som vanligt med det senast sparade hemmet, " +
-  "men ändringar i kartredigeraren sparas inte och historiken sparas inte. " +
+  "men varken ändringar i kartredigeraren eller historiken sparas. " +
   "Kärnan försöker ansluta igen av sig själv.";
 
 /** Våningen som visas först: entréplanet om det finns, annars den första. */

@@ -94,6 +94,8 @@ så slipper du skriva `sudo` före varje `docker`. Kontrollera att allt finns:
 docker compose version
 ```
 
+Versionen ska vara 2.20 eller senare.
+
 Homecontrol fungerar på samma sätt på andra Linux-datorer (amd64 eller
 arm64). Docker Desktop på Mac och Windows går att använda för att prova, men
 rumskorten kräver en inställning där (se **Steg 6**).
@@ -616,7 +618,9 @@ hemmet sparas.
 - **Vid start:** svarar inte databasen inom några sekunder startar kärnan
   med kopian. Lamporna styrs som vanligt, och livevyn visar en varning:
   "Databasen svarar inte". Har kärnan ingen kopia än, till exempel första
-  gången, väntar den på databasen som förut.
+  gången, väntar den på databasen som förut. Svarar databasen men något
+  annat är fel, till exempel ett fel lösenord i `.env`, startar kärnan inte
+  (se **Om något inte fungerar**).
 - **Medan databasen är nere:** ändringar i kartredigeraren och resultatet
   av en lampkalibrering nekas med ett meddelande om varför. Historiken
   sparas inte; det som inte hinner skrivas tappas (se **Historik**).
@@ -632,9 +636,20 @@ hemmet sparas.
 
 Kopian innehåller inga lösenord eller nycklar, bara det som finns i en
 exporterad hemfil, och kan bara läsas av kärnan (filen
-`/var/lib/homecontrol/hem.json` i kärnans container). Vill du börja om från
-början tar du bort både `db-data` och `core-data`, annars läggs det gamla
-hemmet in igen från kopian.
+`/var/lib/homecontrol/hem.json` i kärnans container).
+
+Vill du börja om från början, eller ta bort dina uppgifter innan datorn
+lämnas bort, räcker det inte att ta bort databasen: då läggs hemmet in igen
+från kopian. Ta bort båda volymerna. De har mappens namn först, oftast
+`homecontrol`:
+
+```sh
+docker compose down
+docker volume rm homecontrol_db-data homecontrol_core-data
+```
+
+(`docker compose down --volumes` tar också bort MQTT:s och Zigbee2MQTT:s
+data, och då måste lamporna paras ihop igen.)
 
 ### Vem som når Homecontrol
 
@@ -676,10 +691,10 @@ Blir en del angripen eller går fel kommer den inte åt resten.
 
 - **Databasen:** `db-setup` skapar och uppdaterar tabellerna, ställer in
   hur länge historiken sparas och skapar kärnans roll om den saknas. Först
-  därefter startar kärnan (eller med sin kopia av hemmet om databasen inte
-  blir frisk, se **När databasen är nere**). Alla inloggningar i databasen kräver lösenord,
-  även inifrån datorn (se `postgres/pg_hba.conf`), och databasen nås inte
-  från nätverket.
+  därefter startar kärnan. Kommer databasen inte igång alls startar kärnan
+  ändå, med sin kopia av hemmet (se **När databasen är nere**). Alla
+  inloggningar i databasen kräver lösenord, även inifrån datorn (se
+  `postgres/pg_hba.conf`), och databasen nås inte från nätverket.
 - **MQTT:** vilka ämnen varje användare får läsa och skriva står i
   `mosquitto/acl`. Allt annat är förbjudet, och utan lösenord kommer ingen in.
   Mosquittos hälsokontroll har en egen användare med ett lösenord som

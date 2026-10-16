@@ -7,7 +7,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from homecontrol import store
-from homecontrol.__main__ import load_or_seed_home, main
+from homecontrol.__main__ import main, open_home
 from homecontrol.config import Settings
 from homecontrol.homefile import dumps, example_home, loads, to_document
 from homes import one_room_home
@@ -30,7 +30,7 @@ def test_import_needs_a_file_or_the_example(capsys: pytest.CaptureFixture[str]) 
 def test_first_start_saves_the_example_home(database: str) -> None:
     settings = Settings(host="127.0.0.1", port=8000, web_dir=Path("web"), database=database)
 
-    assert load_or_seed_home(settings) == example_home()
+    assert open_home(settings)[0] == example_home()
     with store.connect(database, attempts=1) as conn:
         assert store.load_home(conn) == example_home()
 
@@ -47,7 +47,7 @@ def test_start_stops_with_an_explanation_if_the_saved_home_is_invalid(database: 
     settings = Settings(host="127.0.0.1", port=8000, web_dir=Path("web"), database=database)
 
     with pytest.raises(SystemExit, match=r"(?s)går utanför rummet.*homecontrol importera"):
-        load_or_seed_home(settings)
+        open_home(settings)
 
 
 def test_start_uses_the_saved_home(database: str) -> None:
@@ -56,7 +56,7 @@ def test_start_uses_the_saved_home(database: str) -> None:
         store.save_home(conn, one_room_home())
     settings = Settings(host="127.0.0.1", port=8000, web_dir=Path("web"), database=database)
 
-    assert load_or_seed_home(settings) == one_room_home()
+    assert open_home(settings)[0] == one_room_home()
 
 
 def test_import_from_stdin_and_export_to_stdout(

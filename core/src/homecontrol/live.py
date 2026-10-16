@@ -20,9 +20,9 @@ Protokollet är JSON. Kärnan skickar:
   pågår eller den senaste (``phase`` är ``"pågår"``, ``"klar"`` eller
   ``"avbruten"``, och ``results`` är varje lampas bidrag i lux), eller är null.
   Kalibreringen startas genom API:t (se calibration_api.py). Fältet
-  ``database`` är ``{"connected": false}`` när kärnan inte har kontakt med
-  databasen och styr med sin kopia av hemmet (se databaselink.py), och null
-  när ingen databas är inställd.
+  ``database`` är ``{"connected": true}`` när kärnan har kontakt med
+  databasen, ``{"connected": false}`` när den inte har det och styr med sin
+  kopia av hemmet (se databaselink.py), och null när ingen databas är inställd.
 
 Livevyn styr lamporna för hand:
 
