@@ -371,7 +371,8 @@ export function moveItemToRoom(
 
 /**
  * Flyttar saken till punkten. Ett rumskort eller en lampa som släpps i ett
- * annat rum hör sedan till det rummet; utanför alla rum behåller den sitt.
+ * annat rum hör sedan till det rummet; i sitt eget rum, på dess väggar eller
+ * utanför alla rum behåller den sitt.
  */
 export function moveItem(document: HomeDocument, itemId: string, point: Point): HomeDocument {
   const found = findItem(document, itemId);
@@ -380,8 +381,20 @@ export function moveItem(document: HomeDocument, itemId: string, point: Point): 
   }
   const position = toXY(point);
   const moved = updateItem(document, itemId, { position });
-  const target = found.room === null ? null : roomAt(found.floor, toPoint(position));
-  return target === null ? moved : moveItemToRoom(moved, itemId, target.id);
+  const at = toPoint(position);
+  // Så länge saken är kvar i sitt rum (även på en vägg som delas med ett
+  // grannrum) behåller den rummet.
+  if (found.room === null || insideRoom(at, found.room)) {
+    return moved;
+  }
+  // Rummet byts bara när saken dras in i ett annat rum än det den stod i.
+  // En sak som har kopplats om i listan men står kvar i det gamla rummet
+  // behåller alltså den nya kopplingen när den flyttas en bit.
+  const target = roomAt(found.floor, at);
+  const before = roomAt(found.floor, toPoint(found.item.position));
+  return target === null || target.id === before?.id
+    ? moved
+    : moveItemToRoom(moved, itemId, target.id);
 }
 
 /** Vridningen i hela grader, 0–359, åt vilket håll den än har snurrats. */

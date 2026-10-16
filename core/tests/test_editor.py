@@ -279,7 +279,8 @@ def test_lamp_added_in_the_editor_is_virtual_and_lights_up_without_restart() -> 
         ws.receive_json()
         ws.receive_json()
 
-        c.put("/api/home", json=to_document(home))
+        response = c.put("/api/home", json=to_document(home))
+        assert response.status_code == 204, response.text
         message = ws.receive_json()
         lamps = {lamp["id"]: lamp for lamp in message["floors"][0]["lamps"]}
         assert lamps["koksbank"]["virtual"] is True

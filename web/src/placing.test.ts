@@ -170,6 +170,17 @@ describe("att ändra det som är placerat", () => {
     expect(rooms(outside)[0].lamps?.[0].position).toEqual([9, 9]);
   });
 
+  it("en lampa som släpps på en delad vägg, eller kopplats om i listan, behåller sitt rum", () => {
+    // Väggen x = 3 delas av köket och hallen.
+    expect(findItem(moveItem(home(), "taklampa", { x: 3, y: 1 }), "taklampa")?.room?.id).toBe(
+      "kok",
+    );
+    // Kopplad till hallen men står kvar i köket: en liten dragning byter inte tillbaka.
+    const relinked = moveItemToRoom(home(), "taklampa", "hall");
+    const nudged = moveItem(relinked, "taklampa", { x: 1.05, y: 1 });
+    expect(findItem(nudged, "taklampa")?.room?.id).toBe("hall");
+  });
+
   it("en lampa kopplas till ett annat rum utan att flyttas", () => {
     const document = moveItemToRoom(home(), "taklampa", "hall");
     const found = findItem(document, "taklampa");
