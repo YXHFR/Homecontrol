@@ -14,9 +14,9 @@ Modellen är oföränderlig och kontrolleras när den skapas, oavsett om den
 kommer från databasen, en importerad fil eller koden.
 
 Några delar är förberedda för kommande steg och påverkar ännu inget:
-lampornas zon och rummens ljusgräns. Regeln använder i dag bara rummens
-mörkergräns och fördröjning; zonerna, noderna och Wi-Fi-vikten används av
-sammanvägningen (fusion.py).
+lampornas zon och profil. Rummens ljusinställningar och lampornas ljusbidrag
+används av regelmotorn (rules.py); zonerna, noderna och Wi-Fi-vikten används
+av sammanvägningen (fusion.py).
 """
 
 import math
@@ -53,6 +53,9 @@ DEFAULT_DARK_BELOW_LUX = 30.0
 DEFAULT_BRIGHT_ABOVE_LUX = 100.0
 DEFAULT_OFF_AFTER_EMPTY_SECONDS = 180.0
 DEFAULT_WIFI_WEIGHT = 0.5
+DEFAULT_DIM_BEFORE_OFF_SECONDS = 30.0
+DEFAULT_DIM_PERCENT = 50
+DEFAULT_DAYLIGHT_OFF_AFTER_SECONDS = 600.0
 
 BODY_HEIGHT = 1.0
 """Ungefär där radarn ser en person, i meter över golvet: mitt på kroppen."""
@@ -140,11 +143,26 @@ class RoomSettings(_Model):
     dark_below_lux: Lux = DEFAULT_DARK_BELOW_LUX
     """Under den här ljusnivån räknas rummet som mörkt."""
     bright_above_lux: Lux = DEFAULT_BRIGHT_ABOVE_LUX
-    """Över den här ljusnivån räknas rummet som ljust av dagsljus. Används inte än."""
+    """Över den här ljusnivån räknas rummet som ljust av dagsljus."""
     off_after_empty_seconds: Annotated[float, Field(gt=0, le=MAX_DELAY_SECONDS)] = (
         DEFAULT_OFF_AFTER_EMPTY_SECONDS
     )
     """Så länge rummet ska ha varit tomt innan lamporna släcks."""
+    dim_before_off_seconds: Annotated[float, Field(ge=0, le=MAX_DELAY_SECONDS)] = (
+        DEFAULT_DIM_BEFORE_OFF_SECONDS
+    )
+    """Så länge lamporna dimras som en varning innan de släcks. 0 stänger av varningen.
+
+    Är den längre än `off_after_empty_seconds` dimras lamporna så fort rummet blir tomt.
+    """
+    dim_percent: Annotated[int, Field(ge=1, le=100)] = DEFAULT_DIM_PERCENT
+    """Ljusstyrkan under varningsdimringen, i procent."""
+    daylight_off_after_seconds: Annotated[float, Field(gt=0, le=MAX_DELAY_SECONDS)] = (
+        DEFAULT_DAYLIGHT_OFF_AFTER_SECONDS
+    )
+    """Så länge dagsljuset ska ha varit över ljusgränsen i sträck innan lamporna släcks."""
+    windowless: bool = False
+    """Rummet har inga fönster och räknas alltid som mörkt, så det behöver ingen ljussensor."""
     wifi_weight: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)] = DEFAULT_WIFI_WEIGHT
     """Hur mycket Wi-Fi-rörelse väger mot radarn, från 0 till 1.
 
@@ -250,6 +268,12 @@ class Lamp(_Model):
     zone_id: Id | None = None
     """Zonen i rummet som lampan hör till, om den bara lyser upp en del av rummet."""
     profile: LampProfile = LampProfile.GENERIC
+    lux_contribution: Lux = 0.0
+    """Hur mycket lampan själv lyser upp rummets ljussensor vid full ljusstyrka, i lux.
+
+    Mäts av lampkalibreringen. Regelmotorn drar av bidraget från den uppmätta
+    ljusnivån, så att lampans eget ljus aldrig räknas som dagsljus.
+    """
 
 
 class Room(_Model):

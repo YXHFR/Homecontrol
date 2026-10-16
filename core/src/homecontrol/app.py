@@ -45,10 +45,15 @@ def create_app(
     # och tidsfarten spärras så länge riktiga lampor styrs (se Simulation).
     lamps = SimulatedLampOutput()
     controller = Controller(home, clock, [lamps])
+    lamps.report_new_lamps(home, controller.observe)
     source = SimulatedSource(home)
     simulation = Simulation(
         source, controller.observe, clock, floor_ids=(floor.id for floor in home.floors)
     )
+
+    def use_home(home: Home) -> None:
+        simulation.use_home(home)
+        lamps.report_new_lamps(home, controller.observe)
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -80,7 +85,7 @@ def create_app(
             controller,
             home_store if home_store is not None else MemoryStore(),
             allowed_hosts,
-            on_home_replaced=simulation.use_home,
+            on_home_replaced=use_home,
         )
     )
 

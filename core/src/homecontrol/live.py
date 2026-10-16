@@ -8,9 +8,20 @@ Protokollet är JSON. Kärnan skickar:
   En lampa som ingen riktig lamputgång styr är ``"virtual": true``.
 * ``{"type": "state", ...}`` vid anslutning och efter varje ändring: spåren
   (``held`` är ett spår som radarn har tappat men som hålls kvar), läget i
-  varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), lamporna
-  och simuleringen. Fältet ``simulation`` visar simuleringsläget, eller är
-  null om det inte finns.
+  varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), om rummet
+  är i manuellt läge och varför lamporna är som de är, lamporna (``on`` är
+  null när läget är okänt), de senaste händelserna för "Varför hände det?"
+  (``at`` är Unix-tid i sekunder) och simuleringen. Fältet ``simulation``
+  visar simuleringsläget, eller är null om det inte finns.
+
+Livevyn styr lamporna för hand:
+
+* ``{"type": "set_lamp", "lamp_id": "taklampa", "on": true}``
+* ``{"type": "resume_automation", "room_id": "vardagsrum"}``
+
+Styrningen går genom samma ström som allt annat och omfattas av samma
+kontroll av adress och avsändare (se trust.py). Det finns inga konton: alla
+som når livevyn kan styra lamporna.
 
 Livevyn skickar kommandon till simuleringen:
 
@@ -56,6 +67,17 @@ PersonId = Annotated[str, Field(max_length=64)]
 FloorId = Annotated[str, Field(max_length=64)]
 
 
+class SetLamp(BaseModel):
+    type: Literal["set_lamp"]
+    lamp_id: Annotated[str, Field(max_length=64)]
+    on: bool
+
+
+class ResumeAutomation(BaseModel):
+    type: Literal["resume_automation"]
+    room_id: Annotated[str, Field(max_length=64)]
+
+
 class SetSimulation(BaseModel):
     type: Literal["set_simulation"]
     enabled: bool
@@ -99,7 +121,16 @@ class SetSpeed(BaseModel):
         return value
 
 
-ClientMessage = SetSimulation | AddPerson | MovePerson | RemovePerson | SetDaylight | SetSpeed
+ClientMessage = (
+    SetLamp
+    | ResumeAutomation
+    | SetSimulation
+    | AddPerson
+    | MovePerson
+    | RemovePerson
+    | SetDaylight
+    | SetSpeed
+)
 
 _client_message: TypeAdapter[ClientMessage] = TypeAdapter(
     Annotated[ClientMessage, Field(discriminator="type")]
@@ -164,13 +195,29 @@ def state_message(snapshot: Snapshot, simulation: SimulationView | None) -> dict
             for track in snapshot.tracks
         ],
         "rooms": [
-            {"id": room.room_id, "status": room.status.value, "lux": room.lux}
+            {
+                "id": room.room_id,
+                "status": room.status.value,
+                "lux": room.lux,
+                "adjusted_lux": room.adjusted_lux,
+                "manual": room.manual,
+                "explanation": room.explanation,
+            }
             for room in snapshot.rooms
         ],
         "zones": [{"id": zone.zone_id, "status": zone.status.value} for zone in snapshot.zones],
         "lamps": [
-            {"id": lamp.lamp_id, "on": lamp.on, "explanation": lamp.explanation}
+            {
+                "id": lamp.lamp_id,
+                "on": lamp.on,
+                "brightness": lamp.brightness,
+                "explanation": lamp.explanation,
+            }
             for lamp in snapshot.lamps
+        ],
+        "events": [
+            {"at": event.at, "room_id": event.room_id, "text": event.text}
+            for event in snapshot.events
         ],
         "simulation": None if simulation is None else simulation_message(simulation),
     }
@@ -235,7 +282,7 @@ def create_live_router(
         async def receive_commands(group: anyio.abc.TaskGroup) -> None:
             try:
                 while True:
-                    _handle(simulation, await websocket.receive_text())
+                    _handle(controller, simulation, await websocket.receive_text())
             except WebSocketDisconnect:
                 # Att klienten går är det normala slutet; då behövs inga fler lägen.
                 group.cancel_scope.cancel()
@@ -255,13 +302,20 @@ def create_live_router(
     return router
 
 
-def _handle(simulation: Simulation | None, text: str) -> None:
-    if simulation is None:
-        return
+def _handle(controller: Controller, simulation: Simulation | None, text: str) -> None:
     try:
         message = _client_message.validate_json(text)
     except ValidationError:
         logger.warning("Ogiltigt meddelande från livevyn ignoreras")
+        return
+    match message:
+        case SetLamp(lamp_id=lamp_id, on=on):
+            controller.set_lamp(lamp_id, on)
+            return
+        case ResumeAutomation(room_id=room_id):
+            controller.resume_automation(room_id)
+            return
+    if simulation is None:
         return
     match message:
         case SetSimulation(enabled=enabled):

@@ -185,9 +185,14 @@ def two_floor_home() -> Home:
     )
 
 
-def home_with_settings(settings: RoomSettings) -> Home:
-    """Enrumshemmet, men vardagsrummet har egna inställningar."""
+def home_with_settings(settings: RoomSettings, *, lamp_lux: float = 0) -> Home:
+    """Enrumshemmet, men vardagsrummet har egna inställningar.
+
+    `lamp_lux` är hur mycket taklampan lyser upp ljussensorn vid full styrka.
+    """
     home = one_room_home()
     floor = home.floors[0]
-    living_room = floor.rooms[0].model_copy(update={"settings": settings})
+    room = floor.rooms[0]
+    lamps = tuple(lamp.model_copy(update={"lux_contribution": lamp_lux}) for lamp in room.lamps)
+    living_room = room.model_copy(update={"settings": settings, "lamps": lamps})
     return home.model_copy(update={"floors": (floor.model_copy(update={"rooms": (living_room,)}),)})

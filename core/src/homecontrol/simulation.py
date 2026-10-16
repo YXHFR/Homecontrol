@@ -21,6 +21,7 @@ from typing import Literal, get_args
 from homecontrol.clock import SpeedControl
 from homecontrol.connectors import (
     LampCommand,
+    LampStateReported,
     LightLevelObserved,
     MotionObserved,
     ObservationSink,
@@ -219,15 +220,33 @@ def _in_view(target: Point) -> bool:
 
 
 class SimulatedLampOutput:
-    """En lamputgång som bara minns vad lamporna senast fick för kommando."""
+    """En lamputgång med virtuella lampor, som bara minns vad de senast fick för kommando.
+
+    Den virtuella lampan lyser inte upp någon ljussensor; dagsljuset i
+    simuleringen är det enda ljuset som mäts.
+    """
 
     def __init__(self) -> None:
         self.states: dict[str, bool] = {}
+        self.brightness: dict[str, int] = {}
         self.history: list[LampCommand] = []
 
     def send(self, command: LampCommand) -> None:
         self.states[command.lamp_id] = command.on
+        self.brightness[command.lamp_id] = command.brightness
         self.history.append(command)
+
+    def report_new_lamps(self, home: Home, sink: ObservationSink) -> None:
+        """Berättar att hemmets virtuella lampor som inte har styrts än är släckta.
+
+        En virtuell lampa finns bara här, så utgången vet alltid hur den är,
+        precis som en riktig lampa som rapporterar sitt läge. Anropas när
+        utgången startar och när hemmet har ändrats.
+        """
+        for lamp in home.lamps:
+            if lamp.id not in self.states:
+                self.states[lamp.id] = False
+                sink(LampStateReported(lamp.id, on=False))
 
 
 @dataclass(frozen=True)

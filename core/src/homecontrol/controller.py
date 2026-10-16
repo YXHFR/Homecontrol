@@ -4,10 +4,16 @@
 Den gör inget av sig själv: någon lämnar observationer via `observe` och
 anropar `tick` när klockan har nått `wake_at`. Det gör att samma kod kan
 köras i realtid av servern och i snabbspolad tid av scenariotester.
+
+Manuell styrning (ett klick på en lampa i livevyn) kommer in via `set_lamp`.
+Varje beslut som ändrar något sparas som en händelse med klockslag, för
+listan "Varför hände det?" i livevyn. Händelserna finns bara i minnet.
 """
 
 import logging
 import math
+import time
+from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -16,6 +22,7 @@ from homecontrol.clock import Clock
 from homecontrol.connectors import (
     LampCommand,
     LampOutput,
+    LampStateReported,
     LightLevelObserved,
     MotionObserved,
     Observation,
@@ -29,12 +36,20 @@ logger = logging.getLogger(__name__)
 
 Listener = Callable[[], None]
 
+MAX_EVENTS = 30
+"""Så många av de senaste händelserna sparas för "Varför hände det?"."""
+
 
 @dataclass(frozen=True)
 class RoomView:
     room_id: str
     status: Occupancy
     lux: float | None
+    adjusted_lux: float | None
+    """Ljusnivån med rummets egna lampors ljus avräknat; den som reglerna använder."""
+    manual: bool
+    """Någon har styrt en lampa i rummet för hand, och automatiken pausar."""
+    explanation: str
 
     @property
     def occupied(self) -> bool:
@@ -50,8 +65,20 @@ class ZoneView:
 @dataclass(frozen=True)
 class LampView:
     lamp_id: str
-    on: bool
+    on: bool | None
+    """None när lampans läge är okänt."""
+    brightness: int
     explanation: str
+
+
+@dataclass(frozen=True)
+class Event:
+    """Något som hände med lamporna, med förklaring: till exempel att de tändes eller dimrades."""
+
+    at: float
+    """Klockslaget som Unix-tid i sekunder."""
+    room_id: str
+    text: str
 
 
 @dataclass(frozen=True)
@@ -63,20 +90,32 @@ class Snapshot:
     rooms: tuple[RoomView, ...]
     zones: tuple[ZoneView, ...]
     lamps: tuple[LampView, ...]
+    events: tuple[Event, ...]
+    """De senaste händelserna, äldst först."""
 
 
 class Controller:
-    def __init__(self, home: Home, clock: Clock, outputs: Sequence[LampOutput]) -> None:
+    def __init__(
+        self,
+        home: Home,
+        clock: Clock,
+        outputs: Sequence[LampOutput],
+        wall_clock: Callable[[], float] = time.time,
+    ) -> None:
+        """`wall_clock` ger klockslaget som Unix-tid, bara för att visa när något hände."""
         self._home = home
         self._clock = clock
+        self._wall_clock = wall_clock
         self._outputs = tuple(outputs)
         # Ljusnivån per rum och källa. Det senast mätta värdet gäller, och en
         # källa som tappas tar sina värden med sig.
         self._lux: dict[str, dict[str, float]] = {}
         self._fusion = Fusion(home, clock.now())
-        # Lamporna antas vara släckta vid start.
-        self._lamps_on = {lamp.id: False for lamp in home.lamps}
+        # Kärnan vet inte hur lamporna är förrän de rapporterar eller den själv styr dem.
+        self._lamps: dict[str, rules.LampState] = {}
+        self._memory: dict[str, rules.Memory] = {}
         self._explanations: dict[str, str] = {}
+        self._events: deque[Event] = deque(maxlen=MAX_EVENTS)
         self._wake_at: float | None = None
         self._listeners: list[Listener] = []
         self._room_ids = {room.id for room in home.rooms}
@@ -116,6 +155,47 @@ class Controller:
                 by_source = self._lux.setdefault(room_id, {})
                 by_source.pop(source_id, None)  # sist i ordningen är senast mätt
                 by_source[source_id] = lux
+            case LampStateReported(lamp_id=lamp_id, on=on, brightness=brightness):
+                if not any(lamp.id == lamp_id for lamp in self._home.lamps):
+                    logger.warning("Läge för okänd lampa %r ignoreras", lamp_id)
+                    return
+                if not 1 <= brightness <= rules.FULL_BRIGHTNESS:
+                    logger.warning("Ogiltig ljusstyrka %r ignoreras", brightness)
+                    return
+                self._lamps[lamp_id] = rules.LampState(on, brightness)
+        self._evaluate()
+        self._notify()
+
+    def set_lamp(self, lamp_id: str, on: bool) -> None:
+        """Manuell styrning: tänder eller släcker en lampa, till exempel efter ett klick i livevyn.
+
+        Automatiken i lampans rum pausar sedan tills rummet har varit tomt i
+        rummets släckfördröjning.
+        """
+        try:
+            room = self._home.room_of(lamp_id)
+        except KeyError:
+            logger.warning("Manuell styrning av okänd lampa %r ignoreras", lamp_id)
+            return
+        lamp = next(lamp for lamp in room.lamps if lamp.id == lamp_id)
+        command = rules.manual_command(room, lamp, on)
+        self._memory[room.id] = rules.start_manual(self._memory.get(room.id, {}), self._clock.now())
+        self._switch(command)
+        self._remember(room.id, command.reason)
+        self._evaluate()
+        self._notify()
+
+    def resume_automation(self, room_id: str) -> None:
+        """Låter automatiken ta över i ett rum direkt, utan att vänta tills rummet varit tomt."""
+        room = next((room for room in self._home.rooms if room.id == room_id), None)
+        if room is None:
+            logger.warning("Automatik för okänt rum %r ignoreras", room_id)
+            return
+        memory = self._memory.get(room_id, {})
+        if not rules.is_manual(memory):
+            return
+        self._memory[room_id] = rules.stop_manual(memory)
+        self._remember(room_id, f"Automatiken i {room.name} återställdes för hand.")
         self._evaluate()
         self._notify()
 
@@ -123,8 +203,8 @@ class Controller:
         """Byter till ett ändrat hem, till exempel när kartredigeraren har sparat.
 
         Det som fortfarande gäller behålls: spåren från noder som finns kvar,
-        ljusnivån i rum som finns kvar, hur länge rummen har varit tomma och
-        vilka lampor som är tända.
+        ljusnivån och det reglerna minns (som manuellt läge) i rum som finns
+        kvar, hur länge rummen har varit tomma och lampornas läge.
         En tänd lampa som inte längre finns i hemmet släcks, så att den inte
         lyser kvar utan att något styr den.
 
@@ -132,15 +212,18 @@ class Controller:
         att jämföra med det förra.
         """
         kept = {lamp.id for lamp in home.lamps}
-        for lamp_id, on in self._lamps_on.items():
-            if on and lamp_id not in kept:
+        for lamp_id, state in self._lamps.items():
+            if state.on is True and lamp_id not in kept:
                 self._send(LampCommand(lamp_id, on=False, reason="Lampan togs bort ur hemmet."))
         self._home = home
         self._room_ids = {room.id for room in home.rooms}
         self._lux = {
             room_id: lux for room_id, lux in self._lux.items() if room_id in self._room_ids
         }
-        self._lamps_on = {lamp.id: self._lamps_on.get(lamp.id, False) for lamp in home.lamps}
+        self._memory = {
+            room_id: memory for room_id, memory in self._memory.items() if room_id in self._room_ids
+        }
+        self._lamps = {lamp_id: state for lamp_id, state in self._lamps.items() if lamp_id in kept}
         self._fusion.replace_home(home, self._clock.now())
         self._evaluate()
         self._notify()
@@ -164,7 +247,14 @@ class Controller:
         return Snapshot(
             tracks=self._fusion.tracks(),
             rooms=tuple(
-                RoomView(room.id, rooms[room.id].status, self._room_lux(room.id))
+                RoomView(
+                    room.id,
+                    rooms[room.id].status,
+                    lux=self._room_lux(room.id),
+                    adjusted_lux=rules.adjusted_lux(room, self._room_lux(room.id), self._lamps),
+                    manual=rules.is_manual(self._memory.get(room.id, {})),
+                    explanation=self._explanations[room.id],
+                )
                 for room in self._home.rooms
             ),
             zones=tuple(
@@ -173,9 +263,17 @@ class Controller:
                 for zone in room.zones
             ),
             lamps=tuple(
-                LampView(lamp.id, self._lamps_on[lamp.id], self._explanations[lamp.id])
-                for lamp in self._home.lamps
+                LampView(
+                    lamp.id,
+                    on=state.on,
+                    brightness=state.brightness,
+                    explanation=self._explanations[room.id],
+                )
+                for room in self._home.rooms
+                for lamp in room.lamps
+                for state in (self._lamps.get(lamp.id, rules.UNKNOWN_LAMP),)
             ),
+            events=tuple(self._events),
         )
 
     def _room_lux(self, room_id: str) -> float | None:
@@ -186,18 +284,32 @@ class Controller:
     def _evaluate(self) -> None:
         presence = self._fusion.rooms()
         room_states = {
-            room.id: rules.RoomState(presence[room.id], self._room_lux(room.id))
+            room.id: rules.RoomState(
+                presence[room.id], self._room_lux(room.id), self._memory.get(room.id, {})
+            )
             for room in self._home.rooms
         }
-        result = rules.evaluate(self._home, room_states, self._lamps_on, self._clock.now())
+        result = rules.evaluate(self._home, room_states, self._lamps, self._clock.now())
         for command in result.commands:
-            # Förklaringen säger var någon är, så den loggas bara när man felsöker.
-            logger.info("%s %s", "Tänder" if command.on else "Släcker", command.lamp_id)
-            logger.debug("%s: %s", command.lamp_id, command.reason)
-            self._lamps_on[command.lamp_id] = command.on
-            self._send(command)
+            self._switch(command)
+        for event in result.events:
+            self._remember(event.room_id, event.text)
+        self._memory = dict(result.memory)
         self._explanations = dict(result.explanations)
         self._wake_at = result.wake_at
+
+    def _switch(self, command: LampCommand) -> None:
+        # Förklaringen säger var någon är, så den loggas bara när man felsöker.
+        if not command.on:
+            logger.info("Släcker %s", command.lamp_id)
+        else:
+            logger.info("Tänder %s (%d %%)", command.lamp_id, command.brightness)
+        logger.debug("%s: %s", command.lamp_id, command.reason)
+        self._lamps[command.lamp_id] = rules.LampState(command.on, command.brightness)
+        self._send(command)
+
+    def _remember(self, room_id: str, text: str) -> None:
+        self._events.append(Event(self._wall_clock(), room_id, text))
 
     def _send(self, command: LampCommand) -> None:
         for output in self._outputs:
