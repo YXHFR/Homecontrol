@@ -1,3 +1,8 @@
+/**
+ * Kartan i kartredigeraren, ritad med Konva. Den ritar det den får och säger
+ * till när någon trycker, men vet inget om hemmet i övrigt eller om sparande.
+ * Allt på kartan är i meter: scenens skala är bildpunkter per meter.
+ */
 import Konva from "konva";
 import { toPoint } from "./editing";
 import type { FloorModel, PlanImage } from "./homefile";
@@ -25,7 +30,7 @@ export interface EditorViewCallbacks {
   onMoveRoom(roomId: string, dx: number, dy: number): void;
 }
 
-/** Kartan i kartredigeraren. Den ritar det den får och säger till när någon trycker. */
+/** Det kartredigeraren kan be kartan om. */
 export interface EditorView {
   render(scene: EditorScene): void;
   /** Hur många meter en skärmpunkt motsvarar just nu, för att veta vad som är "nära". */
@@ -82,28 +87,31 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
   let scene: EditorScene | null = null;
   let fittedFor: string | null = null;
 
-  const scale = () => stage.scaleX();
+  const pixelsPerMeter = () => stage.scaleX();
   const pointer = (): Point | null => stage.getRelativePointerPosition();
 
-  const imageSize = (s: EditorScene): { width: number; height: number } | null => {
-    const image = s.planImage === null ? undefined : images.get(s.planImage.url);
+  const imageSize = (current: EditorScene): { width: number; height: number } | null => {
+    const image = current.planImage === null ? undefined : images.get(current.planImage.url);
     if (
-      s.planImage === null ||
+      current.planImage === null ||
       image === undefined ||
       !image.complete ||
       image.naturalWidth === 0
     ) {
       return null;
     }
-    const mpp = s.planImage.plan.meters_per_pixel;
-    return { width: image.naturalWidth * mpp, height: image.naturalHeight * mpp };
+    const metersPerPixel = current.planImage.plan.meters_per_pixel;
+    return {
+      width: image.naturalWidth * metersPerPixel,
+      height: image.naturalHeight * metersPerPixel,
+    };
   };
 
-  const bounds = (s: EditorScene): Bounds => {
-    const points = s.floor.rooms.flatMap((room) => room.polygon.map(toPoint));
-    const size = imageSize(s);
-    if (s.planImage !== null && size !== null) {
-      const [x, y] = s.planImage.plan.position;
+  const bounds = (current: EditorScene): Bounds => {
+    const points = current.floor.rooms.flatMap((room) => room.polygon.map(toPoint));
+    const size = imageSize(current);
+    if (current.planImage !== null && size !== null) {
+      const [x, y] = current.planImage.plan.position;
       points.push({ x, y }, { x: x + size.width, y: y + size.height });
     }
     if (points.length === 0) {
@@ -129,23 +137,23 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     const b = bounds(scene);
     const width = b.maxX - b.minX + 2 * MARGIN_METERS;
     const height = b.maxY - b.minY + 2 * MARGIN_METERS;
-    const s = Math.min(stage.width() / width, stage.height() / height);
-    stage.scale({ x: s, y: s });
+    const perMeter = Math.min(stage.width() / width, stage.height() / height);
+    stage.scale({ x: perMeter, y: perMeter });
     // Centrera våningen på kartan.
     stage.position({
-      x: (stage.width() - (b.maxX + b.minX) * s) / 2,
-      y: (stage.height() - (b.maxY + b.minY) * s) / 2,
+      x: (stage.width() - (b.maxX + b.minX) * perMeter) / 2,
+      y: (stage.height() - (b.maxY + b.minY) * perMeter) / 2,
     });
   };
 
   /** Ett rutnät med en meter mellan linjerna, där det går att rita (x och y från 0). */
   const drawGrid = () => {
     gridLayer.destroyChildren();
-    const s = scale();
-    const left = Math.max(0, Math.floor(-stage.x() / s));
-    const top = Math.max(0, Math.floor(-stage.y() / s));
-    const right = Math.ceil((stage.width() - stage.x()) / s);
-    const bottom = Math.ceil((stage.height() - stage.y()) / s);
+    const perMeter = pixelsPerMeter();
+    const left = Math.max(0, Math.floor(-stage.x() / perMeter));
+    const top = Math.max(0, Math.floor(-stage.y() / perMeter));
+    const right = Math.ceil((stage.width() - stage.x()) / perMeter);
+    const bottom = Math.ceil((stage.height() - stage.y()) / perMeter);
     if (right <= left || bottom <= top) {
       return;
     }
@@ -159,7 +167,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
       }),
     );
     // Vid stark utzoomning blir varje meter för tät; visa då var tionde.
-    const step = s < 8 ? 10 : 1;
+    const step = perMeter < 8 ? 10 : 1;
     const line = (points: number[]) =>
       gridLayer.add(
         new Konva.Line({ points, stroke: COLORS.grid, strokeWidth: 1, strokeScaleEnabled: false }),
@@ -172,12 +180,12 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     }
   };
 
-  const drawImage = (s: EditorScene) => {
+  const drawImage = (current: EditorScene) => {
     imageLayer.destroyChildren();
-    if (s.planImage === null) {
+    if (current.planImage === null) {
       return;
     }
-    const { url, plan } = s.planImage;
+    const { url, plan } = current.planImage;
     let image = images.get(url);
     if (image === undefined) {
       image = new Image();
@@ -188,7 +196,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
       image.src = url;
       images.set(url, image);
     }
-    const size = imageSize(s);
+    const size = imageSize(current);
     if (size === null) {
       return;
     }
@@ -204,12 +212,12 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     );
   };
 
-  const drawRooms = (s: EditorScene) => {
+  const drawRooms = (current: EditorScene) => {
     roomLayer.destroyChildren();
-    const px = 1 / scale();
-    for (const room of s.floor.rooms) {
-      const selected = room.id === s.selectedRoomId;
-      const group = new Konva.Group({ draggable: selected && s.tool === "select" });
+    const px = 1 / pixelsPerMeter();
+    for (const room of current.floor.rooms) {
+      const selected = room.id === current.selectedRoomId;
+      const group = new Konva.Group({ draggable: selected && current.tool === "select" });
       group.add(
         new Konva.Line({
           points: room.polygon.flat(),
@@ -220,7 +228,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
           strokeScaleEnabled: false,
           lineJoin: "round",
           // Ett rum som ritas över ett annat ska gå att börja inne i det.
-          listening: s.tool === "select",
+          listening: current.tool === "select",
         }),
         new Konva.Text({
           x: Math.min(...room.polygon.map(([x]) => x)) + 8 * px,
@@ -232,12 +240,12 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
         }),
       );
       group.on("pointerclick", () => {
-        if (s.tool === "select") {
+        if (current.tool === "select") {
           callbacks.onSelectRoom(room.id);
         }
       });
       group.on("mouseenter", () => {
-        if (s.tool === "select") {
+        if (current.tool === "select") {
           container.style.cursor = selected ? "move" : "pointer";
         }
       });
@@ -251,10 +259,10 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     }
   };
 
-  const drawDraft = (s: EditorScene) => {
+  const drawDraft = (current: EditorScene) => {
     draftLayer.destroyChildren();
-    const px = 1 / scale();
-    const draft = s.draft;
+    const px = 1 / pixelsPerMeter();
+    const draft = current.draft;
     const dot = (p: Point, radius: number, color: string) =>
       new Konva.Circle({
         ...p,
@@ -336,11 +344,11 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
   });
 
   const zoomAround = (factor: number, center: Point) => {
-    const old = scale();
+    const old = pixelsPerMeter();
     const next = Math.min(Math.max(old * factor, MIN_ZOOM), MAX_ZOOM);
-    const home = { x: (center.x - stage.x()) / old, y: (center.y - stage.y()) / old };
+    const pointInMeters = { x: (center.x - stage.x()) / old, y: (center.y - stage.y()) / old };
     stage.scale({ x: next, y: next });
-    stage.position({ x: center.x - home.x * next, y: center.y - home.y * next });
+    stage.position({ x: center.x - pointInMeters.x * next, y: center.y - pointInMeters.y * next });
     draw();
   };
   stage.on("dragmove", (event) => {
@@ -365,7 +373,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
       scene = next;
       draw();
     },
-    metersPerPixel: () => 1 / scale(),
+    metersPerPixel: () => 1 / pixelsPerMeter(),
     zoom: (factor) => zoomAround(factor, { x: stage.width() / 2, y: stage.height() / 2 }),
     fit() {
       fit();

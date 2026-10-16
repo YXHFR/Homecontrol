@@ -85,8 +85,9 @@ kartan i mitten och en instruktion för det verktyg du har valt till höger. På
 mobilen ligger verktygen ovanför kartan och instruktionen under.
 
 1. **Ladda upp bild** av planritningen, till exempel från mäklarannonsen.
-   Bilden förminskas och rensas från extra uppgifter (som var bilden togs)
-   innan den sparas i databasen. Den följer inte med när hemmet exporteras.
+   Webbläsaren förminskar bilden och rensar bort extra uppgifter i filen (som
+   var bilden togs) innan den skickas. Bilden sparas i databasen och följer
+   inte med när hemmet exporteras.
 2. **Skala bilden**: klicka på två punkter som du vet avståndet mellan, till
    exempel båda ändarna av en vägg, och skriv in avståndet i meter. Gör det
    innan du ritar rummen.
@@ -97,7 +98,13 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
 4. **Välj och flytta**: klicka på ett rum för att byta namn på det eller ta
    bort det, och dra det för att flytta det.
 
-Allt sparas direkt, och livevyn visar ändringen utan omstart. Under
+Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
+Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
+och Enter stänger rummet.
+
+Allt sparas direkt, och livevyn visar ändringen utan omstart. Har du
+redigeraren öppen i två fönster och ändrar i båda, visar det ena fönstret
+det andras ändring i stället för att skriva över den. Under
 **Hemmet** står hur många rum, zoner, rumskort, routrar och lampor hemmet
 har. Väggarnas material, rumskort, routrar, lampor och zoner ritas i kommande
 versioner; tills dess får nya rum gipsväggar.
@@ -115,6 +122,9 @@ docker compose exec -T core homecontrol importera - < hem.json     # läs in fr�
 docker compose exec -T core homecontrol importera --exempelhem     # börja om med exempelhemmet
 docker compose restart core                                        # efter en import
 ```
+
+Starta om kärnan direkt efter en import. Annars kan en ändring i
+kartredigeraren skriva över det du just importerade.
 
 Filen kontrolleras innan något ändras, så en trasig fil lämnar hemmet som det
 var, och felmeddelandet säger var i filen felet finns. En egen hemfil
@@ -189,7 +199,8 @@ uv run ruff check .. && uv run ruff format --check .. && uv run mypy
 HOMECONTROL_WEB_DIR=../web/dist uv run homecontrol
 ```
 
-Utan `HOMECONTROL_DATABASE` visar kärnan exempelhemmet och sparar inget.
+Utan `HOMECONTROL_DATABASE` visar kärnan exempelhemmet, och ändringar från
+kartredigeraren sparas bara så länge kärnan är igång.
 Testerna av databasdelen behöver en Postgres och hoppas annars över:
 
 ```sh
@@ -217,8 +228,10 @@ npm run test:e2e
 Nya API-vägar i kärnan läggs under `/api/...` så att de inte krockar med
 webbgränssnittets filer. Livevyn får sin realtidsström från `/api/live`.
 Kartredigeraren läser och sparar hemmet med `/api/home` och bilden av
-planritningen med `/api/floors/{id}/plan-image` (se `editor.py`). Ett sparat
-hem går till kärnan med `Controller.replace_home`, så livevyn får det direkt.
+planritningen med `/api/floors/{id}/plan-image` (se `editor.py`). Varje
+ändring ger en ny revision (`ETag`), och en ändring som utgår från en gammal
+revision (`If-Match`) nekas. Ett sparat hem går till kärnan med
+`Controller.replace_home`, så livevyn får det direkt.
 
 Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
 närvarobedömningen avgör vilka rum som är upptagna, regelmotorn

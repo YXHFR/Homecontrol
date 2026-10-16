@@ -1,10 +1,13 @@
 /**
- * Kartredigeraren i layouten "Verktygslåda": verktygen till vänster, kartan i
- * mitten och egenskaperna till höger. På en smal skärm staplas de.
+ * Kartredigeraren: verktygen till vänster, kartan i mitten och egenskaperna
+ * till höger (se #34). På en smal skärm staplas de.
  *
  * Varje ändring sparas direkt i kärnan, som kontrollerar hemmet och visar det
- * i livevyn. Säger kärnan nej visas varför, och kartan går tillbaka till det
- * som senast sparades.
+ * i livevyn. Säger kärnan nej visas varför, och kartan läses om från kärnan,
+ * så att den aldrig visar något som inte är sparat.
+ *
+ * Attributen data-ready, data-busy, data-saves och data-rooms på roten finns
+ * för webbläsartesterna, som väntar på dem.
  */
 import "./editor.css";
 import {
@@ -12,7 +15,6 @@ import {
   deleteRoom,
   distance,
   findRoom,
-  initialPlanImage,
   moveRoom,
   polygonArea,
   renameRoom,
@@ -24,7 +26,8 @@ import {
   toXY,
 } from "./editing";
 import { createKonvaEditorView, type EditorViewFactory } from "./editorView";
-import { coreApi, type FloorModel, type HomeApi, type HomeDocument } from "./homefile";
+import { coreApi, CoreError, type HomeApi } from "./homeApi";
+import type { FloorModel, HomeDocument } from "./homefile";
 import type { Point } from "./protocol";
 import { Drawing, INSTRUCTIONS, type Outcome, type ToolName } from "./tools";
 
@@ -98,6 +101,10 @@ function button(label: string, onClick: () => void, className = ""): HTMLButtonE
   return node;
 }
 
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function formatNumber(value: number, decimals = 1): string {
   return value.toLocaleString("sv-SE", { maximumFractionDigits: decimals });
 }
@@ -107,17 +114,22 @@ export function mountEditor(
   deps: EditorDependencies = defaultDependencies,
 ): void {
   const drawing = new Drawing();
-  /** Det som visas, och det som kärnan senast tog emot. */
+  /** Det som visas, inklusive ändringar som håller på att sparas. */
   let shown: HomeDocument | null = null;
+  /** Det som kärnan senast tog emot, och dess revision. */
   let saved: HomeDocument | null = null;
+  let revision = "";
   let floorId: string | null = null;
   let selectedRoomId: string | null = null;
   /** Punkterna som ska skalas mellan, när användaren har klickat ut två. */
   let scalePoints: { a: Point; b: Point } | null = null;
   /** Ändras när en ny bild laddas upp, så att webbläsaren inte visar den gamla. */
   let imageVersion = Date.now();
-  let saving: Promise<void> = Promise.resolve();
-  /** Hur många ändringar kärnan har tagit emot, så att tester kan vänta på nästa. */
+  /** Ändringarna skickas en i taget, i den ordning de gjordes. */
+  let queue: Promise<void> = Promise.resolve();
+  let pending = 0;
+  /** Ökar när en ändring misslyckas, så att de som byggde vidare på den inte skickas. */
+  let generation = 0;
   let savedCount = 0;
 
   // --- Verktygen ---
@@ -131,7 +143,7 @@ export function mountEditor(
   const fileInput = element("input", { type: "file", accept: "image/png,image/jpeg,image/webp" });
   fileInput.hidden = true;
   const uploadButton = button("Ladda upp bild", () => fileInput.click(), "tool");
-  const removeImageButton = button("Ta bort bilden", () => void removeImage(), "tool");
+  const removeImageButton = button("Ta bort bilden", () => removeImage(), "tool");
   const toolbox = element(
     "aside",
     { className: "toolbox" },
@@ -313,7 +325,7 @@ export function mountEditor(
       ["Rum", String(s.rooms)],
       ["Golvyta", `${formatNumber(s.area)} m²`],
       ["Zoner", String(s.zones)],
-      ["ESP32-kort", String(s.nodes)],
+      ["Rumskort", String(s.nodes)],
       ["Routrar", String(s.signalSources)],
       ["Lampor", String(s.lamps)],
     ];
@@ -367,33 +379,69 @@ export function mountEditor(
   };
 
   // --- Sparande ---
-  const commit = (next: HomeDocument) => {
-    shown = next;
+  const setBusy = (busy: boolean) => {
+    root.dataset.busy = String(busy);
+  };
+
+  const showLatest = (latest: { document: HomeDocument; revision: string }) => {
+    shown = saved = latest.document;
+    revision = latest.revision;
+    if (selectedRoomId !== null && findRoom(shown, selectedRoomId) === null) {
+      selectedRoomId = null;
+    }
+  };
+
+  /**
+   * Köar en ändring hos kärnan. Misslyckas den hoppas ändringar som redan
+   * ligger i kön över, eftersom de byggde på den, och hemmet läses om.
+   */
+  const perform = (work: () => Promise<void>) => {
+    const startedIn = generation;
+    pending++;
+    setBusy(true);
     showMessage(null);
     saveStatus.textContent = "Sparar …";
-    root.dataset.saved = "false";
-    render();
-    saving = saving.then(async () => {
+    queue = queue.then(async () => {
       try {
-        await deps.api.save(next);
-        saved = next;
-        savedCount++;
-        root.dataset.saves = String(savedCount);
-        if (shown === next) {
-          saveStatus.textContent = "Alla ändringar är sparade.";
-          root.dataset.saved = "true";
+        if (startedIn !== generation) {
+          return;
         }
-      } catch (error) {
-        // Visa det kärnan har, så att kartan aldrig visar något som inte är sparat.
-        shown = saved;
-        if (selectedRoomId !== null && shown !== null && findRoom(shown, selectedRoomId) === null) {
-          selectedRoomId = null;
+        try {
+          await work();
+          savedCount++;
+          root.dataset.saves = String(savedCount);
+        } catch (error) {
+          generation++;
+          showMessage(errorText(error));
+          saveStatus.textContent =
+            error instanceof CoreError && error.conflict
+              ? "Hemmet har lästs om."
+              : "Ändringen sparades inte.";
+          try {
+            showLatest(await deps.api.load());
+          } catch {
+            shown = saved; // kärnan går inte att nå; visa det som senast sparades
+          }
+          render();
         }
-        saveStatus.textContent = "Ändringen sparades inte.";
-        root.dataset.saved = "true";
-        showMessage(error instanceof Error ? error.message : String(error));
-        render();
+      } finally {
+        pending--;
+        if (pending === 0) {
+          if (message.hidden) {
+            saveStatus.textContent = "Alla ändringar är sparade.";
+          }
+          setBusy(false);
+        }
       }
+    });
+  };
+
+  const commit = (next: HomeDocument) => {
+    shown = next;
+    render();
+    perform(async () => {
+      revision = await deps.api.save(next, revision);
+      saved = next;
     });
   };
 
@@ -407,6 +455,8 @@ export function mountEditor(
     render();
   };
 
+  // cancelDrawing och handle är vanliga funktioner, eftersom knapparna som
+  // ritas ovanför behöver dem innan de har definierats här.
   function cancelDrawing() {
     drawing.cancel();
     scalePoints = null;
@@ -476,38 +526,36 @@ export function mountEditor(
     if (floor === null) {
       return;
     }
-    showMessage(null);
-    saveStatus.textContent = "Laddar upp bilden …";
+    let image: PreparedImage;
     try {
-      const image = await deps.prepareImage(file);
-      await deps.api.uploadPlanImage(floor.id, image.blob);
-      imageVersion = Date.now();
-      if (shown !== null) {
-        commit(setPlanImage(shown, floor.id, initialPlanImage(image.width)));
-      }
-      chooseTool("scale");
+      image = await deps.prepareImage(file);
     } catch (error) {
-      saveStatus.textContent = "Bilden laddades inte upp.";
-      showMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  async function removeImage() {
-    const floor = currentFloor();
-    if (shown === null || floor === null) {
+      showMessage(`Kunde inte läsa bilden: ${errorText(error)}`);
       return;
     }
-    try {
-      await deps.api.deletePlanImage(floor.id);
-      if (drawing.tool === "scale") {
-        drawing.setTool("select");
-      }
-      scalePoints = null;
-      commit(setPlanImage(shown, floor.id, null));
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : String(error));
+    perform(async () => {
+      // Kärnan lägger bilden på våningen och sparar hemmet; läs det som blev.
+      await deps.api.uploadPlanImage(floor.id, image.blob, image.width, revision);
+      imageVersion = Date.now();
+      showLatest(await deps.api.load());
+      chooseTool("scale");
+    });
+  };
+
+  const removeImage = () => {
+    const floor = currentFloor();
+    if (floor === null) {
+      return;
     }
-  }
+    if (drawing.tool === "scale") {
+      chooseTool("select");
+    }
+    perform(async () => {
+      await deps.api.deletePlanImage(floor.id, revision);
+      showLatest(await deps.api.load());
+      render();
+    });
+  };
 
   fileInput.addEventListener("change", () => {
     const file = fileInput.files?.[0];
@@ -571,19 +619,18 @@ export function mountEditor(
 
   chooseTool("select");
   deps.api.load().then(
-    (document) => {
-      shown = saved = document;
-      floorId = (document.home.floors.find((floor) => floor.level === 0) ?? document.home.floors[0])
-        .id;
+    (latest) => {
+      showLatest(latest);
+      const floors = latest.document.home.floors;
+      floorId = (floors.find((floor) => floor.level === 0) ?? floors[0]).id;
       saveStatus.textContent = "Alla ändringar är sparade.";
-      root.dataset.saved = "true";
+      setBusy(false);
       render();
       root.dataset.ready = "true";
     },
     (error: unknown) => {
-      saveStatus.textContent =
-        "Kunde inte läsa hemmet från kärnan. Ladda om sidan för att försöka igen.";
-      showMessage(error instanceof Error ? error.message : String(error));
+      saveStatus.textContent = "Kunde inte läsa hemmet. Ladda om sidan för att försöka igen.";
+      showMessage(errorText(error));
     },
   );
 }

@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from homecontrol import store
 from homecontrol.__main__ import export_home, import_home
 from homecontrol.homefile import FORMAT, VERSION, HomeFileError, dumps, example_home, loads
+from homecontrol.images import StoredImage
 from homes import one_room_home
 
 
@@ -100,7 +101,7 @@ def test_import_of_a_broken_file_leaves_the_home_alone(database: str, tmp_path: 
 def test_plan_image_is_stored_per_floor(conn: psycopg.Connection) -> None:
     store.save_home(conn, example_home())
     floor_id = example_home().floors[0].id
-    image = store.StoredImage("image/png", b"\x89PNG\r\n\x1a\nbild")
+    image = StoredImage("image/png", b"\x89PNG\r\n\x1a\nbild")
 
     store.save_plan_image(conn, floor_id, image)
 
@@ -112,7 +113,7 @@ def test_plan_image_is_stored_per_floor(conn: psycopg.Connection) -> None:
 
 def test_saving_a_home_forgets_images_of_removed_floors(conn: psycopg.Connection) -> None:
     store.save_home(conn, example_home())
-    image = store.StoredImage("image/jpeg", b"\xff\xd8\xffbild")
+    image = StoredImage("image/jpeg", b"\xff\xd8\xffbild")
     for floor in example_home().floors:
         store.save_plan_image(conn, floor.id, image)
 
@@ -125,13 +126,15 @@ def test_database_store_saves_what_the_editor_changes(database: str) -> None:
     with store.connect(database, attempts=1) as conn:
         store.migrate(conn)
     database_store = store.DatabaseStore(database)
-    image = store.StoredImage("image/webp", b"RIFF\0\0\0\0WEBP")
+    image = StoredImage("image/webp", b"RIFF\0\0\0\0WEBP")
 
-    database_store.save_home(one_room_home())
-    database_store.save_plan_image("plan", image)
+    database_store.save_home(example_home())
+    database_store.save_plan_image(one_room_home(), "plan", image)
 
     with store.connect(database, attempts=1) as conn:
         assert store.load_home(conn) == one_room_home()
     assert database_store.load_plan_image("plan") == image
-    database_store.delete_plan_image("plan")
+    database_store.delete_plan_image(example_home(), "plan")
     assert database_store.load_plan_image("plan") is None
+    with store.connect(database, attempts=1) as conn:
+        assert store.load_home(conn) == example_home()

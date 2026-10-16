@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   addRoom,
   deleteRoom,
-  initialPlanImage,
   moveRoom,
   polygonArea,
   rectangleCorners,
@@ -153,10 +152,6 @@ describe("ytor", () => {
 });
 
 describe("planritningen", () => {
-  it("blir 20 meter bred innan den skalas", () => {
-    expect(initialPlanImage(1000)).toEqual({ position: [0, 0], meters_per_pixel: 0.02 });
-  });
-
   it("skalas så att avståndet mellan två punkter blir det angivna", () => {
     const plan = { position: [1, 1] as [number, number], meters_per_pixel: 0.02 };
     // 2 meter med nuvarande skala är 100 bildpunkter; de ska vara 5 meter.

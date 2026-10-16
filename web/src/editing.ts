@@ -123,7 +123,7 @@ export function uniqueId(document: HomeDocument, name: string): string {
     name
       .toLowerCase()
       .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "") // å → a, ä → a, ö → o
+      .replace(/[\u0300-\u036f]/g, "") // å → a, ä → a, ö → o
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 50) || "rum";
@@ -221,9 +221,9 @@ export function moveRoom(
     ];
     const xs = points.map(([x]) => x);
     const ys = points.map(([, y]) => y);
-    const mx = Math.min(Math.max(dx, -Math.min(...xs)), MAX_COORDINATE - Math.max(...xs));
-    const my = Math.min(Math.max(dy, -Math.min(...ys)), MAX_COORDINATE - Math.max(...ys));
-    const shift = ([x, y]: XY): XY => [clampToPlan(x + mx), clampToPlan(y + my)];
+    const allowedDx = Math.min(Math.max(dx, -Math.min(...xs)), MAX_COORDINATE - Math.max(...xs));
+    const allowedDy = Math.min(Math.max(dy, -Math.min(...ys)), MAX_COORDINATE - Math.max(...ys));
+    const shift = ([x, y]: XY): XY => [clampToPlan(x + allowedDx), clampToPlan(y + allowedDy)];
     const moved: RoomModel = { ...room, polygon: room.polygon.map(shift) };
     if (room.zones !== undefined) {
       moved.zones = room.zones.map((zone) => ({ ...zone, polygon: zone.polygon.map(shift) }));
@@ -246,14 +246,6 @@ export function setPlanImage(
   return updateFloors(document, (floor) =>
     floor.id === floorId ? { ...floor, plan_image: planImage } : floor,
   );
-}
-
-/** Hur stor en nyuppladdad bild blir innan den har skalats: så här många meter bred. */
-export const UNSCALED_IMAGE_WIDTH_METERS = 20;
-
-/** Var en nyuppladdad bild läggs: i övre vänstra hörnet, ungefär lagom stor. */
-export function initialPlanImage(widthPixels: number): PlanImage {
-  return { position: [0, 0], meters_per_pixel: UNSCALED_IMAGE_WIDTH_METERS / widthPixels };
 }
 
 /**

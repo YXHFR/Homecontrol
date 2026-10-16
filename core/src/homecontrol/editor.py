@@ -3,10 +3,19 @@
 * ``GET /api/home`` ger hemmet i samma form som exportfilen (se homefile.py).
 * ``PUT /api/home`` ersätter hemmet. Det kontrolleras precis som en import, och
   ett fel ger svar 422 med förklaringen i ``detail``.
-* ``GET``, ``PUT`` och ``DELETE`` på ``/api/floors/{floor_id}/plan-image``
-  läser, ersätter och tar bort bilden av våningens planritning. Bilden skickas
-  som den är (PNG, JPEG eller WebP). Var den ligger och hur den är skalad står
-  i hemmet (``Floor.plan_image``).
+* ``GET /api/floors/{floor_id}/plan-image`` ger bilden av våningens planritning.
+* ``PUT /api/floors/{floor_id}/plan-image?width=…`` ersätter bilden (PNG, JPEG
+  eller WebP, som den är) och lägger den i övre vänstra hörnet, ungefär
+  20 meter bred. ``width`` är bildens bredd i bildpunkter.
+* ``DELETE /api/floors/{floor_id}/plan-image`` tar bort bilden.
+
+Var bilden ligger och hur den är skalad står i hemmet (``Floor.plan_image``).
+Kärnan ändrar bilden och hemmet tillsammans, så att de aldrig hamnar i otakt.
+
+Varje ändring ger hemmet en ny *revision*, som skickas i svarshuvudet ``ETag``.
+Den som skickar med revisionen i ``If-Match`` får svar 409 om någon annan
+(till exempel redigeraren i ett annat fönster) har hunnit ändra hemmet, i
+stället för att skriva över den ändringen.
 
 Ett sparat hem lämnas till kärnan direkt (`Controller.replace_home`), så att
 livevyn visar ändringen utan omstart.
@@ -14,23 +23,32 @@ livevyn visar ändringen utan omstart.
 
 import asyncio
 import logging
+import secrets
 from collections.abc import Callable, Set
-from typing import Any, Protocol, TypeVar
+from typing import Annotated, Any, Protocol, TypeVar
 
 import anyio.to_thread
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from homecontrol import homefile
 from homecontrol.controller import Controller
-from homecontrol.home import Home
-from homecontrol.store import StoredImage
+from homecontrol.home import Floor, Home, PlanImage, Point
+from homecontrol.images import StoredImage, image_type
 from homecontrol.trust import trusted
 
 logger = logging.getLogger(__name__)
 
 MAX_HOME_BYTES = 1024 * 1024
+"""Ett hem med många våningar och rum är några tiotal kilobyte, så en megabyte räcker gott."""
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 """Webbgränssnittet förminskar bilden innan den skickas, så den här gränsen nås sällan."""
+MAX_IMAGE_WIDTH = 20_000
+UNSCALED_IMAGE_WIDTH_METERS = 20.0
+"""Så bred en nyuppladdad bild blir innan den har skalats."""
+
+# Andra webbplatser får inte ens visa hemmet eller planritningen på sina sidor.
+_PRIVATE = {"Cache-Control": "no-store", "Cross-Origin-Resource-Policy": "same-origin"}
 
 T = TypeVar("T")
 
@@ -40,11 +58,13 @@ class HomeStore(Protocol):
 
     def save_home(self, home: Home) -> None: ...
 
-    def save_plan_image(self, floor_id: str, image: StoredImage) -> None: ...
+    def save_plan_image(self, home: Home, floor_id: str, image: StoredImage) -> None:
+        """Sparar bilden och hemmet på en gång."""
+
+    def delete_plan_image(self, home: Home, floor_id: str) -> None:
+        """Tar bort bilden och sparar hemmet på en gång."""
 
     def load_plan_image(self, floor_id: str) -> StoredImage | None: ...
-
-    def delete_plan_image(self, floor_id: str) -> None: ...
 
 
 class MemoryStore:
@@ -59,14 +79,16 @@ class MemoryStore:
         floor_ids = {floor.id for floor in home.floors}
         self.images = {k: v for k, v in self.images.items() if k in floor_ids}
 
-    def save_plan_image(self, floor_id: str, image: StoredImage) -> None:
+    def save_plan_image(self, home: Home, floor_id: str, image: StoredImage) -> None:
+        self.save_home(home)
         self.images[floor_id] = image
+
+    def delete_plan_image(self, home: Home, floor_id: str) -> None:
+        self.save_home(home)
+        self.images.pop(floor_id, None)
 
     def load_plan_image(self, floor_id: str) -> StoredImage | None:
         return self.images.get(floor_id)
-
-    def delete_plan_image(self, floor_id: str) -> None:
-        self.images.pop(floor_id, None)
 
 
 def create_editor_router(
@@ -81,8 +103,15 @@ def create_editor_router(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Okänd adress eller avsändare")
 
     router = APIRouter(prefix="/api", dependencies=[Depends(only_trusted)])
-    # Två sparningar i taget får inte hamna i olika ordning i databasen och i kärnan.
-    saving = asyncio.Lock()
+    # En ändring i taget, så att databasen och kärnan alltid får dem i samma ordning.
+    changing = asyncio.Lock()
+    # Revisionen börjar om när kärnan startar; den slumpade delen gör att en
+    # revision från förra gången aldrig råkar stämma.
+    run = secrets.token_hex(4)
+    changes = 0
+
+    def revision() -> str:
+        return f'"{run}-{changes}"'
 
     async def in_store(call: Callable[..., T], *args: Any) -> T:
         try:
@@ -90,80 +119,119 @@ def create_editor_router(
         except Exception:
             logger.exception("Kunde inte nå lagringen")
             raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE, "Kunde inte spara, försök igen om en stund"
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Kunde inte nå databasen. Försök igen om en stund.",
             ) from None
 
-    def known_floor(floor_id: str) -> str:
-        if all(floor.id != floor_id for floor in controller.home.floors):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Våningen finns inte")
-        return floor_id
+    async def change(
+        if_match: str | None, update: Callable[[Home], Home], store: Callable[[Home], None]
+    ) -> Response:
+        """Ändrar hemmet: kontrollerar revisionen, sparar och lämnar hemmet till kärnan."""
+        nonlocal changes
+        async with changing:
+            if if_match is not None and if_match != revision():
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Hemmet har ändrats i ett annat fönster. Nu visas det senaste.",
+                )
+            home = update(controller.home)
+            await in_store(store, home)
+            controller.replace_home(home)
+            changes += 1
+            return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"ETag": revision()})
+
+    def floor_in(home: Home, floor_id: str) -> Floor:
+        for floor in home.floors:
+            if floor.id == floor_id:
+                return floor
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Våningen finns inte")
 
     @router.get("/home")
-    def get_home() -> dict[str, Any]:
-        return homefile.to_document(controller.home)
+    def get_home() -> Response:
+        return JSONResponse(
+            homefile.to_document(controller.home), headers={**_PRIVATE, "ETag": revision()}
+        )
 
-    @router.put("/home", status_code=status.HTTP_204_NO_CONTENT)
-    async def put_home(request: Request) -> None:
+    @router.put("/home")
+    async def put_home(
+        request: Request, if_match: Annotated[str | None, Header()] = None
+    ) -> Response:
         body = await _read_body(request, MAX_HOME_BYTES)
         try:
             home = homefile.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, homefile.HomeFileError) as error:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from None
-        async with saving:
-            await in_store(home_store.save_home, home)
-            controller.replace_home(home)
+        response = await change(if_match, lambda _: home, home_store.save_home)
         logger.info(
             "Hemmet ändrades i kartredigeraren (%d rum, %d lampor)",
             len(home.rooms),
             len(home.lamps),
         )
+        return response
 
     @router.get("/floors/{floor_id}/plan-image")
-    async def get_plan_image(floor_id: str = Depends(known_floor)) -> Response:
+    async def get_plan_image(floor_id: str) -> Response:
+        floor_in(controller.home, floor_id)
         image = await in_store(home_store.load_plan_image, floor_id)
         if image is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Våningen har ingen bild")
         return Response(
             image.data,
             media_type=image.media_type,
-            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+            headers={**_PRIVATE, "X-Content-Type-Options": "nosniff"},
         )
 
-    @router.put("/floors/{floor_id}/plan-image", status_code=status.HTTP_204_NO_CONTENT)
-    async def put_plan_image(request: Request, floor_id: str = Depends(known_floor)) -> None:
+    @router.put("/floors/{floor_id}/plan-image")
+    async def put_plan_image(
+        request: Request,
+        floor_id: str,
+        width: Annotated[int, Query(gt=0, le=MAX_IMAGE_WIDTH)],
+        if_match: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        floor_in(controller.home, floor_id)
         data = await _read_body(request, MAX_IMAGE_BYTES)
-        media_type = _image_type(data)
+        media_type = image_type(data)
         if media_type is None:
             raise HTTPException(
                 status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Bilden ska vara PNG, JPEG eller WebP"
             )
-        await in_store(home_store.save_plan_image, floor_id, StoredImage(media_type, data))
+        image = StoredImage(media_type, data)
+        plan = PlanImage(
+            position=Point(0, 0),
+            meters_per_pixel=min(1.0, UNSCALED_IMAGE_WIDTH_METERS / width),
+        )
+        # Våningen kontrolleras igen inne i ändringen, ifall den hann tas bort.
+        return await change(
+            if_match,
+            lambda home: _with_plan_image(home, floor_in(home, floor_id), plan),
+            lambda home: home_store.save_plan_image(home, floor_id, image),
+        )
 
-    @router.delete("/floors/{floor_id}/plan-image", status_code=status.HTTP_204_NO_CONTENT)
-    async def delete_plan_image(floor_id: str = Depends(known_floor)) -> None:
-        await in_store(home_store.delete_plan_image, floor_id)
+    @router.delete("/floors/{floor_id}/plan-image")
+    async def delete_plan_image(
+        floor_id: str, if_match: Annotated[str | None, Header()] = None
+    ) -> Response:
+        return await change(
+            if_match,
+            lambda home: _with_plan_image(home, floor_in(home, floor_id), None),
+            lambda home: home_store.delete_plan_image(home, floor_id),
+        )
 
     return router
 
 
-def _image_type(data: bytes) -> str | None:
-    """Bildens format, känt på de första byten och inte på vad avsändaren påstår.
-
-    Bilden visas i webbläsaren och ska inte kunna vara något annat än en bild.
-    """
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return None
+def _with_plan_image(home: Home, floor: Floor, plan: PlanImage | None) -> Home:
+    floors = tuple(
+        f.model_copy(update={"plan_image": plan}) if f.id == floor.id else f for f in home.floors
+    )
+    return home.model_copy(update={"floors": floors})
 
 
 async def _read_body(request: Request, limit: int) -> bytes:
     """Läser hela anropet, men högst `limit` byte."""
     too_large = HTTPException(
-        status.HTTP_413_CONTENT_TOO_LARGE, f"Får vara högst {limit // (1024 * 1024)} MB"
+        status.HTTP_413_CONTENT_TOO_LARGE,
+        f"Filen är för stor. Den får vara högst {limit // (1024 * 1024)} MB.",
     )
     length = request.headers.get("content-length", "")
     if length.isdigit() and int(length) > limit:

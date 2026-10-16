@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { mountEditor, type EditorDependencies } from "./editor";
 import type { EditorScene, EditorViewCallbacks } from "./editorView";
-import { SaveError, type HomeDocument } from "./homefile";
+import { setPlanImage } from "./editing";
+import { CoreError, type HomeApi } from "./homeApi";
+import type { HomeDocument } from "./homefile";
 
 function home(): HomeDocument {
   return {
@@ -34,24 +36,62 @@ function home(): HomeDocument {
   };
 }
 
-async function setup(options: { refuse?: string } = {}) {
-  const saved: HomeDocument[] = [];
+/** En låtsad kärna som håller hemmet och dess revision, och kan säga nej på beställning. */
+class FakeCore {
+  document = home();
+  revision = 1;
+  images = new Map<string, Blob>();
+  saved: HomeDocument[] = [];
+  /** Svar att ge på de kommande anropen som ändrar något, i tur och ordning. */
+  failures: (CoreError | null)[] = [];
+
+  private change(revision: string, apply: () => void): Promise<string> {
+    const failure = this.failures.shift() ?? null;
+    if (failure !== null) {
+      return Promise.reject(failure);
+    }
+    if (revision !== String(this.revision)) {
+      return Promise.reject(new CoreError("Hemmet har ändrats i ett annat fönster.", true));
+    }
+    apply();
+    this.revision++;
+    return Promise.resolve(String(this.revision));
+  }
+
+  api: HomeApi = {
+    load: () =>
+      Promise.resolve({
+        document: structuredClone(this.document),
+        revision: String(this.revision),
+      }),
+    save: (document, revision) =>
+      this.change(revision, () => {
+        this.document = structuredClone(document);
+        this.saved.push(this.document);
+      }),
+    uploadPlanImage: (floorId, image, width, revision) =>
+      this.change(revision, () => {
+        this.images.set(floorId, image);
+        this.document = setPlanImage(this.document, floorId, {
+          position: [0, 0],
+          meters_per_pixel: 20 / width,
+        });
+      }),
+    deletePlanImage: (floorId, revision) =>
+      this.change(revision, () => {
+        this.images.delete(floorId);
+        this.document = setPlanImage(this.document, floorId, null);
+      }),
+    planImageUrl: (floorId) => `/bild/${floorId}`,
+  };
+}
+
+async function setup() {
+  const core = new FakeCore();
   const scenes: EditorScene[] = [];
   let callbacks: EditorViewCallbacks | undefined;
   const deps: EditorDependencies = {
-    api: {
-      load: () => Promise.resolve(home()),
-      save: (document) => {
-        if (options.refuse !== undefined) {
-          return Promise.reject(new SaveError(options.refuse));
-        }
-        saved.push(document);
-        return Promise.resolve();
-      },
-      uploadPlanImage: vi.fn(() => Promise.resolve()),
-      deletePlanImage: vi.fn(() => Promise.resolve()),
-      planImageUrl: (floorId) => `/bild/${floorId}`,
-    },
+    api: core.api,
     createView: (_container, cb) => {
       callbacks = cb;
       return {
@@ -79,15 +119,14 @@ async function setup(options: { refuse?: string } = {}) {
     }
     button.click();
   };
-  const settled = () => vi.waitFor(() => expect(root.dataset.saved).toBe("true"));
-  const drawRectangle = async () => {
+  const settled = () => vi.waitFor(() => expect(root.dataset.busy).toBe("false"));
+  const drawRectangle = (x = 4) => {
     click("Rum, rektangel");
-    map.onPointerDown({ x: 4, y: 0 });
-    map.onPointerMove({ x: 6, y: 1 });
-    map.onPointerUp({ x: 6, y: 2 });
-    await settled();
+    map.onPointerDown({ x, y: 0 });
+    map.onPointerMove({ x: x + 2, y: 1 });
+    map.onPointerUp({ x: x + 2, y: 2 });
   };
-  return { root, saved, scenes, deps, map, click, settled, drawRectangle };
+  return { root, core, scenes, map, click, settled, drawRectangle };
 }
 
 const text = (root: HTMLElement, selector: string) =>
@@ -109,9 +148,11 @@ describe("kartredigeraren", () => {
   });
 
   it("ett utdraget rum sparas, väljs och kan byta namn och tas bort", async () => {
-    const { root, saved, drawRectangle, settled } = await setup();
+    const { root, core, drawRectangle, settled } = await setup();
+    const saved = core.saved;
 
-    await drawRectangle();
+    drawRectangle();
+    await settled();
 
     const added = saved[0].home.floors[0].rooms[1];
     expect(added.polygon).toEqual([
@@ -139,7 +180,7 @@ describe("kartredigeraren", () => {
   });
 
   it("hörn nära ett befintligt hörn hamnar exakt på det", async () => {
-    const { saved, map, click, settled } = await setup();
+    const { core, map, click, settled } = await setup();
     click("Rum, fri form");
 
     for (const point of [
@@ -153,31 +194,67 @@ describe("kartredigeraren", () => {
     }
     await settled();
 
-    expect(saved[0].home.floors[0].rooms[1].polygon[0]).toEqual([3, 0]);
+    expect(core.saved[0].home.floors[0].rooms[1].polygon[0]).toEqual([3, 0]);
   });
 
   it("ett rum som kärnan inte godtar försvinner och felet visas", async () => {
-    const { root, scenes, drawRectangle } = await setup({ refuse: "Rummen delar en vägg" });
+    const { root, core, scenes, drawRectangle, settled } = await setup();
+    core.failures = [new CoreError("Rummen delar en vägg")];
 
-    await drawRectangle();
+    drawRectangle();
+    await settled();
 
     expect(text(root, ".message")).toBe("Rummen delar en vägg");
     expect(text(root, ".save-status")).toBe("Ändringen sparades inte.");
     expect(scenes.at(-1)?.floor.rooms).toHaveLength(1);
   });
 
+  it("ändringar som byggde på en misslyckad ändring skickas inte", async () => {
+    const { root, core, scenes, drawRectangle, settled } = await setup();
+    core.failures = [new CoreError("Kunde inte nå databasen.")];
+
+    drawRectangle(4); // misslyckas
+    drawRectangle(8); // byggde på den första och får inte sparas ensam
+    await settled();
+
+    expect(core.saved).toEqual([]);
+    expect(scenes.at(-1)?.floor.rooms).toHaveLength(1);
+    expect(text(root, ".message")).toBe("Kunde inte nå databasen.");
+
+    // Nästa ändring utgår från det kärnan har och går bra.
+    drawRectangle(4);
+    await settled();
+    expect(core.saved[0].home.floors[0].rooms).toHaveLength(2);
+    expect(text(root, ".save-status")).toBe("Alla ändringar är sparade.");
+  });
+
+  it("en ändring från ett annat fönster skrivs inte över utan visas", async () => {
+    const { root, core, scenes, drawRectangle, settled } = await setup();
+    // Ett annat fönster byter namn på köket.
+    core.document = structuredClone(core.document);
+    core.document.home.floors[0].rooms[0].name = "Köket";
+    core.revision++;
+
+    drawRectangle();
+    await settled();
+
+    expect(core.saved).toEqual([]);
+    expect(text(root, ".save-status")).toBe("Hemmet har lästs om.");
+    expect(scenes.at(-1)?.floor.rooms.map((room) => room.name)).toEqual(["Köket"]);
+  });
+
   it("för små rum sparas inte", async () => {
-    const { root, saved, map, click } = await setup();
+    const { root, core, map, click } = await setup();
     click("Rum, rektangel");
     map.onPointerDown({ x: 4, y: 4 });
     map.onPointerUp({ x: 4.1, y: 4.1 });
 
-    expect(saved).toEqual([]);
+    expect(core.saved).toEqual([]);
     expect(text(root, ".message")).toMatch(/för litet/);
   });
 
   it("en uppladdad bild läggs på våningen och skalas med två punkter", async () => {
-    const { root, saved, deps, map, settled } = await setup();
+    const { root, core, map, settled } = await setup();
     const input = root.querySelector<HTMLInputElement>('input[type="file"]');
     if (input === null) {
       throw new Error("Inget filfält");
@@ -185,11 +262,10 @@ describe("kartredigeraren", () => {
     const file = new File(["bild"], "plan.png", { type: "image/png" });
     Object.defineProperty(input, "files", { value: [file] });
     input.dispatchEvent(new Event("change"));
-    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    await vi.waitFor(() => expect(core.images.get("plan")).toBe(file));
     await settled();
 
-    expect(deps.api.uploadPlanImage).toHaveBeenCalledWith("plan", file);
-    expect(saved[0].home.floors[0].plan_image).toEqual({
+    expect(core.document.home.floors[0].plan_image).toEqual({
       position: [0, 0],
       meters_per_pixel: 0.04,
     });
@@ -207,9 +283,27 @@ describe("kartredigeraren", () => {
     root.querySelector("form")?.requestSubmit();
     await settled();
 
-    expect(saved[1].home.floors[0].plan_image).toEqual({
+    expect(core.saved[0].home.floors[0].plan_image).toEqual({
       position: [0, 0],
       meters_per_pixel: 0.02,
     });
+
+    [...root.querySelectorAll("button")].find((b) => b.textContent === "Ta bort bilden")?.click();
+    await settled();
+    expect(core.document.home.floors[0].plan_image).toBeNull();
+    expect(core.images.size).toBe(0);
+  });
+
+  it("en bild som inte går att ladda upp ger ett fel och ändrar inget", async () => {
+    const { root, core, settled } = await setup();
+    core.failures = [new CoreError("Bilden ska vara PNG, JPEG eller WebP")];
+    const input = root.querySelector<HTMLInputElement>('input[type="file"]');
+    Object.defineProperty(input, "files", { value: [new File(["x"], "a.png")] });
+    input?.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(text(root, ".message")).toMatch(/PNG/));
+    await settled();
+
+    expect(core.document.home.floors[0].plan_image).toBeUndefined();
+    expect(root.querySelector<HTMLButtonElement>('[data-tool="scale"]')?.disabled).toBe(true);
   });
 });

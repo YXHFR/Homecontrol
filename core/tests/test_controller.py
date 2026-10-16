@@ -157,3 +157,18 @@ def test_person_outside_a_moved_room_leaves_it() -> None:
     )
 
     assert not controller.snapshot().rooms[0].occupied
+
+
+def test_lamp_of_a_removed_room_is_turned_off() -> None:
+    controller, _, lamps = make()
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+    assert lamps.states == {"taklampa": True}
+
+    home = one_room_home()
+    controller.replace_home(
+        home.model_copy(update={"floors": (home.floors[0].model_copy(update={"rooms": ()}),)})
+    )
+
+    assert lamps.states == {"taklampa": False}
+    assert controller.snapshot().lamps == ()

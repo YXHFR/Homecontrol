@@ -16,7 +16,6 @@ anslutning per anrop.
 import logging
 import re
 import time
-from dataclasses import dataclass
 from importlib import resources
 
 import psycopg
@@ -24,6 +23,7 @@ from psycopg.types.json import Jsonb
 
 from homecontrol import homefile
 from homecontrol.home import Home
+from homecontrol.images import StoredImage
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +61,6 @@ def migrate(conn: psycopg.Connection) -> None:
             logger.info("Uppdaterar databasen: %s", name)
             conn.execute(sql.encode())
             conn.execute("INSERT INTO schema_migration (version) VALUES (%s)", (version,))
-
-
-@dataclass(frozen=True)
-class StoredImage:
-    media_type: str
-    """"image/png", "image/jpeg" eller "image/webp"."""
-    data: bytes
 
 
 def save_home(conn: psycopg.Connection, home: Home) -> None:
@@ -132,17 +125,21 @@ class DatabaseStore:
         with connect(self._conninfo, attempts=1) as conn:
             save_home(conn, home)
 
-    def save_plan_image(self, floor_id: str, image: StoredImage) -> None:
-        with connect(self._conninfo, attempts=1) as conn:
+    def save_plan_image(self, home: Home, floor_id: str, image: StoredImage) -> None:
+        """Sparar bilden och hemmet (med bildens nya placering) på en gång."""
+        with connect(self._conninfo, attempts=1) as conn, conn.transaction():
+            save_home(conn, home)
             save_plan_image(conn, floor_id, image)
+
+    def delete_plan_image(self, home: Home, floor_id: str) -> None:
+        """Tar bort bilden och sparar hemmet (utan bilden) på en gång."""
+        with connect(self._conninfo, attempts=1) as conn, conn.transaction():
+            save_home(conn, home)
+            delete_plan_image(conn, floor_id)
 
     def load_plan_image(self, floor_id: str) -> StoredImage | None:
         with connect(self._conninfo, attempts=1) as conn:
             return load_plan_image(conn, floor_id)
-
-    def delete_plan_image(self, floor_id: str) -> None:
-        with connect(self._conninfo, attempts=1) as conn:
-            delete_plan_image(conn, floor_id)
 
 
 def _migrations() -> list[tuple[int, str, str]]:

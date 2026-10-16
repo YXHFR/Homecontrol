@@ -41,6 +41,7 @@ export async function waitUntilSaved(page: Page): Promise<void> {
   const next = (savesSeen.get(page) ?? 0) + 1;
   await expect(page.locator(".message"), "kärnan sa nej").toBeHidden();
   await expect(page.locator("#app")).toHaveAttribute("data-saves", String(next));
+  await expect(page.locator("#app")).toHaveAttribute("data-busy", "false");
   await expect(page.getByRole("status")).toHaveText("Alla ändringar är sparade.");
   savesSeen.set(page, next);
 }
