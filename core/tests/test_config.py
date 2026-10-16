@@ -87,7 +87,11 @@ def test_history_is_kept_without_time_limit_unless_changed(
         ("HOMECONTROL_HISTORY_FULL_HOURS", "inf", "HISTORY_FULL_HOURS i .env ska vara ett tal"),
         ("HOMECONTROL_HISTORY_FULL_HOURS", "0.5", "HISTORY_FULL_HOURS i .env ska vara minst 1"),
         ("HOMECONTROL_HISTORY_KEEP_DAYS", "0", "HISTORY_KEEP_DAYS i .env ska vara minst 1"),
-        ("HOMECONTROL_HISTORY_KEEP_DAYS", "1", "HISTORY_KEEP_DAYS i .env ska vara längre"),
+        (
+            "HOMECONTROL_HISTORY_KEEP_DAYS",
+            "1",
+            r"HISTORY_KEEP_DAYS i \.env \(1 dagar\) ska vara längre",
+        ),
     ],
 )
 def test_bad_history_settings_say_which_setting_is_wrong(

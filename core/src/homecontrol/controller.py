@@ -79,7 +79,8 @@ class Controller:
         self._clock = clock
         self._outputs = tuple(outputs)
         self._event_log = event_log
-        self._explanations_to_log: list[tuple[str, str | None, str]] = []
+        self._explanations_to_log: list[tuple[LampCommand, str | None]] = []
+        """Kommandona vars förklaringar ska till händelseloggen, med lampans rum."""
         # Ljusnivån per rum och källa. Det senast mätta värdet gäller, och en
         # källa som tappas tar sina värden med sig.
         self._lux: dict[str, dict[str, float]] = {}
@@ -221,9 +222,7 @@ class Controller:
     def _explain(self, command: LampCommand) -> None:
         """Lägger förklaringen åt sidan. Den skickas efter ändringen som orsakade den."""
         if self._event_log is not None:
-            self._explanations_to_log.append(
-                (command.reason, self._room_of_lamp(command.lamp_id), command.lamp_id)
-            )
+            self._explanations_to_log.append((command, self._room_of_lamp(command.lamp_id)))
 
     def _room_of_lamp(self, lamp_id: str) -> str | None:
         return next(
@@ -236,15 +235,15 @@ class Controller:
         )
 
     def _notify(self) -> None:
+        explanations, self._explanations_to_log = self._explanations_to_log, []
         for listener in list(self._listeners):
             listener()
         # Efter lyssnarna, så att historiken får rummets nya läge före förklaringen.
-        explanations, self._explanations_to_log = self._explanations_to_log, []
         if self._event_log is None:
             return
-        for text, room_id, lamp_id in explanations:
+        for command, room_id in explanations:
             # Loggen får inte hindra lamporna, precis som en trasig utgång.
             try:
-                self._event_log.explain(text, room_id=room_id, lamp_id=lamp_id)
+                self._event_log.explain(command.reason, room_id=room_id, lamp_id=command.lamp_id)
             except Exception:
                 logger.exception("Händelseloggen kunde inte ta emot förklaringen")

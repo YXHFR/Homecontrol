@@ -141,6 +141,7 @@ def prepare_history(settings: Settings) -> history.History | None:
     if settings.database is None:
         return None
     with store.connect(settings.database) as conn:
+        store.migrate(conn)
         history.configure(conn, settings.history_full_resolution, settings.history_keep)
     logger.info(
         "Historiken sparas med full upplösning i %g timmar, sedan nedsamplad %s",

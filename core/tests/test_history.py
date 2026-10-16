@@ -25,6 +25,7 @@ from homecontrol.home import Point, Room
 from homecontrol.homefile import example_home
 from homes import radar_sees
 
+DAY = timedelta(days=1)
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 ANNA = str(uuid.uuid4())
 BO = str(uuid.uuid4())
@@ -89,7 +90,7 @@ def per_second(conn: psycopg.Connection) -> list[tuple[datetime, str, float]]:
 def test_old_positions_are_downsampled_to_one_per_second_and_compressed(
     conn: psycopg.Connection,
 ) -> None:
-    history.configure(conn)
+    history.configure(conn, DAY, None)
     pause_background_jobs(conn)
     old = datetime.now(UTC).replace(microsecond=0) - timedelta(days=3)
     insert_positions(conn, ANNA, old, [float(i) for i in range(25)])  # 2,5 sekunder
@@ -134,7 +135,7 @@ def test_old_positions_are_downsampled_to_one_per_second_and_compressed(
 
 
 def test_downsampled_positions_are_kept_without_time_limit(conn: psycopg.Connection) -> None:
-    history.configure(conn)
+    history.configure(conn, DAY, None)
 
     retention = conn.execute(
         "SELECT hypertable_name FROM timescaledb_information.jobs"
@@ -156,8 +157,10 @@ def policy(conn: psycopg.Connection, kind: str, table: str, key: str) -> list[ti
     ]
 
 
-def test_full_resolution_lasts_one_day_by_default(conn: psycopg.Connection) -> None:
-    history.configure(conn)
+def test_full_resolution_ends_and_compression_starts_after_the_set_time(
+    conn: psycopg.Connection,
+) -> None:
+    history.configure(conn, DAY, None)
 
     assert policy(conn, "policy_retention", "track_position", "drop_after") == [timedelta(days=1)]
     assert policy(conn, "policy_compression", "track_position_per_second", "compress_after") == [
@@ -166,9 +169,9 @@ def test_full_resolution_lasts_one_day_by_default(conn: psycopg.Connection) -> N
 
 
 def test_full_resolution_time_can_be_changed(conn: psycopg.Connection) -> None:
-    history.configure(conn)
+    history.configure(conn, DAY, None)
 
-    history.configure(conn, timedelta(hours=6))
+    history.configure(conn, timedelta(hours=6), None)
 
     assert policy(conn, "policy_retention", "track_position", "drop_after") == [timedelta(hours=6)]
     assert policy(conn, "policy_compression", "track_position_per_second", "compress_after") == [
@@ -176,20 +179,13 @@ def test_full_resolution_time_can_be_changed(conn: psycopg.Connection) -> None:
     ]
 
 
-def test_full_resolution_shorter_than_the_downsampling_is_refused(
-    conn: psycopg.Connection,
-) -> None:
-    with pytest.raises(ValueError, match="minst"):
-        history.configure(conn, timedelta(minutes=30))
-
-
 def test_history_can_be_kept_for_a_limited_time(conn: psycopg.Connection) -> None:
-    history.configure(conn, keep=timedelta(days=90))
+    history.configure(conn, DAY, timedelta(days=90))
 
     for table in ("track_position_per_second", "event_log"):
         assert policy(conn, "policy_retention", table, "drop_after") == [timedelta(days=90)]
 
-    history.configure(conn)
+    history.configure(conn, DAY, None)
 
     for table in ("track_position_per_second", "event_log"):
         assert policy(conn, "policy_retention", table, "drop_after") == []

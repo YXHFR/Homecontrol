@@ -42,7 +42,7 @@ def _drop_schema(admin: psycopg.Connection, schema: str) -> None:
         try:
             admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
             return
-        except psycopg.errors.InternalError_:
+        except (psycopg.errors.InternalError_, psycopg.errors.DeadlockDetected):
             if attempt == 9:
                 raise
             time.sleep(0.2)

@@ -11,6 +11,9 @@ kön, och då tappas nya punkter i stället för att lamporna får vänta.
 Det som inte gick att skriva tappas också; historiken är inte viktigare än
 att kärnan fortsätter.
 
+Rummets läge sparas före förklaringen som det gav upphov till, utom när
+kön har varit full: då kan rumsändringen komma efter förklaringen.
+
 En position sparas när spåret har flyttat sig eller bytt mellan sett och
 kvarhållet. Ett spår som står helt still ger alltså inga nya punkter.
 
@@ -29,7 +32,6 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from homecontrol.config import HISTORY_FULL_RESOLUTION, MIN_HISTORY_FULL_RESOLUTION
 from homecontrol.controller import Snapshot
 from homecontrol.fusion import Occupancy
 from homecontrol.home import Point
@@ -73,22 +75,18 @@ _STOP = object()
 """Läggs sist i kön av `close`, så att skrivaren vet att allt före den är skrivet."""
 
 
-def configure(
-    conn: psycopg.Connection,
-    full_resolution: timedelta = HISTORY_FULL_RESOLUTION,
-    keep: timedelta | None = None,
-) -> None:
+def configure(conn: psycopg.Connection, full_resolution: timedelta, keep: timedelta | None) -> None:
     """Ställer in hur länge historiken sparas.
 
     Positionerna sparas med full upplösning i `full_resolution`. Sedan tas
     de bort av TimescaleDB, och samtidigt komprimeras den nedsamplade
     historiken. Den nedsamplade historiken och händelseloggen sparas i
     `keep`, eller utan tidsgräns om den är None.
+
+    Tiderna kontrolleras av `config.Settings`. TimescaleDB tar bort hela
+    delar av tabellerna åt gången, så det gamla kan ligga kvar ett tag till:
+    händelseloggen upp till en vecka.
     """
-    if full_resolution < MIN_HISTORY_FULL_RESOLUTION:
-        raise ValueError(f"Full upplösning måste sparas i minst {MIN_HISTORY_FULL_RESOLUTION}")
-    if keep is not None and keep <= full_resolution:
-        raise ValueError("Historiken måste sparas längre än den fulla upplösningen")
     with conn.transaction():
         _replace_retention(conn, "track_position", full_resolution)
         _replace_retention(conn, "track_position_per_second", keep)
@@ -170,6 +168,8 @@ class History:
             self._rooms.clear()
             return
         now = self._wall_clock()
+        # Det sparade uppdateras bara om ändringen fick plats i kön. Annars
+        # försöker nästa anrop igen.
         tracks = {}
         for track in snapshot.tracks:
             state = (track.floor_id, track.position, track.held)
