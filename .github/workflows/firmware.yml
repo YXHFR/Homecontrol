@@ -113,6 +113,9 @@ jobs:
 
   site:
     name: Bygg webbinstalleraren
+    # Bara från main. En PR bygger bara ett rum, och en PR (även från en fork)
+    # ska inte kunna ladda upp en installerare som någon tar för den riktiga.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -141,10 +144,7 @@ jobs:
           ref=$(grep -oP '^\s+ref: \K[0-9a-f]{40}$' firmware/homecontrol.yaml)
           curl -sSfL "https://raw.githubusercontent.com/francescopace/espectre/${ref}/LICENSE" \
             -o site/LICENSE-GPL-3.0.txt
-      # Bara från main: en PR (även från en fork) bygger sidan som test men
-      # laddar inte upp någon installerare som någon kan ta för den riktiga.
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
           name: webbinstallerare
           path: site/
