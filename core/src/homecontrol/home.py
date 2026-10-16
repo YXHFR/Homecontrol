@@ -1,5 +1,7 @@
 """Hemmodellen: hem, våningar, rum, väggar, dörröppningar, zoner, noder, signalkällor och lampor.
 
+Varje våning kan också ha en planritning (en bild) att rita rummen ovanpå.
+
 Koordinater är meter i ett plan per våning, med origo uppe till vänster:
 x växer åt höger och y nedåt, precis som på en ritning eller skärm. Rotation
 anges i grader medurs, där 0° pekar åt höger (längs x).
@@ -230,6 +232,19 @@ class SignalSource(_Model):
     height: Height
 
 
+class PlanImage(_Model):
+    """Var bilden av våningens planritning ligger och hur stor den är.
+
+    Själva bilden sparas för sig i databasen och följer inte med i exportfilen,
+    så den här delen säger bara hur bilden ska läggas under rummen.
+    """
+
+    position: Position
+    """Bildens övre vänstra hörn."""
+    meters_per_pixel: Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
+    """Hur många meter en bildpunkt motsvarar. Sätts när bilden skalas."""
+
+
 class Floor(_Model):
     id: Id
     name: Name
@@ -237,6 +252,8 @@ class Floor(_Model):
     """Våningsplanet: 0 är entréplanet, 1 en trappa upp och -1 källaren."""
     rooms: tuple[Room, ...] = ()
     signal_sources: tuple[SignalSource, ...] = ()
+    plan_image: PlanImage | None = None
+    """Bilden av planritningen som rummen ritas ovanpå, om någon har laddats upp."""
 
     @model_validator(mode="after")
     def _shared_walls_agree(self) -> Self:

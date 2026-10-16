@@ -56,7 +56,12 @@ def main(argv: list[str] | None = None) -> None:
 def serve(settings: Settings) -> None:
     uvicorn.run(
         create_app(
-            settings.web_dir, allowed_hosts=settings.allowed_hosts, home=load_or_seed_home(settings)
+            settings.web_dir,
+            allowed_hosts=settings.allowed_hosts,
+            home=load_or_seed_home(settings),
+            home_store=(
+                None if settings.database is None else store.DatabaseStore(settings.database)
+            ),
         ),
         host=settings.host,
         port=settings.port,

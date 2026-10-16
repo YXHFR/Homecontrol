@@ -182,7 +182,8 @@
             "position": [9.5, 5.5],
             "height": 1.0
           }
-        ]
+        ],
+        "plan_image": null
       },
       {
         "id": "ovanvaning",
@@ -321,7 +322,8 @@
             "position": [5.0, 6.8],
             "height": 2.4
           }
-        ]
+        ],
+        "plan_image": null
       }
     ]
   }

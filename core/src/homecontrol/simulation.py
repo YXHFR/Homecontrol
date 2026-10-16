@@ -19,7 +19,7 @@ from homecontrol.connectors import (
     SourceLost,
     TargetsObserved,
 )
-from homecontrol.home import Point, Target
+from homecontrol.home import Home, Point, Target
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,15 @@ class SimulatedSource:
         self._daylight = lux
         for room_id in self._room_ids:
             self.set_light_level(room_id, lux)
+
+    def set_rooms(self, room_ids: Iterable[str]) -> None:
+        """Byter rummen, till exempel när hemmet har ritats om. Nya rum får dagsljuset."""
+        before = set(self._room_ids)
+        self._room_ids = tuple(room_ids)
+        if self._daylight is not None:
+            for room_id in self._room_ids:
+                if room_id not in before:
+                    self.set_light_level(room_id, self._daylight)
 
     def set_light_level(self, room_id: str, lux: float) -> None:
         """Ljusnivån i ett enda rum."""
@@ -195,6 +204,11 @@ class Simulation:
             self._source.stop()
             self._clock.set_speed(1)
         self._notify()
+
+    def use_home(self, home: Home) -> None:
+        """Byter till ett ändrat hem, så att nya rum och våningar också simuleras."""
+        self._floor_ids = frozenset(floor.id for floor in home.floors)
+        self._source.set_rooms(room.id for room in home.rooms)
 
     def add_person(self, floor_id: str, position: Point) -> str | None:
         """Lägger till en person och returnerar dess id, eller None om det inte gick."""

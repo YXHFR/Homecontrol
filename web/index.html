@@ -66,9 +66,26 @@
         border-color: #2f6fed;
         color: #fff;
       }
+      .pages {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 8px;
+      }
+      .pages a {
+        color: #2f6fed;
+      }
+      .pages a[aria-current="page"] {
+        color: #222;
+        font-weight: 600;
+        text-decoration: none;
+      }
     </style>
   </head>
   <body>
+    <nav class="pages" aria-label="Sidor">
+      <a href="#" data-page="live">Livevy</a>
+      <a href="#redigera" data-page="editor">Kartredigerare</a>
+    </nav>
     <main id="app"></main>
     <script type="module" src="/src/main.ts"></script>
   </body>

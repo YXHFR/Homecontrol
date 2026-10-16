@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from homecontrol import presence, rules
 from homecontrol.clock import Clock
 from homecontrol.connectors import (
+    LampCommand,
     LampOutput,
     LightLevelObserved,
     Observation,
@@ -101,6 +102,31 @@ class Controller:
         self._evaluate()
         self._notify()
 
+    def replace_home(self, home: Home) -> None:
+        """Byter till ett ändrat hem, till exempel när kartredigeraren har sparat.
+
+        Det som fortfarande gäller behålls: källornas mål, ljusnivån i rum som
+        finns kvar, hur länge rummen har varit tomma och vilka lampor som är tända.
+        En tänd lampa som inte längre finns i hemmet släcks, så att den inte
+        lyser kvar utan att något styr den.
+
+        `home` ska vara ett nytt objekt; livevyn ser att hemmet har bytts genom
+        att jämföra med det förra.
+        """
+        kept = {lamp.id for lamp in home.lamps}
+        for lamp_id, on in self._lamps_on.items():
+            if on and lamp_id not in kept:
+                self._send(LampCommand(lamp_id, on=False, reason="Lampan togs bort ur hemmet."))
+        self._home = home
+        self._room_ids = {room.id for room in home.rooms}
+        self._lux = {
+            room_id: lux for room_id, lux in self._lux.items() if room_id in self._room_ids
+        }
+        self._lamps_on = {lamp.id: self._lamps_on.get(lamp.id, False) for lamp in home.lamps}
+        self._assess_presence()
+        self._evaluate()
+        self._notify()
+
     def tick(self) -> None:
         """Låter regeln titta igen om klockan har nått `wake_at`."""
         if self._wake_at is not None and self._clock.now() >= self._wake_at:
@@ -149,14 +175,17 @@ class Controller:
             logger.info("%s %s", "Tänder" if command.on else "Släcker", command.lamp_id)
             logger.debug("%s: %s", command.lamp_id, command.reason)
             self._lamps_on[command.lamp_id] = command.on
-            for output in self._outputs:
-                # En trasig utgång får inte hindra de andra eller stoppa kärnan.
-                try:
-                    output.send(command)
-                except Exception:
-                    logger.exception("Lamputgången kunde inte ta emot %s", command)
+            self._send(command)
         self._explanations = dict(result.explanations)
         self._wake_at = result.wake_at
+
+    def _send(self, command: LampCommand) -> None:
+        for output in self._outputs:
+            # En trasig utgång får inte hindra de andra eller stoppa kärnan.
+            try:
+                output.send(command)
+            except Exception:
+                logger.exception("Lamputgången kunde inte ta emot %s", command)
 
     def _notify(self) -> None:
         for listener in list(self._listeners):

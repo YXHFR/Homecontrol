@@ -6,7 +6,7 @@ from homecontrol.clock import ManualClock
 from homecontrol.connectors import LampCommand, LightLevelObserved, SourceLost, TargetsObserved
 from homecontrol.controller import Controller
 from homecontrol.simulation import SimulatedLampOutput
-from homes import at, one_room_home
+from homes import at, one_room_home, room
 
 
 def make() -> tuple[Controller, ManualClock, SimulatedLampOutput]:
@@ -134,3 +134,63 @@ def test_manual_clock_cannot_go_backwards() -> None:
 
     with pytest.raises(ValueError, match="bakåt"):
         clock.advance_to(9)
+
+
+def test_replaced_home_keeps_what_still_applies() -> None:
+    controller, _, lamps = make()
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+    assert lamps.states == {"taklampa": True}
+    changes: list[None] = []
+    controller.subscribe(lambda: changes.append(None))
+
+    home = one_room_home()
+    floor = home.floors[0]
+    hall = room("hall", "Hall", 5, 0, 2, 4, lamp="hallampa")
+    controller.replace_home(
+        home.model_copy(
+            update={"floors": (floor.model_copy(update={"rooms": (*floor.rooms, hall)}),)}
+        )
+    )
+
+    snapshot = controller.snapshot()
+    assert changes == [None]
+    assert [(r.room_id, r.occupied, r.lux) for r in snapshot.rooms] == [
+        ("vardagsrum", True, 5),
+        ("hall", False, None),
+    ]
+    assert [(lamp.lamp_id, lamp.on) for lamp in snapshot.lamps] == [
+        ("taklampa", True),
+        ("hallampa", False),
+    ]
+    # Lampan var redan tänd, så inget nytt kommando behövdes.
+    assert len(lamps.history) == 1
+
+
+def test_person_outside_a_moved_room_leaves_it() -> None:
+    controller, _, _ = make()
+    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+
+    home = one_room_home()
+    floor = home.floors[0]
+    moved = room("vardagsrum", "Vardagsrum", 10, 10, 5, 4, lamp="taklampa")
+    controller.replace_home(
+        home.model_copy(update={"floors": (floor.model_copy(update={"rooms": (moved,)}),)})
+    )
+
+    assert not controller.snapshot().rooms[0].occupied
+
+
+def test_lamp_of_a_removed_room_is_turned_off() -> None:
+    controller, _, lamps = make()
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+    assert lamps.states == {"taklampa": True}
+
+    home = one_room_home()
+    controller.replace_home(
+        home.model_copy(update={"floors": (home.floors[0].model_copy(update={"rooms": ()}),)})
+    )
+
+    assert lamps.states == {"taklampa": False}
+    assert controller.snapshot().lamps == ()
