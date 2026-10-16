@@ -16,6 +16,7 @@ from homecontrol import __version__
 from homecontrol.clock import SystemClock
 from homecontrol.controller import Controller
 from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
+from homecontrol.history import History
 from homecontrol.home import Home
 from homecontrol.homefile import example_home
 from homecontrol.live import create_live_router, run_timer
@@ -30,11 +31,15 @@ def create_app(
     allowed_hosts: Set[str] = frozenset(),
     home: Home | None = None,
     home_store: HomeStore | None = None,
+    history: History | None = None,
 ) -> FastAPI:
     """`home` är hemmet från databasen. Utan det används exempelhemmet.
 
     `home_store` är där kartredigerarens ändringar sparas. Utan den sparas de
     bara så länge kärnan är igång.
+
+    `history` sparar spåren, rummens läge och förklaringarna. Utan den sparas
+    ingen historik.
     """
     clock = clock if clock is not None else SystemClock()
     home = home if home is not None else example_home()
@@ -44,7 +49,10 @@ def create_app(
     # något att se. När riktiga kopplingar läggs till ska läget börja avslaget,
     # och tidsfarten spärras så länge riktiga lampor styrs (se Simulation).
     lamps = SimulatedLampOutput()
-    controller = Controller(home, clock, [lamps])
+    controller = Controller(home, clock, [lamps], event_log=history)
+    if history is not None:
+        history.record(controller.snapshot())
+        controller.subscribe(lambda: history.record(controller.snapshot()))
     source = SimulatedSource(home)
     simulation = Simulation(
         source, controller.observe, clock, floor_ids=(floor.id for floor in home.floors)
@@ -52,6 +60,8 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if history is not None:
+            history.start()
         timer = asyncio.create_task(run_timer(controller, clock))
         try:
             yield
@@ -59,6 +69,8 @@ def create_app(
             timer.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await timer
+            if history is not None:
+                await asyncio.to_thread(history.close)
 
     app = FastAPI(
         title="Homecontrol",

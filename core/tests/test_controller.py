@@ -97,6 +97,42 @@ def test_log_says_which_lamp_but_not_where_someone_is(caplog: pytest.LogCaptureF
     assert "Vardagsrum" not in caplog.text
 
 
+class RecordedLog:
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, str | None, str | None]] = []
+
+    def explain(self, text: str, *, room_id: str | None = None, lamp_id: str | None = None) -> None:
+        self.entries.append((text, room_id, lamp_id))
+
+
+def test_every_lamp_command_is_explained_in_the_event_log() -> None:
+    log = RecordedLog()
+    controller = Controller(one_room_home(), ManualClock(), [SimulatedLampOutput()], log)
+
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+    controller.observe(radar_sees((1, 1)))
+
+    [(text, room_id, lamp_id)] = log.entries
+    assert (room_id, lamp_id) == ("vardagsrum", "taklampa")
+    assert text
+
+
+class BrokenLog:
+    def explain(self, text: str, *, room_id: str | None = None, lamp_id: str | None = None) -> None:
+        raise RuntimeError("full")
+
+
+def test_broken_event_log_does_not_stop_the_lamps(caplog: pytest.LogCaptureFixture) -> None:
+    lamps = SimulatedLampOutput()
+    controller = Controller(one_room_home(), ManualClock(), [lamps], BrokenLog())
+
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
+    controller.observe(radar_sees((1, 1)))
+
+    assert lamps.states == {"taklampa": True}
+    assert "Händelseloggen kunde inte" in caplog.text
+
+
 @pytest.mark.parametrize("lux", [-1.0, math.nan, math.inf])
 def test_invalid_light_level_is_ignored(lux: float) -> None:
     controller, _, _ = make()

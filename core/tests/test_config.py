@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_WEB_DIR",
         "HOMECONTROL_ALLOWED_HOSTS",
         "HOMECONTROL_DATABASE",
+        "HOMECONTROL_HISTORY_FULL_HOURS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -48,3 +50,14 @@ def test_empty_database_setting_means_no_database(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("HOMECONTROL_DATABASE", "")
 
     assert Settings.from_env().database is None
+
+
+def test_full_resolution_history_lasts_one_day_unless_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("HOMECONTROL_HISTORY_FULL_HOURS", raising=False)
+    assert Settings.from_env().history_full_resolution == timedelta(days=1)
+
+    monkeypatch.setenv("HOMECONTROL_HISTORY_FULL_HOURS", "48")
+
+    assert Settings.from_env().history_full_resolution == timedelta(days=2)

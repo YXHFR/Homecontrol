@@ -30,7 +30,7 @@ def database() -> Iterator[str]:
     with psycopg.connect(base, autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
         try:
-            yield make_conninfo(base, options=f"-c search_path={schema}")
+            yield make_conninfo(base, options=f"-c search_path={schema},public")
         finally:
             admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 

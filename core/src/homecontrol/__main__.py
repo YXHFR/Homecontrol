@@ -14,11 +14,12 @@ import argparse
 import logging
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import uvicorn
 
-from homecontrol import store
+from homecontrol import history, store
 from homecontrol.app import create_app
 from homecontrol.config import Settings
 from homecontrol.home import Home
@@ -62,6 +63,7 @@ def serve(settings: Settings) -> None:
             home_store=(
                 None if settings.database is None else store.DatabaseStore(settings.database)
             ),
+            history=prepare_history(settings),
         ),
         host=settings.host,
         port=settings.port,
@@ -129,6 +131,22 @@ def load_or_seed_home(settings: Settings) -> Home:
             logger.info("Inget hem var sparat, så exempelhemmet lades in")
     logger.info("Läste in hemmet från databasen (%s)", _summary(home))
     return home
+
+
+def prepare_history(settings: Settings) -> history.History | None:
+    """Ställer in hur länge historiken sparas med full upplösning. Utan databas sparas ingen."""
+    if settings.database is None:
+        return None
+    with store.connect(settings.database) as conn:
+        try:
+            history.configure(conn, settings.history_full_resolution)
+        except ValueError as error:
+            sys.exit(f"HOMECONTROL_HISTORY_FULL_HOURS: {error}")
+    logger.info(
+        "Historiken sparas med full upplösning i %g timmar, sedan nedsamplad",
+        settings.history_full_resolution / timedelta(hours=1),
+    )
+    return history.History(settings.database)
 
 
 def _summary(home: Home) -> str:

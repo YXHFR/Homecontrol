@@ -169,6 +169,36 @@ Livevyn visar alltså också när någon sitter eller ligger still, i vilka
 zoner, och vilka sensorer som inte svarar. Tänk på det när du bestämmer vem
 som når livevyn (se nedan).
 
+### Historik
+
+Kärnan sparar var spåren har varit och vad som har hänt, i databasen på
+datorn där Homecontrol körs. Inget av det skickas någonstans, och inget
+exporteras av sig självt.
+
+- **Positioner:** varje spår sparas ungefär tio gånger i sekunden. Efter ett
+  dygn finns bara en punkt per sekund och spår kvar (medelvärdet), och den
+  äldre historiken komprimeras. Den sparas sedan utan tidsgräns.
+- **Händelseloggen:** när ett rum blir upptaget, tomt eller okänt, och
+  förklaringen till varje gång en lampa tänds eller släcks. Den sparas utan
+  tidsgräns.
+
+Spåren är anonyma: varje spår får ett slumpat id och historiken säger inget
+om vem det var. Vill du spara full upplösning längre eller kortare än ett
+dygn ställer du in antalet timmar i `.env` (minst 1) och startar om kärnan:
+
+```sh
+HISTORY_FULL_HOURS=48
+```
+
+Låtsaspersonerna i simuleringsläget sparas på samma sätt som riktiga spår.
+
+Hinner databasen inte med, till exempel på ett långsamt minneskort, tappas
+punkter i historiken i stället för att lamporna får vänta.
+
+Historiken visar när någon har varit hemma och i vilka rum. Tänk på det när
+du bestämmer vem som når datorn och databasen, och var säkerhetskopior av
+databasen hamnar.
+
 ### Hemmet: spara, flytta och läsa in
 
 Hemmet (våningar, rum, väggar, dörröppningar, zoner, rumskort, routrar och

@@ -6,7 +6,10 @@ och skickas in i containern av Docker Compose.
 
 import os
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
+
+from homecontrol.history import FULL_RESOLUTION
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,8 @@ class Settings:
     Lösenordet står inte här utan läses av databasbiblioteket från PGPASSWORD.
     Utan databas används exempelhemmet, och inget sparas.
     """
+    history_full_resolution: timedelta = FULL_RESOLUTION
+    """Hur länge historiken sparas med full upplösning innan den bara finns nedsamplad."""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -35,4 +40,11 @@ class Settings:
                 if name.strip()
             ),
             database=os.environ.get("HOMECONTROL_DATABASE", "").strip() or None,
+            history_full_resolution=_hours(
+                os.environ.get("HOMECONTROL_HISTORY_FULL_HOURS", ""), FULL_RESOLUTION
+            ),
         )
+
+
+def _hours(text: str, default: timedelta) -> timedelta:
+    return timedelta(hours=float(text)) if text.strip() else default

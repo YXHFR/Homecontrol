@@ -22,6 +22,7 @@ from homecontrol.connectors import (
     RadarTargetsObserved,
     SourceLost,
 )
+from homecontrol.events import EventLog
 from homecontrol.fusion import Fusion, Occupancy, Track
 from homecontrol.home import Home
 
@@ -66,10 +67,18 @@ class Snapshot:
 
 
 class Controller:
-    def __init__(self, home: Home, clock: Clock, outputs: Sequence[LampOutput]) -> None:
+    def __init__(
+        self,
+        home: Home,
+        clock: Clock,
+        outputs: Sequence[LampOutput],
+        event_log: EventLog | None = None,
+    ) -> None:
+        """`event_log` får förklaringen av varje lampkommando."""
         self._home = home
         self._clock = clock
         self._outputs = tuple(outputs)
+        self._event_log = event_log
         # Ljusnivån per rum och källa. Det senast mätta värdet gäller, och en
         # källa som tappas tar sina värden med sig.
         self._lux: dict[str, dict[str, float]] = {}
@@ -200,12 +209,30 @@ class Controller:
         self._wake_at = result.wake_at
 
     def _send(self, command: LampCommand) -> None:
+        self._log(command)
         for output in self._outputs:
             # En trasig utgång får inte hindra de andra eller stoppa kärnan.
             try:
                 output.send(command)
             except Exception:
                 logger.exception("Lamputgången kunde inte ta emot %s", command)
+
+    def _log(self, command: LampCommand) -> None:
+        if self._event_log is None:
+            return
+        room_id = next(
+            (
+                room.id
+                for room in self._home.rooms
+                if any(lamp.id == command.lamp_id for lamp in room.lamps)
+            ),
+            None,
+        )
+        # Loggen får inte hindra lamporna, precis som en trasig utgång.
+        try:
+            self._event_log.explain(command.reason, room_id=room_id, lamp_id=command.lamp_id)
+        except Exception:
+            logger.exception("Händelseloggen kunde inte ta emot förklaringen")
 
     def _notify(self) -> None:
         for listener in list(self._listeners):
