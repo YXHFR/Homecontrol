@@ -214,7 +214,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
 
   const drawRooms = (current: EditorScene) => {
     roomLayer.destroyChildren();
-    const px = 1 / pixelsPerMeter();
+    const metersPerScreenPixel = 1 / pixelsPerMeter();
     for (const room of current.floor.rooms) {
       const selected = room.id === current.selectedRoomId;
       const group = new Konva.Group({ draggable: selected && current.tool === "select" });
@@ -231,10 +231,10 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
           listening: current.tool === "select",
         }),
         new Konva.Text({
-          x: Math.min(...room.polygon.map(([x]) => x)) + 8 * px,
-          y: Math.min(...room.polygon.map(([, y]) => y)) + 8 * px,
+          x: Math.min(...room.polygon.map(([x]) => x)) + 8 * metersPerScreenPixel,
+          y: Math.min(...room.polygon.map(([, y]) => y)) + 8 * metersPerScreenPixel,
           text: room.name,
-          fontSize: 15 * px,
+          fontSize: 15 * metersPerScreenPixel,
           fill: COLORS.text,
           listening: false,
         }),
@@ -261,12 +261,12 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
 
   const drawDraft = (current: EditorScene) => {
     draftLayer.destroyChildren();
-    const px = 1 / pixelsPerMeter();
+    const metersPerScreenPixel = 1 / pixelsPerMeter();
     const draft = current.draft;
     const dot = (p: Point, radius: number, color: string) =>
       new Konva.Circle({
         ...p,
-        radius: radius * px,
+        radius: radius * metersPerScreenPixel,
         fill: "white",
         stroke: color,
         strokeWidth: 2,
@@ -279,7 +279,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
         strokeWidth: 2,
         strokeScaleEnabled: false,
         closed,
-        dash: dash?.map((d) => d * px),
+        dash: dash?.map((d) => d * metersPerScreenPixel),
       });
     switch (draft.kind) {
       case "polygon": {

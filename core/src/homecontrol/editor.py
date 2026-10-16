@@ -44,6 +44,7 @@ MAX_HOME_BYTES = 1024 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 """Webbgränssnittet förminskar bilden innan den skickas, så den här gränsen nås sällan."""
 MAX_IMAGE_WIDTH = 20_000
+"""Bredare än så blir ingen bild från webbgränssnittet, som förminskar till 4000 bildpunkter."""
 UNSCALED_IMAGE_WIDTH_METERS = 20.0
 """Så bred en nyuppladdad bild blir innan den har skalats."""
 
@@ -104,14 +105,14 @@ def create_editor_router(
 
     router = APIRouter(prefix="/api", dependencies=[Depends(only_trusted)])
     # En ändring i taget, så att databasen och kärnan alltid får dem i samma ordning.
-    changing = asyncio.Lock()
+    change_lock = asyncio.Lock()
     # Revisionen börjar om när kärnan startar; den slumpade delen gör att en
     # revision från förra gången aldrig råkar stämma.
-    run = secrets.token_hex(4)
-    changes = 0
+    startup_id = secrets.token_hex(4)
+    change_count = 0
 
     def revision() -> str:
-        return f'"{run}-{changes}"'
+        return f'"{startup_id}-{change_count}"'
 
     async def in_store(call: Callable[..., T], *args: Any) -> T:
         try:
@@ -127,8 +128,8 @@ def create_editor_router(
         if_match: str | None, update: Callable[[Home], Home], store: Callable[[Home], None]
     ) -> Response:
         """Ändrar hemmet: kontrollerar revisionen, sparar och lämnar hemmet till kärnan."""
-        nonlocal changes
-        async with changing:
+        nonlocal change_count
+        async with change_lock:
             if if_match is not None and if_match != revision():
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
@@ -136,11 +137,13 @@ def create_editor_router(
                 )
             home = update(controller.home)
             await in_store(store, home)
+            # Nu är hemmet sparat och har en ny revision, vad som än händer i kärnan.
+            change_count += 1
             controller.replace_home(home)
-            changes += 1
             return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"ETag": revision()})
 
-    def floor_in(home: Home, floor_id: str) -> Floor:
+    def require_floor(home: Home, floor_id: str) -> Floor:
+        """Våningen, eller svar 404 om den inte finns."""
         for floor in home.floors:
             if floor.id == floor_id:
                 return floor
@@ -171,7 +174,7 @@ def create_editor_router(
 
     @router.get("/floors/{floor_id}/plan-image")
     async def get_plan_image(floor_id: str) -> Response:
-        floor_in(controller.home, floor_id)
+        require_floor(controller.home, floor_id)
         image = await in_store(home_store.load_plan_image, floor_id)
         if image is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Våningen har ingen bild")
@@ -188,7 +191,7 @@ def create_editor_router(
         width: Annotated[int, Query(gt=0, le=MAX_IMAGE_WIDTH)],
         if_match: Annotated[str | None, Header()] = None,
     ) -> Response:
-        floor_in(controller.home, floor_id)
+        require_floor(controller.home, floor_id)
         data = await _read_body(request, MAX_IMAGE_BYTES)
         media_type = image_type(data)
         if media_type is None:
@@ -203,7 +206,7 @@ def create_editor_router(
         # Våningen kontrolleras igen inne i ändringen, ifall den hann tas bort.
         return await change(
             if_match,
-            lambda home: _with_plan_image(home, floor_in(home, floor_id), plan),
+            lambda home: _with_plan_image(home, require_floor(home, floor_id), plan),
             lambda home: home_store.save_plan_image(home, floor_id, image),
         )
 
@@ -213,7 +216,7 @@ def create_editor_router(
     ) -> Response:
         return await change(
             if_match,
-            lambda home: _with_plan_image(home, floor_in(home, floor_id), None),
+            lambda home: _with_plan_image(home, require_floor(home, floor_id), None),
             lambda home: home_store.delete_plan_image(home, floor_id),
         )
 

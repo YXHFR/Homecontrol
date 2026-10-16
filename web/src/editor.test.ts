@@ -72,9 +72,10 @@ class FakeCore {
     uploadPlanImage: (floorId, image, width, revision) =>
       this.change(revision, () => {
         this.images.set(floorId, image);
+        // Samma regel som kärnan (editor.py): ungefär 20 meter bred.
         this.document = setPlanImage(this.document, floorId, {
           position: [0, 0],
-          meters_per_pixel: 20 / width,
+          meters_per_pixel: Math.min(1, 20 / width),
         });
       }),
     deletePlanImage: (floorId, revision) =>
@@ -235,12 +236,45 @@ describe("kartredigeraren", () => {
     core.document.home.floors[0].rooms[0].name = "Köket";
     core.revision++;
 
-    drawRectangle();
+    drawRectangle(4); // nekas: hemmet har ändrats
+    drawRectangle(8); // byggde på den nekade och skickas inte
     await settled();
 
     expect(core.saved).toEqual([]);
     expect(text(root, ".save-status")).toBe("Hemmet har lästs om.");
     expect(scenes.at(-1)?.floor.rooms.map((room) => room.name)).toEqual(["Köket"]);
+
+    // En ny ändring görs på det nya hemmet, så namnbytet finns kvar.
+    drawRectangle(4);
+    await settled();
+    expect(core.document.home.floors[0].rooms.map((room) => room.name)).toEqual(["Köket", "Rum 2"]);
+  });
+
+  it("en ändring som görs medan bilden laddas upp tar inte bort bilden", async () => {
+    const { root, core, scenes, drawRectangle, settled } = await setup();
+    // Bilden når inte fram förrän testet släpper den.
+    let arrive: (value?: unknown) => void = () => undefined;
+    const arrived = new Promise((resolve) => (arrive = resolve));
+    const upload = core.api.uploadPlanImage;
+    core.api.uploadPlanImage = async (...args) => {
+      await arrived;
+      return upload(...args);
+    };
+    const input = root.querySelector<HTMLInputElement>('input[type="file"]');
+    Object.defineProperty(input, "files", { value: [new File(["bild"], "plan.png")] });
+    input?.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(root.dataset.busy).toBe("true"));
+
+    drawRectangle(); // medan bilden fortfarande är på väg
+    arrive();
+    await settled();
+
+    const floor = core.document.home.floors[0];
+    expect(floor.plan_image).not.toBeNull();
+    expect(floor.plan_image).toBeDefined();
+    expect(floor.rooms).toHaveLength(2);
+    expect(scenes.at(-1)?.floor.rooms).toHaveLength(2);
+    expect(scenes.at(-1)?.planImage).not.toBeNull();
   });
 
   it("för små rum sparas inte", async () => {

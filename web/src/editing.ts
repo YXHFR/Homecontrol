@@ -172,18 +172,23 @@ export function findRoom(document: HomeDocument, roomId: string | null): RoomMod
   return null;
 }
 
-/** Lägger till ett rum med gipsväggar och ett påhittat namn. */
+/**
+ * Lägger till ett rum med gipsväggar och ett påhittat namn, eller med det id
+ * och namn som anges (när samma rum läggs till igen i ett nyare hem).
+ */
 export function addRoom(
   document: HomeDocument,
   floorId: string,
   corners: Point[],
-): { document: HomeDocument; roomId: string } {
-  const name = nextRoomName(document);
-  const roomId = uniqueId(document, name);
+  given?: { roomId: string; name: string },
+): { document: HomeDocument; roomId: string; name: string } {
+  const name = given?.name ?? nextRoomName(document);
+  const roomId = given?.roomId ?? uniqueId(document, name);
   const polygon = corners.map(toXY);
   const room: RoomModel = { id: roomId, name, polygon, walls: polygon.map(() => "gips") };
   return {
     roomId,
+    name,
     document: updateFloors(document, (floor) =>
       floor.id === floorId ? { ...floor, rooms: [...floor.rooms, room] } : floor,
     ),

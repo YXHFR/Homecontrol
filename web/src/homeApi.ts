@@ -49,8 +49,14 @@ async function ensureOk(request: Promise<Response>): Promise<Response> {
   let detail = `Något gick fel i Homecontrol (felkod ${response.status}). Försök igen om en stund.`;
   try {
     const body: unknown = await response.json();
-    if (typeof body === "object" && body !== null && "detail" in body) {
-      detail = String(body.detail);
+    // Kärnans egna fel har en text; FastAPIs kontroller ger en lista, som inte visas.
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      "detail" in body &&
+      typeof body.detail === "string"
+    ) {
+      detail = body.detail;
     }
   } catch {
     // Inget begripligt svar; texten ovan får räcka.

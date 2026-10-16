@@ -138,3 +138,18 @@ def test_database_store_saves_what_the_editor_changes(database: str) -> None:
     assert database_store.load_plan_image("plan") is None
     with store.connect(database, attempts=1) as conn:
         assert store.load_home(conn) == example_home()
+
+
+def test_failing_image_leaves_the_home_unchanged(database: str) -> None:
+    with store.connect(database, attempts=1) as conn:
+        store.migrate(conn)
+        store.save_home(conn, example_home())
+    database_store = store.DatabaseStore(database)
+
+    # Databasen godtar inte bildformatet, så hela ändringen ska utebli.
+    with pytest.raises(psycopg.errors.CheckViolation):
+        database_store.save_plan_image(one_room_home(), "plan", StoredImage("image/gif", b"GIF"))
+
+    with store.connect(database, attempts=1) as conn:
+        assert store.load_home(conn) == example_home()
+    assert database_store.load_plan_image("plan") is None

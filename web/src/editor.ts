@@ -64,13 +64,19 @@ export async function shrinkImage(file: File): Promise<PreparedImage> {
   const type = file.type === "image/png" ? "image/png" : "image/jpeg";
   const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
-      (result) => (result === null ? reject(new Error("Kunde inte läsa bilden")) : resolve(result)),
+      (result) => (result === null ? reject(new Error("toBlob gav ingen bild")) : resolve(result)),
       type,
       0.9,
     ),
   );
   return { blob, width: canvas.width };
 }
+
+/** En ändring av hemmet, som görs på det sparade hemmet när den står på tur. */
+type Edit = (document: HomeDocument) => HomeDocument;
+
+/** Något som ska skickas till kärnan: en ändring av hemmet eller av en bild. */
+type Change = { kind: "edit"; edit: Edit } | { kind: "image"; send: () => Promise<void> };
 
 const defaultDependencies: EditorDependencies = {
   api: coreApi,
@@ -114,22 +120,21 @@ export function mountEditor(
   deps: EditorDependencies = defaultDependencies,
 ): void {
   const drawing = new Drawing();
-  /** Det som visas, inklusive ändringar som håller på att sparas. */
-  let shown: HomeDocument | null = null;
   /** Det som kärnan senast tog emot, och dess revision. */
   let saved: HomeDocument | null = null;
   let revision = "";
+  /** Ändringar som väntar på att skickas till kärnan, i den ordning de gjordes. */
+  let waiting: Change[] = [];
+  /** Det som visas: det sparade med de väntande ändringarna ovanpå. */
+  let shown: HomeDocument | null = null;
   let floorId: string | null = null;
   let selectedRoomId: string | null = null;
   /** Punkterna som ska skalas mellan, när användaren har klickat ut två. */
   let scalePoints: { a: Point; b: Point } | null = null;
   /** Ändras när en ny bild laddas upp, så att webbläsaren inte visar den gamla. */
   let imageVersion = Date.now();
-  /** Ändringarna skickas en i taget, i den ordning de gjordes. */
+  /** Ändringarna skickas en i taget. */
   let queue: Promise<void> = Promise.resolve();
-  let pending = 0;
-  /** Ökar när en ändring misslyckas, så att de som byggde vidare på den inte skickas. */
-  let generation = 0;
   let savedCount = 0;
 
   // --- Verktygen ---
@@ -287,7 +292,7 @@ export function mountEditor(
         name.value = room.name;
         showMessage("Rummet måste ha ett namn.");
       } else if (next !== room.name && shown !== null) {
-        commit(renameRoom(shown, room.id, next));
+        commit((document) => renameRoom(document, room.id, next));
       }
     });
     name.addEventListener("keydown", (event) => {
@@ -307,7 +312,7 @@ export function mountEditor(
         () => {
           if (shown !== null) {
             selectedRoomId = null;
-            commit(deleteRoom(shown, room.id));
+            commit((document) => deleteRoom(document, room.id));
           }
         },
         "danger",
@@ -383,67 +388,83 @@ export function mountEditor(
     root.dataset.busy = String(busy);
   };
 
-  const showLatest = (latest: { document: HomeDocument; revision: string }) => {
-    shown = saved = latest.document;
-    revision = latest.revision;
-    if (selectedRoomId !== null && findRoom(shown, selectedRoomId) === null) {
+  /** Räknar fram det som visas och glömmer ett valt rum som inte längre finns. */
+  const refreshShown = () => {
+    shown = saved;
+    for (const change of waiting) {
+      if (shown !== null && change.kind === "edit") {
+        shown = change.edit(shown);
+      }
+    }
+    if (selectedRoomId !== null && shown !== null && findRoom(shown, selectedRoomId) === null) {
       selectedRoomId = null;
     }
   };
 
-  /**
-   * Köar en ändring hos kärnan. Misslyckas den hoppas ändringar som redan
-   * ligger i kön över, eftersom de byggde på den, och hemmet läses om.
-   */
-  const perform = (work: () => Promise<void>) => {
-    const startedIn = generation;
-    pending++;
-    setBusy(true);
-    showMessage(null);
-    saveStatus.textContent = "Sparar …";
-    queue = queue.then(async () => {
-      try {
-        if (startedIn !== generation) {
-          return;
-        }
-        try {
-          await work();
-          savedCount++;
-          root.dataset.saves = String(savedCount);
-        } catch (error) {
-          generation++;
-          showMessage(errorText(error));
-          saveStatus.textContent =
-            error instanceof CoreError && error.conflict
-              ? "Hemmet har lästs om."
-              : "Ändringen sparades inte.";
-          try {
-            showLatest(await deps.api.load());
-          } catch {
-            shown = saved; // kärnan går inte att nå; visa det som senast sparades
-          }
-          render();
-        }
-      } finally {
-        pending--;
-        if (pending === 0) {
-          if (message.hidden) {
-            saveStatus.textContent = "Alla ändringar är sparade.";
-          }
-          setBusy(false);
-        }
-      }
-    });
+  const reload = async () => {
+    const latest = await deps.api.load();
+    saved = latest.document;
+    revision = latest.revision;
   };
 
-  const commit = (next: HomeDocument) => {
-    shown = next;
-    render();
-    perform(async () => {
-      revision = await deps.api.save(next, revision);
-      saved = next;
-    });
+  const run = async (change: Change) => {
+    if (!waiting.includes(change)) {
+      return; // en tidigare ändring misslyckades, och den här byggde på den
+    }
+    let changedView = change.kind === "image";
+    try {
+      if (change.kind === "edit" && saved !== null) {
+        // Ändringen görs på det kärnan har nu, inte på det som visades när
+        // användaren gjorde den. Då försvinner inget som hann sparas emellan.
+        const next = change.edit(saved);
+        revision = await deps.api.save(next, revision);
+        saved = next;
+      } else if (change.kind === "image") {
+        await change.send();
+        await reload(); // kärnan har ändrat hemmet; läs det som blev
+      }
+      waiting = waiting.filter((other) => other !== change);
+      savedCount++;
+      root.dataset.saves = String(savedCount);
+    } catch (error) {
+      // Resten av kön byggde på den här ändringen och skickas inte heller.
+      waiting = [];
+      changedView = true;
+      showMessage(errorText(error));
+      saveStatus.textContent =
+        error instanceof CoreError && error.conflict
+          ? "Hemmet har lästs om."
+          : "Ändringen sparades inte.";
+      try {
+        await reload();
+      } catch {
+        // Kärnan går inte att nå; visa det som senast sparades.
+      }
+    }
+    if (changedView) {
+      refreshShown();
+      render();
+    }
+    if (waiting.length === 0) {
+      if (message.hidden) {
+        saveStatus.textContent = "Alla ändringar är sparade.";
+      }
+      setBusy(false);
+    }
   };
+
+  const enqueue = (change: Change) => {
+    waiting.push(change);
+    refreshShown();
+    showMessage(null);
+    saveStatus.textContent = "Sparar …";
+    setBusy(true);
+    render();
+    queue = queue.then(() => run(change));
+  };
+
+  /** Ändrar hemmet. `edit` görs på det sparade hemmet när ändringen står på tur. */
+  const commit = (edit: Edit) => enqueue({ kind: "edit", edit });
 
   // --- Verktyg och ritande ---
   const chooseTool = (tool: ToolName) => {
@@ -490,9 +511,11 @@ export function mountEditor(
       if (problem !== null) {
         showMessage(problem);
       } else if (shown !== null && floor !== null) {
-        const added = addRoom(shown, floor.id, outcome.corners);
-        selectedRoomId = added.roomId;
-        commit(added.document);
+        const { roomId, name } = addRoom(shown, floor.id, outcome.corners);
+        selectedRoomId = roomId;
+        commit(
+          (document) => addRoom(document, floor.id, outcome.corners, { roomId, name }).document,
+        );
         return;
       }
     } else if (outcome?.kind === "scale") {
@@ -517,7 +540,7 @@ export function mountEditor(
     }
     drawing.cancel();
     scalePoints = null;
-    commit(setPlanImage(shown, floor.id, plan));
+    commit((document) => setPlanImage(document, floor.id, plan));
     view.fit();
   };
 
@@ -529,16 +552,18 @@ export function mountEditor(
     let image: PreparedImage;
     try {
       image = await deps.prepareImage(file);
-    } catch (error) {
-      showMessage(`Kunde inte läsa bilden: ${errorText(error)}`);
+    } catch {
+      showMessage("Kunde inte läsa bilden. Välj en PNG-, JPEG- eller WebP-fil.");
       return;
     }
-    perform(async () => {
-      // Kärnan lägger bilden på våningen och sparar hemmet; läs det som blev.
-      await deps.api.uploadPlanImage(floor.id, image.blob, image.width, revision);
-      imageVersion = Date.now();
-      showLatest(await deps.api.load());
-      chooseTool("scale");
+    enqueue({
+      kind: "image",
+      send: async () => {
+        // Kärnan lägger bilden på våningen och sparar hemmet i samma steg.
+        revision = await deps.api.uploadPlanImage(floor.id, image.blob, image.width, revision);
+        imageVersion = Date.now();
+        chooseTool("scale");
+      },
     });
   };
 
@@ -550,10 +575,11 @@ export function mountEditor(
     if (drawing.tool === "scale") {
       chooseTool("select");
     }
-    perform(async () => {
-      await deps.api.deletePlanImage(floor.id, revision);
-      showLatest(await deps.api.load());
-      render();
+    enqueue({
+      kind: "image",
+      send: async () => {
+        revision = await deps.api.deletePlanImage(floor.id, revision);
+      },
     });
   };
 
@@ -598,7 +624,7 @@ export function mountEditor(
     },
     onMoveRoom: (roomId, dx, dy) => {
       if (shown !== null && (dx !== 0 || dy !== 0)) {
-        commit(moveRoom(shown, roomId, dx, dy));
+        commit((document) => moveRoom(document, roomId, dx, dy));
       }
     },
   });
@@ -620,7 +646,9 @@ export function mountEditor(
   chooseTool("select");
   deps.api.load().then(
     (latest) => {
-      showLatest(latest);
+      saved = latest.document;
+      revision = latest.revision;
+      refreshShown();
       const floors = latest.document.home.floors;
       floorId = (floors.find((floor) => floor.level === 0) ?? floors[0]).id;
       saveStatus.textContent = "Alla ändringar är sparade.";

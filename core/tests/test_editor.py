@@ -237,3 +237,16 @@ def test_home_is_private_to_the_page() -> None:
 
     assert headers["cross-origin-resource-policy"] == "same-origin"
     assert headers["cache-control"] == "no-store"
+
+
+def test_image_changes_also_refuse_an_old_revision() -> None:
+    with client() as c:
+        old = c.get("/api/home").headers["etag"]
+        c.put("/api/home", json=to_document(with_kitchen()))
+        image = f"/api/floors/{FLOOR}/plan-image"
+
+        assert (
+            c.put(f"{image}?width=500", content=PNG, headers={"if-match": old}).status_code == 409
+        )
+        assert c.delete(image, headers={"if-match": old}).status_code == 409
+        assert c.get(image).status_code == 404

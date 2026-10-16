@@ -228,7 +228,8 @@ npm run test:e2e
 Nya API-vägar i kärnan läggs under `/api/...` så att de inte krockar med
 webbgränssnittets filer. Livevyn får sin realtidsström från `/api/live`.
 Kartredigeraren läser och sparar hemmet med `/api/home` och bilden av
-planritningen med `/api/floors/{id}/plan-image` (se `editor.py`). Varje
+planritningen med `/api/floors/{id}/plan-image` (se `core/src/homecontrol/editor.py`
+och klienten i `web/src/homeApi.ts`). Varje
 ändring ger en ny revision (`ETag`), och en ändring som utgår från en gammal
 revision (`If-Match`) nekas. Ett sparat hem går till kärnan med
 `Controller.replace_home`, så livevyn får det direkt.
