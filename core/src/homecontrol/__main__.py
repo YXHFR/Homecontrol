@@ -14,11 +14,12 @@ import argparse
 import logging
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import uvicorn
 
-from homecontrol import store
+from homecontrol import history, store
 from homecontrol.app import create_app
 from homecontrol.config import Settings
 from homecontrol.esphome import MIN_SECRET_LENGTH
@@ -42,7 +43,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    settings = Settings.from_env()
+    try:
+        settings = Settings.from_env()
+    except ValueError as error:
+        sys.exit(str(error))
     if args.command is None:
         serve(settings)
         return
@@ -71,6 +75,7 @@ def serve(settings: Settings) -> None:
             home_store=(
                 None if settings.database is None else store.DatabaseStore(settings.database)
             ),
+            history=prepare_history(settings),
             esphome_secret=secret,
         ),
         host=settings.host,
@@ -139,6 +144,23 @@ def load_or_seed_home(settings: Settings) -> Home:
             logger.info("Inget hem var sparat, så exempelhemmet lades in")
     logger.info("Läste in hemmet från databasen (%s)", _summary(home))
     return home
+
+
+def prepare_history(settings: Settings) -> history.History | None:
+    """Ställer in hur länge historiken sparas. Utan databas sparas ingen historik."""
+    if settings.database is None:
+        return None
+    with store.connect(settings.database) as conn:
+        store.migrate(conn)
+        history.configure(conn, settings.history_full_resolution, settings.history_keep)
+    logger.info(
+        "Historiken sparas med full upplösning i %g timmar, sedan nedsamplad %s",
+        settings.history_full_resolution / timedelta(hours=1),
+        "utan tidsgräns"
+        if settings.history_keep is None
+        else f"i {settings.history_keep / timedelta(days=1):g} dagar",
+    )
+    return history.History(settings.database)
 
 
 def _summary(home: Home) -> str:

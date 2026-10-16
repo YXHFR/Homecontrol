@@ -22,6 +22,10 @@ services:
       # Hemmodellen sparas i databasen. Lösenordet läses från PGPASSWORD.
       HOMECONTROL_DATABASE: host=/var/run/postgresql dbname=homecontrol user=homecontrol
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD saknas – kopiera .env.example till .env och fyll i}
+      # Hur länge historiken sparas (se README).
+      HOMECONTROL_HISTORY_FULL_HOURS: ${HISTORY_FULL_HOURS:-24}
+      # Tomt betyder utan tidsgräns.
+      HOMECONTROL_HISTORY_KEEP_DAYS: ${HISTORY_KEEP_DAYS:-}
       # Rumskortens nycklar räknas fram ur den här. Tom: inga kort ansluts.
       HOMECONTROL_ESPHOME_SECRET: ${ESPHOME_SECRET:-}
     volumes:

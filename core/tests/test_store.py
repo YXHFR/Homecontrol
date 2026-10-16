@@ -61,7 +61,7 @@ def test_migrating_again_changes_nothing(conn: psycopg.Connection) -> None:
     store.migrate(conn)
 
     assert store.load_home(conn) == example_home()
-    assert conn.execute("SELECT version FROM schema_migration").fetchall() == [(1,), (2,)]
+    assert conn.execute("SELECT version FROM schema_migration").fetchall() == [(1,), (2,), (3,)]
 
 
 def test_file_round_trip_through_the_database(database: str, tmp_path: Path) -> None:

@@ -258,8 +258,45 @@ Rummet står som **manuellt** på kartan och under **Just nu**, och med
 
 **Varför hände det?** listar de senaste besluten med klockslag och värden,
 till exempel "19:02 Tändes: någon är i Vardagsrum och det var mörkt (9 lux,
-under 30)." Listan finns bara i kärnans minne och töms när den
-startar om.
+under 30)." Listan visar de senaste besluten och töms när kärnan startar
+om, men besluten sparas också i historiken (se nedan).
+
+### Historik
+
+Kärnan sparar var personerna på kartan har rört sig och vad som har hänt.
+Allt sparas i databasen på datorn där Homecontrol körs. Inget av det skickas
+någonstans, och inget exporteras av sig självt.
+
+- **Var personerna har rört sig:** ungefär tio mätningar i sekunden sparas
+  i ett dygn. Sedan finns bara en mätning per sekund kvar (medelvärdet), och
+  den packas ihop så att den tar mindre plats.
+- **Händelseloggen:** när ett rum blir upptaget, tomt eller okänt, och
+  besluten från **Varför hände det?**.
+
+Prickarna på kartan är anonyma. Varje prick får ett slumpat nummer, och
+historiken säger inget om vem det var. Låtsaspersonerna i simuleringsläget
+sparas inte: ingen historik sparas medan simuleringsläget är på. Utan
+`ESPHOME_SECRET` (se ovan) är simuleringsläget påslaget från början; stäng
+av det i livevyn för att historiken ska börja sparas.
+
+Som standard sparas historiken utan tidsgräns, så den växer sakta med
+tiden. Båda tiderna går att ändra i `.env`. Ta bort `#` framför raden och
+starta om kärnan med `docker compose up -d`:
+
+```sh
+HISTORY_FULL_HOURS=48   # alla mätningar sparas i 48 timmar (minst 1)
+HISTORY_KEEP_DAYS=365   # all historik tas bort efter ungefär ett år
+```
+
+`HISTORY_KEEP_DAYS` ska vara längre än `HISTORY_FULL_HOURS`. Det gamla tas
+bort i omgångar, så det kan ligga kvar upp till en vecka längre.
+
+Hinner databasen inte med, till exempel på ett långsamt minneskort, tappas
+mätningar i historiken i stället för att lamporna får vänta.
+
+Historiken visar när någon har varit hemma och i vilka rum. Tänk på det när
+du bestämmer vem som når datorn och databasen, och var säkerhetskopior av
+databasen hamnar.
 
 ### Hemmet: spara, flytta och läsa in
 
@@ -392,7 +429,17 @@ HOMECONTROL_WEB_DIR=../web/dist uv run homecontrol
 
 Utan `HOMECONTROL_DATABASE` visar kärnan exempelhemmet, och ändringar från
 kartredigeraren sparas bara så länge kärnan är igång.
-Testerna av databasdelen behöver en Postgres och hoppas annars över:
+Testerna av databasdelen behöver en Postgres med TimescaleDB och hoppas
+annars över. En sådan startar du till exempel så här (den nås bara från
+den här datorn och försvinner när den stoppas):
+
+```sh
+docker run -d --rm -p 127.0.0.1:5432:5432 -e POSTGRES_DB=homecontrol_test \
+  -e POSTGRES_USER=homecontrol -e POSTGRES_HOST_AUTH_METHOD=trust \
+  timescale/timescaledb:2.30.2-pg17
+```
+
+Kör sedan testerna:
 
 ```sh
 HOMECONTROL_TEST_DATABASE="host=localhost dbname=homecontrol_test user=homecontrol" \

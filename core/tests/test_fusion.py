@@ -59,6 +59,18 @@ def test_tracks_follow_the_persons_and_not_the_radar_numbering() -> None:
     assert not any(track.held for track in fusion.tracks())
 
 
+def test_each_track_keeps_its_own_random_id_and_not_the_radar_numbering() -> None:
+    fusion = Fusion(HOME, now=0)
+    fusion.radar(radar_sees((1, 2), (4, 2)), now=0)
+    first = [track.id for track in fusion.tracks()]
+
+    fusion.radar(radar_sees((4.1, 2), (1.1, 2)), now=0.1)
+
+    assert [track.id for track in fusion.tracks()] == first
+    assert len(set(first)) == 2
+    assert not set(first) & {"0", "1", "2"}
+
+
 def test_lost_track_is_released_when_its_time_is_up_even_if_asked_later() -> None:
     fusion = Fusion(HOME, now=0)
     fusion.radar(radar_sees((2, 2)), now=0)
