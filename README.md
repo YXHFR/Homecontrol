@@ -270,16 +270,32 @@ rum där lamporna ska styras av närvaro. Koppla ihop delarna enligt
 
 **Installera firmware med webbinstalleraren.** Webbinstalleraren är en
 webbsida där du installerar kortets mjukvara med ett klick, utan att bygga
-något själv.
+något själv. Den byggs automatiskt på GitHub men är inte publicerad på
+webben än; det kommer senare. Tills dess hämtar du den och öppnar den på
+din egen dator:
 
-> **Obs:** webbinstalleraren är inte publicerad än. Den publiceras på
-> <https://yxhfr.github.io/Homecontrol/> när GitHub Pages har slagits på för
-> repot. Tills dess finns ingen sida där, och den som vill prova får bygga
-> firmware själv med ESPHome (se
-> [firmware/README.md](firmware/README.md#rummet-finns-inte-i-listan)). Ett
-> kort som är byggt så får inga uppdateringar över nätverket.
+1. Logga in på GitHub och öppna
+   [Firmware-körningarna på main](https://github.com/YXHFR/Homecontrol/actions/workflows/firmware.yml?query=branch%3Amain+is%3Asuccess).
+   Välj den översta och ladda ner **webbinstallerare** under
+   **Artifacts**. Packa upp zip-filen till en egen mapp.
+2. Öppna ett terminalfönster i den mappen och starta en liten webbserver
+   (Python finns på Mac och Linux; på Windows installeras det från
+   [python.org](https://www.python.org/downloads/)):
 
-1. Öppna webbinstalleraren i Chrome eller Edge på en dator.
+   ```sh
+   python3 -m http.server 8001 --bind 127.0.0.1
+   ```
+
+3. Öppna <http://localhost:8001> i Chrome eller Edge på samma dator.
+   Stäng webbservern med Ctrl+C när du är klar.
+
+Artefakterna sparas i 90 dagar. Finns ingen körning med artefakten kvar
+kan du bygga firmware själv med ESPHome (se
+[firmware/README.md](firmware/README.md#rummet-finns-inte-i-listan)).
+
+Installera sedan kortet:
+
+1. Öppna webbinstalleraren i Chrome eller Edge.
 2. Välj rummet där kortet ska sitta. Kortet får namnet `homecontrol-<rum>`.
 3. Anslut kortet med USB. På kort med två USB-uttag: använd det som är
    märkt **USB** (inte **UART**).
@@ -801,7 +817,9 @@ läsbarhet.
   bara i releaserna; det finns ingen CHANGELOG-fil. Dependabot använder
   `fix(deps)` för beroenden som hamnar i avbilden eller i `compose.yaml`, så
   att de ger en ny version. Webbinstalleraren för rumskorten byggs däremot
-  från main vid varje ändring i `firmware/`, inte vid en release.
+  från main vid varje ändring i `firmware/`, inte vid en release, och
+  sparas som artefakten `webbinstallerare`. Den publiceras inte på webben
+  än.
 - Hemligheter läggs bara i `.env`, aldrig i repot.
 - Inga personliga uppgifter (planritningar, nätverksadresser, nycklar)
   får checkas in.

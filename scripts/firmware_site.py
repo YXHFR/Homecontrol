@@ -7,7 +7,7 @@ Användning:
 
     python3 scripts/firmware_site.py site --builds DIR --out DIR \\
             --version VERSION --source URL
-        Lägger ihop färdiga firmware-filer till en sida för GitHub Pages.
+        Lägger ihop färdiga firmware-filer till webbinstalleraren.
         DIR ska innehålla <rum>.factory.bin (hela kortet, för installation
         över USB) och <rum>.ota.bin (bara appen, för uppdatering över
         nätverket) för varje rum i rooms.txt.
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("rooms", help="skriv rummen som JSON")
-    site = commands.add_parser("site", help="bygg sidan för GitHub Pages")
+    site = commands.add_parser("site", help="bygg webbinstalleraren")
     site.add_argument("--builds", type=Path, required=True)
     site.add_argument("--out", type=Path, required=True)
     site.add_argument("--version", required=True)
