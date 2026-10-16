@@ -7,6 +7,7 @@
 import {
   allIds,
   distance,
+  inPolygon,
   polygonArea,
   polygonWithin,
   selfIntersecting,
@@ -54,11 +55,15 @@ export function nearestOnWall(floor: FloorModel, point: Point, radius: number): 
               ),
             );
       const onWall = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+      // Hörnen sparas i hela centimeter. På en sned vägg kan den avrundade
+      // punkten hamna utanför rummet; då är det bättre att inte dra alls.
+      const saved = toPoint(toXY(onWall));
       if (
-        distance(point, onWall) <= radius &&
-        (best === null || distance(point, onWall) < distance(point, best))
+        inPolygon(saved, corners) &&
+        distance(point, saved) <= radius &&
+        (best === null || distance(point, saved) < distance(point, best))
       ) {
-        best = onWall;
+        best = saved;
       }
     });
   }

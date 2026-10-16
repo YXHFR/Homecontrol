@@ -112,6 +112,37 @@ describe("nearestOnWall", () => {
     expect(nearestOnWall(floor(home()), { x: 3, y: 2.03 }, 0.05)).toEqual({ x: 3, y: 2 });
     expect(nearestOnWall(floor(home()), { x: 1, y: 1 }, 0.05)).toBeNull();
   });
+
+  it("drar aldrig ett hörn utanför rummet vid en sned vägg", () => {
+    const triangle: FloorModel = {
+      id: "plan",
+      name: "Plan",
+      level: 0,
+      rooms: [
+        {
+          id: "r",
+          name: "R",
+          polygon: [
+            [0, 0],
+            [4, 0],
+            [4, 3.3],
+          ],
+          walls: ["gips", "gips", "gips"],
+        },
+      ],
+    };
+    const room = triangle.rooms[0].polygon.map(([x, y]) => ({ x, y }));
+    const length = Math.hypot(4, 3.3);
+    // Klick 3 cm innanför den sneda väggen från (0, 0) till (4, 3,3), längs hela väggen.
+    for (let i = 1; i < 400; i++) {
+      const along = { x: (4 * i) / 400, y: (3.3 * i) / 400 };
+      const click = { x: along.x + (0.03 * 3.3) / length, y: along.y - (0.03 * 4) / length };
+      const snapped = nearestOnWall(triangle, click, 0.12);
+      if (snapped !== null) {
+        expect(inPolygon(snapped, room)).toBe(true);
+      }
+    }
+  });
 });
 
 describe("planZone", () => {

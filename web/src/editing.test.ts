@@ -179,6 +179,22 @@ describe("ytor", () => {
     expect(polygonWithin(shortcut, u)).toBe(false);
   });
 
+  it("en yta får inte täcka ett spetsigt hack som bara nuddar dess kant", () => {
+    const spike = [
+      [0, 0],
+      [20, 0],
+      [20, 10],
+      [6, 10],
+      [6, 5],
+      [5, 3],
+      [4, 5],
+      [4, 10],
+      [0, 10],
+    ].map(([x, y]) => ({ x, y }));
+    expect(polygonWithin(rectangleCorners({ x: 1, y: 1 }, { x: 19, y: 5 }), spike)).toBe(false);
+    expect(polygonWithin(rectangleCorners({ x: 1, y: 1 }, { x: 19, y: 2 }), spike)).toBe(true);
+  });
+
   it("en rektangel går att dra åt vilket håll som helst", () => {
     expect(rectangleCorners({ x: 3, y: 4 }, { x: 1, y: 2 })).toEqual([
       { x: 1, y: 2 },

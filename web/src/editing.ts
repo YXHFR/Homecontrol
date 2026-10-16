@@ -44,19 +44,11 @@ export function polygonArea(points: Point[]): number {
 
 /** Om punkten är i ytan. Punkter på kanten räknas som inne, som i kärnan (home.py). */
 export function inPolygon(point: Point, polygon: Point[]): boolean {
-  const tolerance = 1e-9;
   let inside = false;
   for (let i = 0; i < polygon.length; i++) {
     const a = polygon[i];
     const b = polygon[(i + 1) % polygon.length];
-    const cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
-    const onEdge =
-      Math.abs(cross) <= tolerance &&
-      Math.min(a.x, b.x) - tolerance <= point.x &&
-      point.x <= Math.max(a.x, b.x) + tolerance &&
-      Math.min(a.y, b.y) - tolerance <= point.y &&
-      point.y <= Math.max(a.y, b.y) + tolerance;
-    if (onEdge) {
+    if (onSegment(point, a, b)) {
       return true;
     }
     // Strålmetoden: räkna hur många sidor en stråle åt höger från punkten korsar.
@@ -76,6 +68,19 @@ function crosses(a: Point, b: Point, c: Point, d: Point): boolean {
   return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
 }
 
+/** Om punkten ligger på sträckan a–b, som `_on_segment` i kärnan. */
+function onSegment(point: Point, a: Point, b: Point): boolean {
+  const tolerance = 1e-9;
+  const cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+  return (
+    Math.abs(cross) <= tolerance &&
+    Math.min(a.x, b.x) - tolerance <= point.x &&
+    point.x <= Math.max(a.x, b.x) + tolerance &&
+    Math.min(a.y, b.y) - tolerance <= point.y &&
+    point.y <= Math.max(a.y, b.y) + tolerance
+  );
+}
+
 /** Sidorna i ytan, var och en som sitt start- och sluthörn. */
 function edges(points: Point[]): [Point, Point][] {
   return points.map((a, i) => [a, points[(i + 1) % points.length]]);
@@ -83,7 +88,8 @@ function edges(points: Point[]): [Point, Point][] {
 
 /**
  * Om ytan `inner` ligger i `outer`, på samma sätt som i kärnan (home.py):
- * alla hörn och mitten av alla kanter är inne, och ingen kant korsar en vägg.
+ * alla hörn och mitten av alla kanter är inne, ingen kant korsar en vägg och
+ * inget av hörnen i `outer` ligger inne i `inner` (ett spetsigt hack).
  * Kanter längs med väggen räknas som inne.
  */
 export function polygonWithin(inner: Point[], outer: Point[]): boolean {
@@ -91,8 +97,13 @@ export function polygonWithin(inner: Point[], outer: Point[]): boolean {
   return (
     inner.every((corner) => inPolygon(corner, outer)) &&
     innerEdges.every(([a, b]) => inPolygon({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, outer)) &&
-    !innerEdges.some(([a, b]) => edges(outer).some(([c, d]) => crosses(a, b, c, d)))
+    !innerEdges.some(([a, b]) => edges(outer).some(([c, d]) => crosses(a, b, c, d))) &&
+    !outer.some((corner) => inPolygon(corner, inner) && !onBoundary(corner, inner))
   );
+}
+
+function onBoundary(point: Point, polygon: Point[]): boolean {
+  return edges(polygon).some(([a, b]) => onSegment(point, a, b));
 }
 
 /** Om två sidor som inte sitter ihop korsar varandra, som i en åtta. */
