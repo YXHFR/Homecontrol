@@ -45,12 +45,12 @@ jobs:
       contents: read
       packages: write
     env:
-      TAG: ${{ needs.release-please.outputs.tag_name }}
       VERSION: ${{ needs.release-please.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
       - name: Avbildens namn
         id: names
         run: |
@@ -84,3 +84,4 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=Apache-2.0
           cache-from: type=gha
+          cache-to: type=gha,mode=max

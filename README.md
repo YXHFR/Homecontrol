@@ -4,25 +4,13 @@ Närvarostyrd belysning för hemmet. Radar (LD2450) och Wi-Fi-CSI på ESP32
 känner av var någon befinner sig, och lamporna (IKEA via Zigbee2MQTT) tänds
 och släcks efter det.
 
-> Projektet är i ett tidigt skede. Grunden startar (kärnan, databasen, MQTT och
-> Zigbee2MQTT) och det finns en första livevy som ritar hemmet från
-> databasen, en våning i taget. Första gången visas ett påhittat exempelhem.
-> Livevyn har ett simuleringsläge: lägg till låtsaspersoner och dra in dem i
-> rummen med musen eller fingret. Varje rumskort blir en virtuell radar som
-> ser personerna framför sig, och kärnan gör om det radarerna ser till
-> prickar på kartan och upptagna rum. Då tänds de virtuella lamporna när det
-> är mörkt, och dimras som en varning och släcks när rummet har varit tomt
-> en stund eller när dagsljuset räcker. Ett klick på en lampa tänder eller
-> släcker den för hand, och under **Varför hände det?** står varför lamporna
-> gjorde som de gjorde. Dagsljuset ställs med
-> ett reglage, och tiden kan gå 10 eller 60 gånger fortare så att du slipper
-> vänta. I kartredigeraren ritar du dina egna rum ovanpå en bild av
-> planritningen, väljer vad väggarna är gjorda av och var dörröppningarna är,
-> och placerar rumskort, routrar och lampor. Varje rum kan få egna ljusgränser
-> och en egen fördröjning. Riktiga rumskort (ESP32) hittas av sig själva och
-> används när de har placerats på kartan; deras prickar, Wi-Fi-rörelse och
-> ljusnivå syns i livevyn. Riktiga Zigbee-lampor styrs genom Zigbee2MQTT på
-> samma sätt (se **Steg 5**).
+> Projektet är i ett tidigt skede men fungerar från början till slut: du
+> ritar hemmet ovanpå en planritning, rumskorten (ESP32) ser var personerna
+> är, och kärnan tänder, dimrar och släcker Zigbee-lamporna efter ljusregler
+> som går att ändra per rum. Livevyn visar prickar på kartan och förklarar
+> under **Varför hände det?** varför lamporna gjorde som de gjorde. Utan
+> hårdvara kan allt provas i simuleringsläget, med låtsaspersoner som du
+> drar runt i hemmet.
 
 ## Installera steg för steg
 
@@ -82,15 +70,17 @@ På en Raspberry Pi:
 
 1. Installera **Raspberry Pi OS Lite (64-bit)** på SSD-disken med
    [Raspberry Pi Imager](https://www.raspberrypi.com/software/). I Imagerns
-   inställningar väljer du ett användarnamn och lösenord, slår på **SSH**
-   och anger Wi-Fi om du inte använder kabel. Homecontrol kräver 64 bitar.
+   inställningar väljer du ett användarnamn och ett starkt lösenord, slår
+   på **SSH** och anger Wi-Fi om du inte använder kabel. Kan du, välj
+   inloggning med nyckel (public-key) för SSH i stället för lösenord.
+   Homecontrol kräver 64 bitar.
 2. Starta Pi:n från disken och logga in från din vanliga dator med
    `ssh användarnamn@datornamn.local` (namnet du valde i Imagern), eller
    med skärm och tangentbord direkt på Pi:n.
 
 Installera sedan Docker med Compose enligt
-[Dockers guide för Debian](https://docs.docker.com/engine/install/debian/)
-(Raspberry Pi OS är Debian) och git:
+[Dockers guide för Debian](https://docs.docker.com/engine/install/debian/).
+Raspberry Pi OS är Debian, så den guiden gäller. Installera också git:
 
 ```sh
 sudo apt install git
@@ -115,12 +105,24 @@ Hämta Homecontrol och skapa inställningsfilen:
 ```sh
 git clone https://github.com/YXHFR/Homecontrol.git
 cd Homecontrol
+git checkout "$(git describe --tags --abbrev=0)"   # den senaste versionen
 cp .env.example .env
 ```
+
+Raden med `git checkout` väljer den senaste versionen i stället för det som
+är under arbete. Finns det ingen version än svarar den med två rader som
+börjar med `fatal:`; gå då bara vidare.
 
 Öppna filen `.env` och byt ut alla `byt-mig` mot egna lösenord. Filnamnet
 börjar med en punkt, så den kan vara dold i filhanteraren. Öppna den till
 exempel med `nano .env` (spara med Ctrl+O och avsluta med Ctrl+X).
+Hitta inte på lösenorden själv; låt datorn slumpa fram ett starkt lösenord
+för vart och ett:
+
+```sh
+openssl rand -hex 24   # kör en gång per lösenord och klistra in resultatet
+```
+
 Lösenorden behöver du inte komma ihåg, utom `ZIGBEE2MQTT_AUTH_TOKEN` som
 du loggar in på Zigbee2MQTT med. Filen stannar på datorn och ska inte
 delas med någon.
@@ -131,8 +133,9 @@ Starta sedan:
 docker compose up -d
 ```
 
-Datorn hämtar då färdiga avbilder för sin sorts processor (amd64 eller
-arm64), med den version som står i `compose.yaml`. Går kärnans avbild inte
+Datorn hämtar då färdiga avbilder (färdigpackade versioner av programmen)
+för sin sorts processor (amd64 eller arm64), med den version som står i
+`compose.yaml`. Går kärnans avbild inte
 att hämta, byggs den i stället från koden. Det tar längre tid, upp till en
 halvtimme på en Raspberry Pi. Därefter finns:
 
@@ -147,7 +150,7 @@ Surfar du från en annan enhet, byt `localhost` mot datorns adress i
 hemnätet. Den hittar du till exempel i routerns lista över anslutna enheter.
 Använder du ett namn i stället för adressen, till exempel
 `homecontrol.local`, skriv in det som `ALLOWED_HOSTS` i `.env`. Annars
-kopplas livevyn bort.
+öppnas sidan, men livevyn tappar genast anslutningen.
 
 Homecontrol startar av sig själv igen efter ett strömavbrott och behöver
 inte internet för att styra lamporna. Läs **Vem som når Homecontrol** längre
@@ -289,8 +292,8 @@ Mer om installationen, uppdateringar och licensen för firmware finns i
 [firmware/README.md](firmware/README.md).
 
 **Koppla kortet till Homecontrol.** Kärnan behöver en hemlighet som
-kortens krypteringsnycklar räknas fram ur. Skapa den en gång och skriv in
-den i `.env`:
+kortens krypteringsnycklar räknas fram ur. Skapa den en gång, innan du
+placerar det första kortet, och skriv in den i `.env`:
 
 ```sh
 openssl rand -hex 32     # skriv resultatet efter ESPHOME_SECRET= i .env
@@ -300,7 +303,7 @@ docker compose up -d     # starta om kärnan med hemligheten
 Byt aldrig hemligheten; då får varje kort en ny nyckel och måste raderas och
 installeras om. När det första kortet är placerat stängs simuleringsläget av.
 
-1. Starta Homecontrol innan eller strax efter att kortet har fått Wi-Fi.
+1. Låt Homecontrol vara igång (från **Steg 3**) när kortet får Wi-Fi.
    Kärnan hittar korten i hemnätet av sig själv (med mDNS). Ett nytt kort
    syns i livevyn under **Rumskort** som ett nytt kort att placera.
 2. Öppna kartredigeraren och välj **Placera Homecontrol <rum>** under
@@ -373,13 +376,15 @@ i ett eget krypterat nätverk.
 
 Vill du använda datorns namn i Tailscale (MagicDNS) i stället för adressen,
 skriv in namnet som `ALLOWED_HOSTS` i `.env` och starta om med
-`docker compose up -d`. Annars kopplas livevyn bort.
+`docker compose up -d`. Annars öppnas sidan, men livevyn tappar genast
+anslutningen.
 
 Tänk på:
 
-- Alla enheter i ditt Tailscale-nätverk når Homecontrol. Dela inte datorn
-  med andra i Tailscale om de inte ska kunna se var ni är och styra
-  lamporna.
+- Alla enheter i ditt Tailscale-nätverk når Homecontrol, och med
+  standardinställningen även MQTT (port 1883) och Zigbee2MQTT (port 8080),
+  som båda kräver lösenord. Dela inte datorn med andra i Tailscale om de
+  inte ska kunna se var ni är och styra lamporna.
 - Slå inte på **Funnel** i Tailscale för datorn. Funnel öppnar den mot hela
   internet.
 - Har du satt `BIND_ADDRESS` till datorns adress i hemnätet når du inte
@@ -437,8 +442,8 @@ Värdena inom parentes är standard och ändras per rum i kartredigeraren.
 Ljusnivån som reglerna använder är den uppmätta minus det ljus som rummets
 tända lampor själva ger vid ljussensorn (mindre när de är dimrade). Därför
 släcker en lampa aldrig sig själv för att den lyser upp rummet. Hur mycket
-varje lampa lyser upp sensorn mäts av lampkalibreringen, som kommer i ett
-senare steg; tills dess är bidraget 0. Under **Just nu** står båda värdena
+varje lampa lyser upp sensorn mäts av lampkalibreringen, som kommer i en
+senare version (se **Steg 7**); tills dess är bidraget 0. Under **Just nu** står båda värdena
 när de skiljer sig.
 
 Kärnan antar inte att lamporna är släckta när den startar. Tills en lampa
@@ -635,14 +640,19 @@ Uppdatera så här (hemmet, inställningarna och historiken finns kvar):
 ```sh
 cd Homecontrol
 docker compose exec -T core homecontrol exportera > ~/hem.json   # säkerhetskopia av hemmet
-git pull
+git fetch --tags
+git checkout "$(git describe --tags --abbrev=0 origin/main)"     # den senaste versionen
+docker compose pull core
 docker compose up -d
 ```
 
-`git pull` hämtar en ny `compose.yaml` som pekar på den senaste versionens
-avbild, och `docker compose up -d` hämtar den och startar om det som har
-ändrats. Säkerhetskopian `hem.json` hamnar i din hemmapp på datorn. Dela
-den inte; den innehåller din planlösning.
+`git checkout` byter till den senaste versionens filer, med en
+`compose.yaml` som pekar på samma versions avbild. `docker compose pull core`
+hämtar avbilden, och `docker compose up -d` startar om det som har ändrats.
+Säger `pull` att avbilden inte finns har versionen nyss släppts och byggs
+fortfarande; vänta en halvtimme och försök igen. Säkerhetskopian `hem.json`
+hamnar i din hemmapp på datorn. Dela den inte; den innehåller din
+planlösning.
 
 Stoppa Homecontrol med `docker compose down`. Inget sparat försvinner;
 `docker compose up -d` startar allt igen.
@@ -786,7 +796,10 @@ läsbarhet.
   `core/pyproject.toml`, `web/package.json` och låsfilerna. När den mergas
   skapas en tagg och en GitHub Release, och kärnans avbild publiceras som
   `ghcr.io/yxhfr/homecontrol` för amd64 och arm64. Ändringslistan finns
-  bara i releaserna; det finns ingen CHANGELOG-fil.
+  bara i releaserna; det finns ingen CHANGELOG-fil. Dependabot använder
+  `fix(deps)` för beroenden som hamnar i avbilden eller i `compose.yaml`, så
+  att de ger en ny version. Webbinstalleraren för rumskorten byggs däremot
+  från main vid varje ändring i `firmware/`, inte vid en release.
 - Hemligheter läggs bara i `.env`, aldrig i repot.
 - Inga personliga uppgifter (planritningar, nätverksadresser, nycklar)
   får checkas in.
