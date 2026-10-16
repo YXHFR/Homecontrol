@@ -33,6 +33,8 @@ export interface LampModel extends PlacedItem {
   /** Zonen i rummet som lampan hör till. */
   zone_id?: string | null;
   profile?: string;
+  /** Hur mycket lampan lyser upp rummets ljussensor vid full styrka, i lux (lampkalibreringen). */
+  lux_contribution?: number;
 }
 
 /** En Wi-Fi-sändare, till exempel routern. */
@@ -54,6 +56,14 @@ export interface RoomSettings {
    * core/src/homecontrol/home.py). Under 1 startar Wi-Fi aldrig närvaro ensam.
    */
   wifi_weight: number;
+  /** Så länge lamporna dimras som varning innan de släcks, i sekunder. 0 stänger av varningen. */
+  dim_before_off_seconds: number;
+  /** Ljusstyrkan under varningsdimringen, i procent. */
+  dim_percent: number;
+  /** Så länge dagsljuset ska ha varit över ljusgränsen i sträck innan lamporna släcks, i sekunder. */
+  daylight_off_after_seconds: number;
+  /** Rummet har inga fönster och räknas alltid som mörkt. */
+  windowless: boolean;
 }
 
 export interface RoomModel {

@@ -2,8 +2,8 @@ import { LiveConnection, liveUrl, type ConnectionHandlers, type ConnectionStatus
 import { element } from "./dom";
 import { parkingSpot } from "./geometry";
 import type { ClientMessage, Floor, HomeMessage, StateMessage } from "./protocol";
+import { eventItems, shouldTurnOn, roomsNowItems, type RoomActions } from "./roomPanels";
 import { createSimulationPanel } from "./simulationPanel";
-import { OCCUPANCY_TEXT } from "./trackStyles";
 import { createKonvaView, type ViewFactory } from "./view";
 
 export interface Connection {
@@ -33,13 +33,14 @@ export function startFloor(home: HomeMessage): Floor {
 }
 
 /**
- * Ritar upp livevyn: hemmet en våning åt gången, lamporna, och panelen för
- * simuleringsläget med låtsaspersoner, dagsljus och tidsfart.
+ * Ritar upp livevyn: hemmet en våning åt gången, lamporna (ett klick styr dem
+ * för hand), panelen för simuleringsläget med låtsaspersoner, dagsljus och
+ * tidsfart, och panelerna "Just nu" och "Varför hände det?".
  */
 export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDependencies): void {
   const status = element("p", { className: "status" }, STATUS_TEXT.connecting);
   const stageContainer = element("div", { className: "stage" });
-  const explanations = element("ul", { className: "explanations" });
+  const events = element("ol", { className: "events" });
   const roomsNow = element("ul", { className: "rooms-now" });
   const floorPicker = element("nav", { className: "floors", hidden: true });
   floorPicker.setAttribute("aria-label", "Våningar");
@@ -70,9 +71,14 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     simulation.element,
     element("h2", {}, "Just nu"),
     roomsNow,
-    element("h2", {}, "Varför lamporna är som de är"),
-    explanations,
+    element("h2", {}, "Varför hände det?"),
+    events,
   );
+
+  const roomActions: RoomActions = {
+    setLamp: (lampId, on) => connection.send({ type: "set_lamp", lamp_id: lampId, on }),
+    resumeAutomation: (roomId) => connection.send({ type: "resume_automation", room_id: roomId }),
+  };
 
   let shownFloor: Floor | null = null;
   let lastState: StateMessage | null = null;
@@ -82,39 +88,31 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
         connection.send({ type: "move_person", person_id: personId, floor_id: shownFloor.id, ...position });
       }
     },
+    onToggleLamp: (lampId) => {
+      const lampState = lastState?.lamps.find((lamp) => lamp.id === lampId);
+      roomActions.setLamp(lampId, shouldTurnOn(lampState));
+    },
   });
 
-  const showExplanations = () => {
-    const lamps = shownFloor?.lamps ?? [];
-    const states = new Map(lastState?.lamps.map((lamp) => [lamp.id, lamp]));
-    explanations.replaceChildren(
-      ...lamps.flatMap((lamp) => {
-        const lampState = states.get(lamp.id);
-        return lampState === undefined
-          ? []
-          : [element("li", {}, `${lamp.name}: ${lampState.explanation}`)];
-      }),
-    );
-  };
-
-  /** Läget och ljusnivån i varje rum på våningen som visas. */
+  /**
+   * Läget i varje rum på våningen som visas, och vad som har hänt där.
+   *
+   * Läget kommer upp till tio gånger i sekunden när någon rör sig. Panelerna
+   * byggs bara om när något de visar har ändrats, så att ett klick på en knapp
+   * inte tappas för att knappen byttes ut mitt i klicket.
+   */
+  let shownPanels = "";
   const showRooms = () => {
-    const states = new Map(lastState?.rooms.map((room) => [room.id, room]));
-    roomsNow.replaceChildren(
-      ...(shownFloor?.rooms ?? []).flatMap((room) => {
-        const roomState = states.get(room.id);
-        if (roomState === undefined) {
-          return [];
-        }
-        const lux =
-          roomState.lux === null
-            ? "ljusnivån okänd"
-            : `${roomState.lux.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} lux`;
-        const item = element("li", {}, `${room.name}: ${OCCUPANCY_TEXT[roomState.status]}, ${lux}`);
-        item.dataset.status = roomState.status;
-        return [item];
-      }),
-    );
+    if (shownFloor === null) {
+      return;
+    }
+    const panels = JSON.stringify([shownFloor, lastState?.rooms, lastState?.lamps, lastState?.events]);
+    if (panels === shownPanels) {
+      return;
+    }
+    shownPanels = panels;
+    roomsNow.replaceChildren(...roomsNowItems(shownFloor, lastState, roomActions));
+    events.replaceChildren(...eventItems(shownFloor, lastState?.events ?? []));
   };
 
   const showFloor = (next: Floor) => {
@@ -124,7 +122,6 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     }
     view.setFloor(next);
     showRooms();
-    showExplanations();
   };
 
   const showHome = (next: HomeMessage) => {
@@ -147,7 +144,6 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     view.setState(state);
     simulation.show(state.simulation);
     showRooms();
-    showExplanations();
   };
 
   const connection = deps.connect({

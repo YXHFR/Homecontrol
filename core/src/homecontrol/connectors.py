@@ -2,7 +2,8 @@
 
 En *källkoppling* (radar, Wi-Fi-CSI, ljussensor, simulering …) lämnar
 observationer till kärnan genom en `ObservationSink`. En *lamputgång*
-(Zigbee2MQTT, simulering …) tar emot `LampCommand` från kärnan.
+(Zigbee2MQTT, simulering …) tar emot `LampCommand` från kärnan och berättar
+hur lamporna är med `LampStateReported` genom samma ingång.
 
 Kärnan vet inget om vilken koppling som sitter i andra änden. Simuleringen
 använder exakt samma ingång och utgång som de riktiga kopplingarna.
@@ -78,7 +79,30 @@ class SourceLost:
     source_id: str
 
 
-Observation = RadarTargetsObserved | MotionObserved | LightLevelObserved | SourceLost
+@dataclass(frozen=True)
+class LampStateReported:
+    """Lampans eget besked om sitt läge, från lamputgången.
+
+    Utgången skickar det när den startar, när lampan svarar igen och när
+    lampan har ändrats. `on` är None när lampan inte svarar och läget är
+    okänt. Kärnan antar aldrig att en lampa är släckt; tills lampan har
+    rapporterat eller kärnan själv har styrt den är läget okänt.
+
+    Än så länge ersätter beskedet bara det kärnan vet om lampan. Att en
+    ändring med fjärrkontroll eller app ska räknas som manuell styrning
+    (`Controller.set_lamp`) hör till den riktiga lampkopplingen, som först
+    måste skilja lampans svar på kärnans egna kommandon från sådana ändringar.
+    """
+
+    lamp_id: str
+    on: bool | None
+    brightness: int = 100
+    """Ljusstyrkan i procent (1–100) när lampan är tänd."""
+
+
+Observation = (
+    RadarTargetsObserved | MotionObserved | LightLevelObserved | SourceLost | LampStateReported
+)
 ObservationSink = Callable[[Observation], None]
 
 
@@ -107,6 +131,8 @@ class LampCommand:
     lamp_id: str
     on: bool
     reason: str
+    brightness: int = 100
+    """Ljusstyrkan i procent (1–100) när lampan tänds, till exempel lägre under en dimring."""
 
 
 class LampOutput(Protocol):

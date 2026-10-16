@@ -52,16 +52,17 @@ ALTER MATERIALIZED VIEW track_position_per_second
          timescaledb.orderby = 'time');
 
 -- Händelseloggen: varje gång ett rum blir upptaget, tomt eller okänt
--- (kind 'rum', detail är det nya läget), och regelmotorns förklaringar
--- (kind 'förklaring', detail är förklaringen i klartext). Den komprimeras
--- efter en vecka.
+-- (kind 'rum', detail är det nya läget), och kärnans beslut från
+-- "Varför hände det?" (kind 'förklaring', detail är förklaringen i klartext).
+-- Händelser med samma tid sorteras med seq, i den ordning de skrevs.
+-- Den komprimeras efter en vecka.
 CREATE TABLE event_log (
     time timestamptz NOT NULL,
+    seq bigint GENERATED ALWAYS AS IDENTITY,
     kind text NOT NULL CHECK (kind IN ('rum', 'förklaring')),
-    room_id text,
-    lamp_id text,
+    room_id text NOT NULL,
     detail text NOT NULL
 );
 SELECT create_hypertable('event_log', by_range('time', interval '7 days'));
-ALTER TABLE event_log SET (timescaledb.enable_columnstore = true, timescaledb.orderby = 'time');
+ALTER TABLE event_log SET (timescaledb.enable_columnstore = true, timescaledb.orderby = 'time, seq');
 CALL add_columnstore_policy('event_log', after => interval '7 days');

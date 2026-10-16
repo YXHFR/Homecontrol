@@ -4,15 +4,16 @@ Tabellerna skapas av `migrations/0003_historik.sql`, som också beskriver hur
 positionerna nedsamplas och komprimeras. Hur länge historiken sparas ställs
 in med `configure` när kärnan startar.
 
-`History` tar emot kärnans läge (`record`) och förklaringar (`explain`) i
-händelseloopen och lägger dem i en kö. En egen tråd skriver kön till
+`History` tar emot kärnans läge (`record`) i händelseloopen och lägger det
+som är nytt i en kö: spårens positioner, rummens läge och kärnans händelser
+(`Snapshot.events`, besluten i "Varför hände det?"). En egen tråd skriver kön till
 databasen ungefär en gång i sekunden. Om databasen är seg eller borta fylls
 kön, och då tappas nya punkter i stället för att lamporna får vänta.
 Det som inte gick att skriva tappas också; historiken är inte viktigare än
 att kärnan fortsätter.
 
-Rummets läge sparas före förklaringen som det gav upphov till, utom när
-kön har varit full: då kan rumsändringen komma efter förklaringen.
+I händelseloggen sparas rummets nya läge före händelsen som det gav upphov
+till, utom när kön har varit full: då kan rumsändringen komma efter.
 
 En position sparas när spåret har flyttat sig eller bytt mellan sett och
 kvarhållet. Ett spår som står helt still ger alltså inga nya punkter.
@@ -66,8 +67,7 @@ class _Position:
 class _Event:
     time: datetime
     kind: str
-    room_id: str | None
-    lamp_id: str | None
+    room_id: str
     detail: str
 
 
@@ -110,7 +110,7 @@ class History:
     """Skriver historiken i bakgrunden. Anropas från händelseloopen och väntar aldrig.
 
     Det som sparas är spårens positioner när de ändras, rummens läge när det
-    ändras och förklaringarna. Starta skrivaren med `start` och stoppa den med
+    ändras och kärnans händelser. Starta skrivaren med `start` och stoppa den med
     `close`, som skriver det som ligger kvar i kön.
     """
 
@@ -133,6 +133,8 @@ class History:
         """Det senast sparade om varje spår."""
         self._rooms: dict[str, Occupancy] = {}
         """Det senast sparade läget i varje rum."""
+        self._last_event = 0
+        """Löpnumret på den senast sparade (eller hoppade) händelsen i `Snapshot.events`."""
         self._dropped = 0
         self._thread: threading.Thread | None = None
         self._stopping = threading.Event()
@@ -164,8 +166,10 @@ class History:
         """Lägger det som har ändrats sedan det senast sparade i kön."""
         if self._paused():
             # Börja om när pausen är slut, så att rummens läge sparas på nytt.
+            # Händelserna under pausen hoppas över.
             self._tracks.clear()
             self._rooms.clear()
+            self._last_event = max((event.number for event in snapshot.events), default=0)
             return
         now = self._wall_clock()
         # Det sparade uppdateras bara om ändringen fick plats i kön. Annars
@@ -183,16 +187,19 @@ class History:
         for room in snapshot.rooms:
             saved_status = self._rooms.get(room.room_id)
             if saved_status is not room.status and self._put(
-                _Event(now, _ROOM_CHANGED, room.room_id, None, room.status.value)
+                _Event(now, _ROOM_CHANGED, room.room_id, room.status.value)
             ):
                 saved_status = room.status
             if saved_status is not None:
                 rooms[room.room_id] = saved_status
         self._rooms = rooms
-
-    def explain(self, text: str, *, room_id: str | None = None, lamp_id: str | None = None) -> None:
-        if not self._paused():
-            self._put(_Event(self._wall_clock(), _EXPLANATION, room_id, lamp_id, text))
+        # Efter rummen, så att händelsen kommer efter rumsändringen som orsakade den.
+        for event in snapshot.events:
+            if event.number <= self._last_event:
+                continue
+            if not self._put(_Event(now, _EXPLANATION, event.room_id, event.text)):
+                break  # resten försöks nästa gång, i samma ordning
+            self._last_event = event.number
 
     def _put(self, item: _Position | _Event) -> bool:
         """Lägger `item` i kön om den får plats. Returnerar om den fick det."""
@@ -284,9 +291,7 @@ def _insert(conn: psycopg.Connection, batch: list[_Position | _Event]) -> None:
                     copy.write_row(
                         (item.time, item.track_id, item.floor_id, *item.position, item.held)
                     )
-        with cursor.copy(
-            "COPY event_log (time, kind, room_id, lamp_id, detail) FROM STDIN"
-        ) as copy:
+        with cursor.copy("COPY event_log (time, kind, room_id, detail) FROM STDIN") as copy:
             for item in batch:
                 if isinstance(item, _Event):
-                    copy.write_row((item.time, item.kind, item.room_id, item.lamp_id, item.detail))
+                    copy.write_row((item.time, item.kind, item.room_id, item.detail))

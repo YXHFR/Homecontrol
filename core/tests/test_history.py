@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from homecontrol import history
 from homecontrol.app import create_app
 from homecontrol.connectors import LightLevelObserved
-from homecontrol.controller import Controller, RoomView, Snapshot
+from homecontrol.controller import Controller, Event, RoomView, Snapshot
 from homecontrol.fusion import Occupancy, Track
 from homecontrol.history import History
 from homecontrol.home import Point, Room
@@ -191,8 +191,16 @@ def test_history_can_be_kept_for_a_limited_time(conn: psycopg.Connection) -> Non
         assert policy(conn, "policy_retention", table, "drop_after") == []
 
 
-def snapshot(*tracks: Track, kitchen: Occupancy = Occupancy.VACANT) -> Snapshot:
-    return Snapshot(tracks=tracks, rooms=(RoomView("kok", kitchen, None),), zones=(), lamps=())
+def snapshot(
+    *tracks: Track, kitchen: Occupancy = Occupancy.VACANT, events: tuple[Event, ...] = ()
+) -> Snapshot:
+    room = RoomView("kok", kitchen, None, None, manual=False, explanation="")
+    return Snapshot(tracks=tracks, rooms=(room,), zones=(), lamps=(), events=events)
+
+
+def lit(number: int = 1) -> Event:
+    """Kärnans händelse när lampan i köket tändes."""
+    return Event(number, 0.0, "kok", "Tändes: någon är i Kök och det var mörkt.")
 
 
 def anna_at(x: float, *, held: bool = False) -> Track:
@@ -213,7 +221,7 @@ def positions(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
 
 def events(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
     return conn.execute(
-        "SELECT time, kind, room_id, lamp_id, detail FROM event_log ORDER BY time"
+        "SELECT time, kind, room_id, detail FROM event_log ORDER BY time, seq"
     ).fetchall()
 
 
@@ -224,26 +232,20 @@ def test_tracks_room_changes_and_explanations_are_written(
     writer.start()
 
     writer.record(snapshot())
-    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED))
-    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED))  # inget nytt
-    writer.explain("Tändes: radarn ser 1 person.", room_id="kok", lamp_id="taklampa")
-    writer.record(snapshot(anna_at(1, held=True), kitchen=Occupancy.OCCUPIED))
+    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED, events=(lit(),)))
+    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED, events=(lit(),)))  # inget nytt
+    writer.record(snapshot(anna_at(1, held=True), kitchen=Occupancy.OCCUPIED, events=(lit(),)))
     writer.close()
 
     assert positions(conn) == [
         (NOW + timedelta(seconds=1), ANNA, "plan", 1, 2, False),
-        (NOW + timedelta(seconds=4), ANNA, "plan", 1, 2, True),
+        (NOW + timedelta(seconds=3), ANNA, "plan", 1, 2, True),
     ]
+    # Händelsen kommer efter rumsändringen som orsakade den.
     assert events(conn) == [
-        (NOW, "rum", "kok", None, "tomt"),
-        (NOW + timedelta(seconds=1), "rum", "kok", None, "upptaget"),
-        (
-            NOW + timedelta(seconds=3),
-            "förklaring",
-            "kok",
-            "taklampa",
-            "Tändes: radarn ser 1 person.",
-        ),
+        (NOW, "rum", "kok", "tomt"),
+        (NOW + timedelta(seconds=1), "rum", "kok", "upptaget"),
+        (NOW + timedelta(seconds=1), "förklaring", "kok", lit().text),
     ]
 
 
@@ -255,14 +257,13 @@ def test_nothing_is_saved_while_paused_and_rooms_are_saved_again_after(
     writer.pause_while(lambda: simulating)
     writer.start()
 
-    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED))
-    writer.explain("Tändes.", room_id="kok", lamp_id="taklampa")
+    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED, events=(lit(1),)))
     simulating = False
-    writer.record(snapshot())
+    writer.record(snapshot(events=(lit(1), lit(2))))
     writer.close()
 
     assert positions(conn) == []
-    assert events(conn) == [(NOW, "rum", "kok", None, "tomt")]
+    assert events(conn) == [(NOW, "rum", "kok", "tomt"), (NOW, "förklaring", "kok", lit().text)]
 
 
 def test_full_queue_drops_points_instead_of_waiting() -> None:
@@ -286,6 +287,20 @@ def test_room_change_that_did_not_fit_is_saved_later() -> None:
     saved = writer._queue.get_nowait()
     assert isinstance(saved, history._Event)
     assert saved.detail == "upptaget"
+
+
+def test_events_that_did_not_fit_are_saved_later_in_order() -> None:
+    writer = History("host=127.0.0.1 port=1", max_queued=2)
+    writer.record(snapshot())  # rummets läge
+    writer.record(snapshot(events=(lit(1), lit(2))))  # bara den första får plats
+    writer._queue.get_nowait()
+    writer._queue.get_nowait()
+
+    writer.record(snapshot(events=(lit(1), lit(2), lit(3))))
+
+    saved = [writer._queue.get_nowait(), writer._queue.get_nowait()]
+    assert [item.detail for item in saved if isinstance(item, history._Event)] == [lit().text] * 2
+    assert writer._last_event == 3
 
 
 def wait_for(condition: Callable[[], bool]) -> None:
@@ -357,7 +372,7 @@ def test_core_writes_its_history_but_not_the_simulation(
 
     [(track_id,)] = conn.execute("SELECT DISTINCT track_id::text FROM track_position").fetchall()
     assert track_id == controller.snapshot().tracks[0].id
-    in_room = [(kind, detail) for _, kind, room_id, _, detail in events(conn) if room_id == room.id]
+    in_room = [(kind, detail) for _, kind, room_id, detail in events(conn) if room_id == room.id]
     # Förklaringen kommer efter rumsändringen som orsakade den.
     explained = next(i for i, (kind, _) in enumerate(in_room) if kind == "förklaring")
     assert in_room[explained - 1] == ("rum", "upptaget")
