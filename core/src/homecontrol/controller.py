@@ -149,7 +149,9 @@ class Controller:
     @property
     def wake_at(self) -> float | None:
         """När `tick` behöver anropas nästa gång, eller None om inget väntar."""
-        calibration = None if self._calibration is None else self._calibration.wake_at()
+        calibration = (
+            None if self._calibration is None else self._calibration.wake_at(self._clock.now())
+        )
         return min(
             (
                 when
@@ -182,7 +184,7 @@ class Controller:
                 by_source.pop(source_id, None)  # sist i ordningen är senast mätt
                 by_source[source_id] = lux
                 if self._calibration is not None and self._calibration.room_id == room_id:
-                    self._calibration.reading(lux, now)
+                    self._calibration.reading(source_id, lux, now)
             case LampStateReported(lamp_id=lamp_id, on=on, brightness=brightness):
                 if not any(lamp.id == lamp_id for lamp in self._home.lamps):
                     logger.warning("Läge för okänd lampa %r ignoreras", lamp_id)
@@ -217,7 +219,9 @@ class Controller:
         lamp = next(lamp for lamp in room.lamps if lamp.id == lamp_id)
         if self._calibration is not None and self._calibration.room_id == room.id:
             # Den som styr en lampa för hand vill ha den så; den ställs inte tillbaka.
-            self._end_calibration(self._calibration, f"{lamp.name} styrdes för hand", restore=False)
+            self._end_calibration(
+                self._calibration, f"{lamp.name} styrdes för hand", touched=lamp_id
+            )
         command = rules.manual_command(room, lamp, on)
         self._memory[room.id] = rules.start_manual(self._memory.get(room.id, {}), self._clock.now())
         self._switch(command)
@@ -262,7 +266,9 @@ class Controller:
                 return f"{lamp.name} svarar inte, så dess ljus går inte att mäta."
             before[lamp.id] = LampSetting(state.on, state.brightness)
         now = self._clock.now()
-        calibration = RoomCalibration(room, before, now)
+        # Ett rum med flera ljussensorer mäts med den som mätte senast.
+        source_id = next(reversed(self._lux[room.id]))
+        calibration = RoomCalibration(room, before, source_id, now)
         self._calibration = calibration
         self._calibration_view = calibration.view()
         self._memory[room.id] = rules.start_calibrating(self._memory.get(room.id, {}), now)
@@ -278,7 +284,7 @@ class Controller:
         """Avbryter lampkalibreringen som pågår och ställer tillbaka lamporna."""
         if self._calibration is None:
             return
-        self._end_calibration(self._calibration, "någon tryckte på Avbryt", restore=True)
+        self._end_calibration(self._calibration, "någon tryckte på Avbryt")
         self._evaluate()
         self._notify()
 
@@ -307,40 +313,44 @@ class Controller:
             return
         lamp = next(lamp for lamp in calibration.room.lamps if lamp.id == lamp_id)
         if report.on is None:
-            self._end_calibration(calibration, f"{lamp.name} slutade svara", restore=True)
+            self._end_calibration(calibration, f"{lamp.name} slutade svara")
         elif report.external:
-            # Den som har ändrat lampan vill ha den så; lamporna ställs inte tillbaka.
+            # Den som har ändrat lampan vill ha den så; den ställs inte tillbaka.
             self._end_calibration(
-                calibration, f"{lamp.name} ändrades med fjärrkontroll eller app", restore=False
+                calibration, f"{lamp.name} ändrades med fjärrkontroll eller app", touched=lamp_id
             )
 
     def _advance_calibration(self) -> None:
         calibration = self._calibration
         if calibration is None:
             return
-        if calibration.update(self._room_lux(calibration.room_id), self._clock.now()):
+        lux = self._lux.get(calibration.room_id, {}).get(calibration.source_id)
+        if calibration.update(lux, self._clock.now()):
             for command in calibration.commands():
                 self._switch(command)
         if calibration.finished:
-            self._end_calibration(calibration, failure=None, restore=True)
+            self._end_calibration(calibration, failure=None)
         else:
             self._calibration_view = calibration.view()
 
     def _end_calibration(
-        self, calibration: RoomCalibration, failure: str | None, *, restore: bool
+        self, calibration: RoomCalibration, failure: str | None, *, touched: str | None = None
     ) -> None:
-        """Avslutar kalibreringen. `failure` säger varför den avbröts, om den gjorde det."""
+        """Avslutar kalibreringen och ställer tillbaka lamporna.
+
+        `failure` säger varför den avbröts, om den gjorde det. Lampan `touched`
+        har någon just styrt själv, så den ställs inte tillbaka.
+        """
         self._calibration = None
         if failure is not None:
             calibration.fail(failure)
         view = calibration.view()
         self._calibration_view = view
         room_id = calibration.room_id
-        if restore:
-            known = {lamp.id for lamp in self._home.lamps}
-            for command in calibration.restore_commands():
-                if command.lamp_id in known and command.lamp_id not in self._not_responding:
-                    self._switch(command)
+        known = {lamp.id for lamp in self._home.lamps} - self._not_responding - {touched}
+        for command in calibration.restore_commands():
+            if command.lamp_id in known:
+                self._switch(command)
         self._memory[room_id] = rules.stop_calibrating(self._memory.get(room_id, {}))
         logger.info("Lampkalibreringen i %s: %s", room_id, view.phase.value)
         self._log_event(room_id, view.text)
@@ -399,9 +409,7 @@ class Controller:
                 or room.settings.windowless
                 or [lamp.id for lamp in room.lamps] != list(calibration.before)
             ):
-                self._end_calibration(
-                    calibration, "rummet ändrades i kartredigeraren", restore=True
-                )
+                self._end_calibration(calibration, "rummet ändrades i kartredigeraren")
         self._lux = {
             room_id: lux for room_id, lux in self._lux.items() if room_id in self._room_ids
         }

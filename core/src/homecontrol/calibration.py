@@ -37,6 +37,8 @@ STABLE_SECONDS = 12.0
 
 Rumskortets ljussensor mäter var femte sekund, så det blir minst två mätningar.
 """
+MIN_SAMPLES = 2
+"""Så många gånger sensorn ska ha mätt samma ljusnivå innan den räknas som mätt."""
 STEP_TIMEOUT_SECONDS = 90.0
 """Har ljusnivån inte legat still efter så här lång tid avbryts kalibreringen."""
 STEADY_LUX = 2.0
@@ -80,13 +82,16 @@ class LampSetting:
 
 
 class _Measurement:
-    """En mätning av ljusnivån: väntar ut övergången och sedan tills ljuset ligger still."""
+    """En mätning av ljusnivån: väntar ut övergången och sedan tills ljuset är jämnt.
+
+    Bara det sensorn mäter efter övergången räknas, så att ett värde från
+    innan lamporna styrdes aldrig kommer med.
+    """
 
     def __init__(self, started_at: float) -> None:
         self.started_at = started_at
-        self._fresh = False
-        """Sensorn har mätt sedan lamporna styrdes."""
         self._window_start: float | None = None
+        """När ljuset senast ändrades efter övergången, eller None innan sensorn har mätt."""
         self._reference = 0.0
         self._samples: list[float] = []
 
@@ -98,40 +103,44 @@ class _Measurement:
     def gives_up_at(self) -> float:
         return self.started_at + STEP_TIMEOUT_SECONDS
 
+    @property
+    def heard(self) -> bool:
+        """Sensorn har mätt efter övergången."""
+        return self._window_start is not None
+
     def reading(self, lux: float, now: float) -> None:
-        self._fresh = True
         if now < self.settled_at:
             return
         if self._window_start is None or not _steady(lux, self._reference):
-            self._start_window(lux, now)
+            self._window_start = now
+            self._reference = lux
+            self._samples = [lux]
         else:
             self._samples.append(lux)
 
-    def result(self, lux: float, now: float) -> float | None:
-        """Den mätta ljusnivån, eller None om ljuset inte har legat still länge nog än.
+    def result(self, now: float) -> float | None:
+        """Den mätta ljusnivån, eller None om ljuset inte har varit jämnt länge nog än.
 
-        `lux` är den senast mätta ljusnivån.
+        Ljuset ska ha varit jämnt i `STABLE_SECONDS`, och sensorn ska ha mätt
+        minst två gånger under tiden.
         """
-        if now < self.settled_at:
+        if self._window_start is None or now - self._window_start < STABLE_SECONDS:
             return None
-        window_start = self._window_start
-        if window_start is None:
-            # Ingen mätning efter övergången än: det senaste värdet får börja.
-            self._start_window(lux, now)
-            window_start = now
-        if not self._fresh or now - window_start < STABLE_SECONDS:
+        if len(self._samples) < MIN_SAMPLES:
             return None
         return sum(self._samples) / len(self._samples)
 
-    def wake_at(self) -> float:
-        if self._window_start is None:
-            return self.settled_at
-        return min(self._window_start + STABLE_SECONDS, self.gives_up_at)
+    def wake_at(self, now: float) -> float:
+        """När mätningen kan vara klar, om inget nytt mäts innan dess.
 
-    def _start_window(self, lux: float, now: float) -> None:
-        self._window_start = now
-        self._reference = lux
-        self._samples = [lux]
+        Väntar mätningen på sensorn är det när den ger upp; nästa avläsning
+        väcker kärnan ändå.
+        """
+        if now < self.settled_at:
+            return self.settled_at
+        if self._window_start is not None and self._window_start + STABLE_SECONDS > now:
+            return min(self._window_start + STABLE_SECONDS, self.gives_up_at)
+        return self.gives_up_at
 
 
 @dataclass(frozen=True)
@@ -144,10 +153,15 @@ class RoomCalibration:
     """Kalibreringen av ett rum, från första till sista mätningen.
 
     Rummet måste ha lampor, och `before` ska ha läget för var och en av dem.
+    `source_id` är källan vars ljussensor mäter; ett rum med flera kort mäts
+    med ett av dem, så att deras värden inte blandas.
     """
 
-    def __init__(self, room: Room, before: Mapping[str, LampSetting], now: float) -> None:
+    def __init__(
+        self, room: Room, before: Mapping[str, LampSetting], source_id: str, now: float
+    ) -> None:
         self.room = room
+        self.source_id = source_id
         self.before = dict(before)
         self._lamps = room.lamps
         # Släckt, sedan varje lampa tänd och släckt igen.
@@ -188,27 +202,30 @@ class RoomCalibration:
             for other in self._lamps
         ]
 
-    def reading(self, lux: float, now: float) -> None:
-        """Sensorn i rummet har mätt ljusnivån."""
-        if not self.finished:
+    def reading(self, source_id: str, lux: float, now: float) -> None:
+        """En sensor i rummet har mätt ljusnivån. Bara kalibreringens egen källa räknas."""
+        if source_id == self.source_id and not self.finished:
             self._measurement.reading(lux, now)
 
     def update(self, lux: float | None, now: float) -> bool:
         """Låter mätningen gå vidare. Returnerar True när lamporna ska styras om.
 
-        `lux` är rummets senast mätta ljusnivå, eller None om sensorn har tappats.
+        `lux` är den senast mätta ljusnivån från kalibreringens källa, eller
+        None om sensorn har tappats.
         """
         if self.finished:
             return False
         if lux is None:
             self.fail("ljussensorn i rummet slutade svara")
             return False
-        value = self._measurement.result(lux, now)
+        value = self._measurement.result(now)
         if value is None:
             if now >= self._measurement.gives_up_at:
                 self.fail(
                     "ljuset blev aldrig jämnt. Försök igen när ljuset är stadigare, "
                     "gärna när det är mörkt ute"
+                    if self._measurement.heard
+                    else "ljussensorn i rummet har inte mätt något på en stund"
                 )
             return False
         self._measured.append(value)
@@ -231,8 +248,8 @@ class RoomCalibration:
         if not self.finished:
             self._failure = reason
 
-    def wake_at(self) -> float | None:
-        return None if self.finished else self._measurement.wake_at()
+    def wake_at(self, now: float) -> float | None:
+        return None if self.finished else self._measurement.wake_at(now)
 
     def results(self) -> dict[str, float]:
         """Varje lampas bidrag i lux vid full ljusstyrka. Bara när kalibreringen är klar."""

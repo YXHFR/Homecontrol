@@ -30,7 +30,12 @@ from homecontrol.home import Home
 from homecontrol.homefile import example_home
 from homecontrol.lampdevices import create_lamp_devices_router
 from homecontrol.live import create_live_router, run_timer
-from homecontrol.simulation import SimulatedLampOutput, SimulatedSource, Simulation
+from homecontrol.simulation import (
+    SimulatedLampOutput,
+    SimulatedSource,
+    Simulation,
+    run_light_sensors,
+)
 from homecontrol.zigbee import Connect, ZigbeeOutput, zigbee_lamps
 
 logger = logging.getLogger(__name__)
@@ -97,7 +102,6 @@ def create_app(
         enabled=not real_hardware(home),
         real_hardware=real_hardware,
         lamps=lamps,
-        defer=defer_in_loop,
     )
     if history is not None:
         # Låtsaspersonerna ska inte hamna i historiken bland de riktiga spåren.
@@ -117,7 +121,10 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if history is not None:
             history.start()
-        tasks = [asyncio.create_task(run_timer(controller, clock))]
+        tasks = [
+            asyncio.create_task(run_timer(controller, clock)),
+            asyncio.create_task(run_light_sensors(simulation, clock)),
+        ]
         if cards is not None:
             tasks.append(asyncio.create_task(cards.run(controller.observe)))
         if zigbee is not None and mqtt is not None:

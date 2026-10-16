@@ -6,7 +6,10 @@ sitter taklampan 2 meter från rumskortet och lyser alltså upp sensorn med en
 fjärdedel av `LAMP_LUX_AT_ONE_METER`.
 """
 
+import pytest
+
 from homecontrol.calibration import STEP_TIMEOUT_SECONDS
+from homecontrol.connectors import LightLevelObserved
 from homecontrol.home import RoomSettings
 from homecontrol.simulation import LAMP_LUX_AT_ONE_METER
 from homes import home_with_settings, one_room_home, two_lamp_home
@@ -40,6 +43,45 @@ def test_measures_each_lamp_and_puts_the_lamps_back() -> None:
         .expect_lamp_on("golvlampa")
         .expect_event("Lampkalibreringen i Vardagsrum är klar")
     )
+
+
+@pytest.mark.parametrize("phase", [0.0, 1.0, 2.5, 4.0])
+def test_a_faint_lamp_in_daylight_is_measured_whenever_the_sensor_measures(phase: float) -> None:
+    """Sensorn mäter var femte sekund. Värden från innan lampan ändrades får aldrig räknas med.
+
+    Lampan sitter 2,5 meter från rumskortet, och dess ljus är mindre än vad
+    dagsljuset får skifta under en mätning.
+    """
+    (
+        Scenario(lamp_light=True, sensor_phase=phase)
+        .daylight(300)
+        .move_lamp("taklampa", x=2.5, y=2.5)
+        .start_calibration()
+        .wait_for_calibration()
+        .expect_calibration("klar")
+        .expect_lamp_light(LAMP_LUX_AT_ONE_METER / 2.5**2)
+    )
+
+
+def test_a_silent_sensor_stops_the_calibration_without_spinning() -> None:
+    """Slutar sensorn mäta, utan att kortet tappas, väntar kalibreringen en stund och ger upp."""
+    (
+        Scenario()  # sensorn mäter bara när dagsljuset ställs
+        .daylight(10)
+        .start_calibration()
+        .wait(minutes=3)
+        .expect_calibration("avbruten", "har inte mätt något")
+        .expect_lamp_light(0)
+    )
+
+
+def test_another_sensor_in_the_room_does_not_disturb_the_measurement() -> None:
+    """Ett rum med två rumskort mäts med det som mätte senast när kalibreringen startade."""
+    scenario = Scenario(lamp_light=True).daylight(10).start_calibration()
+    for _ in range(60):
+        scenario.controller.observe(LightLevelObserved("annat-kort", "vardagsrum", 500))
+        scenario.wait(seconds=2)
+    scenario.expect_calibration("klar").expect_lamp_light(CEILING_LAMP)
 
 
 def test_automation_pauses_during_the_calibration() -> None:
@@ -161,6 +203,21 @@ def test_a_remote_control_stops_the_calibration_and_wins() -> None:
         .wait(seconds=30)
         .expect_lamp_on()
         .expect_manual()
+    )
+
+
+def test_a_remote_control_puts_the_other_lamps_back() -> None:
+    """Bara lampan som någon rörde lämnas; den andra lampan lyser inte kvar för mätningen."""
+    (
+        Scenario(two_lamp_home(), lamp_light=True)
+        .daylight(10)
+        .start_calibration()
+        .wait(seconds=25)  # nu lyser taklampan för att mätas
+        .expect_lamp_on("taklampa")
+        .lamp_changed_with_remote(True, "golvlampa")
+        .expect_calibration("avbruten", "Golvlampa ändrades")
+        .expect_lamp_off("taklampa")
+        .expect_lamp_on("golvlampa")
     )
 
 

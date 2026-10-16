@@ -18,6 +18,7 @@ lamporna genom att starta en kalibrering.
 """
 
 import asyncio
+import logging
 from collections.abc import Mapping, Set
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -26,6 +27,8 @@ from homecontrol.calibration import with_contributions
 from homecontrol.controller import CalibratedListener, Controller
 from homecontrol.editor import HomeChanges, StoreUnavailable
 from homecontrol.trust import trusted
+
+logger = logging.getLogger(__name__)
 
 
 def calibration_saver(changes: HomeChanges) -> CalibratedListener:
@@ -44,6 +47,10 @@ def calibration_saver(changes: HomeChanges) -> CalibratedListener:
             changes.controller.calibration_not_saved(
                 "Databasen svarade inte. Försök igen om en stund."
             )
+        except Exception:
+            # Annars syns kalibreringen som klar fast inget sparades.
+            logger.exception("Kunde inte spara lampkalibreringen")
+            changes.controller.calibration_not_saved("Något gick fel. Försök igen.")
 
     def start_saving(results: Mapping[str, float]) -> None:
         task = asyncio.get_running_loop().create_task(save(dict(results)))

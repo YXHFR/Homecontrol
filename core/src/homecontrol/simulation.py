@@ -16,9 +16,13 @@ simuleringen aldrig blandas med det de riktiga korten mäter.
 
 De virtuella lamporna kan lysa upp de simulerade ljussensorerna (se
 `SimulatedLampOutput.light_by_room`), så att lampkalibreringen går att prova.
-Ljuset avtar med avståndet från lampan till rummets ljussensor.
+Ljuset avtar med avståndet från lampan till rummets ljussensor. Sensorerna
+mäter var femte sekund (`run_light_sensors`), precis som rumskorten, och när
+dagsljuset ändras.
 """
 
+import asyncio
+import contextlib
 import logging
 import math
 from collections import deque
@@ -27,9 +31,8 @@ from dataclasses import dataclass
 from itertools import count
 from typing import Literal, get_args
 
-from homecontrol.clock import SpeedControl
+from homecontrol.clock import PacedClock, SpeedControl
 from homecontrol.connectors import (
-    Defer,
     LampCommand,
     LampStateReported,
     LightLevelObserved,
@@ -196,16 +199,15 @@ class SimulatedSource:
         for room in self._simulated_rooms(self._home):
             self._measure(room.id)
 
-    def set_lamp_light(self, light: Mapping[str, float]) -> None:
-        """Ljuset från de virtuella lamporna per rum, som sensorerna mäter ihop med dagsljuset.
+    def measure_light(self, lamp_light: Mapping[str, float]) -> None:
+        """Varje simulerad sensor mäter dagsljuset och lampornas ljus, som ett rumskort gör.
 
-        Varje simulerad sensor mäter på nytt, som när en riktig sensor mäter
-        efter att en lampa har tänts eller släckts.
+        `lamp_light` är ljuset från de virtuella lamporna per rum. Det mäts
+        ihop med dagsljuset från och med nu.
         """
-        self._lamp_light = dict(light)
-        if self._daylight is not None:
-            for room in self._simulated_rooms(self._home):
-                self._measure(room.id)
+        self._lamp_light = dict(lamp_light)
+        for room in self._simulated_rooms(self._home):
+            self._measure(room.id)
 
     def use_home(self, home: Home) -> None:
         """Byter hem, till exempel när det har ritats om. Nya rum får dagsljuset."""
@@ -280,14 +282,11 @@ class SimulatedLampOutput:
     `real_lamps` ger lamporna i ett hem som en riktig lamputgång styr. De är
     inte virtuella, så den här utgången varken rapporterar eller styr dem.
 
-    Den som prenumererar (`subscribe`) får veta när en virtuell lampa har fått
-    ett kommando, till exempel simuleringen, som låter lampornas ljus nå de
-    simulerade sensorerna (se `light_by_room`).
+    Simuleringen låter lampornas ljus nå de simulerade sensorerna (se `light_by_room`).
     """
 
     def __init__(self, real_lamps: Callable[[Home], Set[str]] = lambda _: frozenset()) -> None:
         self._real_lamps = real_lamps
-        self._listeners: list[Listener] = []
         self._real: Set[str] = frozenset()
         self.states: dict[str, bool] = {}
         self.brightness: dict[str, int] = {}
@@ -301,16 +300,6 @@ class SimulatedLampOutput:
         self.states[command.lamp_id] = command.on
         self.brightness[command.lamp_id] = command.brightness
         self.history.append(command)
-        for listener in list(self._listeners):
-            listener()
-
-    def subscribe(self, listener: Listener) -> Callable[[], None]:
-        """Anropar `listener` efter varje kommando till en virtuell lampa, mitt i kärnans beslut.
-
-        Returnerar en funktion som avslutar.
-        """
-        self._listeners.append(listener)
-        return lambda: self._listeners.remove(listener)
 
     def light_by_room(self, home: Home) -> dict[str, float]:
         """Hur mycket de tända virtuella lamporna lyser upp varje rums ljussensor, i lux.
@@ -378,9 +367,8 @@ class Simulation:
     `floor_ids` är hemmets våningar. Personer på andra våningar avvisas. Utan
     `daylight` lämnas ljusnivån i rummen okänd tills någon ställer den.
 
-    Med `lamps` och `defer` lyser de virtuella lamporna upp de simulerade sensorerna.
-    Lamporna styrs mitt i kärnans beslut, så sensorerna mäter först när
-    `defer` kör, en gång för alla kommandon i samma beslut.
+    Med `lamps` lyser de virtuella lamporna upp de simulerade sensorerna när
+    de mäter (`measure_light`).
     """
 
     def __init__(
@@ -394,14 +382,9 @@ class Simulation:
         daylight: float | None = DEFAULT_DAYLIGHT_LUX,
         real_hardware: Callable[[Home], bool] = lambda _: False,
         lamps: SimulatedLampOutput | None = None,
-        defer: Defer | None = None,
     ) -> None:
         self._source = source
         self._lamps = lamps
-        self._defer = defer
-        self._measure_scheduled = False
-        if lamps is not None and defer is not None:
-            lamps.subscribe(self._lamp_changed)
         self._real_hardware = real_hardware
         self._sink = sink
         self._clock = clock
@@ -483,6 +466,12 @@ class Simulation:
             self._source.set_daylight(lux)
             self._notify()
 
+    def measure_light(self) -> None:
+        """De simulerade ljussensorerna mäter, med de virtuella lampornas ljus."""
+        if self._enabled:
+            light = {} if self._lamps is None else self._lamps.light_by_room(self._source.home)
+            self._source.measure_light(light)
+
     def set_speed(self, speed: Speed) -> None:
         if isinstance(speed, bool) or speed not in SPEEDS:
             raise ValueError(f"Tidsfarten ska vara en av {SPEEDS}, inte {speed}")
@@ -494,21 +483,6 @@ class Simulation:
         """Anropar `listener` efter varje ändring. Returnerar en funktion som avslutar."""
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
-
-    def _lamp_changed(self) -> None:
-        if self._measure_scheduled or self._defer is None:
-            return  # sensorerna mäter redan strax
-        self._measure_scheduled = True
-        try:
-            self._defer(self._measure_lamp_light)
-        except Exception:
-            self._measure_scheduled = False  # annars mäter sensorerna aldrig mer
-            raise
-
-    def _measure_lamp_light(self) -> None:
-        self._measure_scheduled = False
-        if self._lamps is not None:
-            self._source.set_lamp_light(self._lamps.light_by_room(self._source.home))
 
     def _speed_locked(self) -> bool:
         return self._real_hardware(self._source.home)
@@ -522,3 +496,33 @@ class Simulation:
     def _notify(self) -> None:
         for listener in list(self._listeners):
             listener()
+
+
+SENSOR_INTERVAL_SECONDS = 5.0
+"""Så ofta de simulerade ljussensorerna mäter, i kärnans tid. Samma som rumskortens."""
+
+
+async def run_light_sensors(simulation: Simulation, clock: PacedClock) -> None:
+    """Låter de simulerade ljussensorerna mäta var femte sekund. Körs tills den avbryts.
+
+    Med snabbare tidsfart mäter de lika mycket oftare, som allt annat i kärnan.
+    Väntetiden räknas om när takten ändras.
+    """
+    changed = asyncio.Event()
+    unsubscribe = clock.subscribe(changed.set)
+    try:
+        next_reading = clock.now() + SENSOR_INTERVAL_SECONDS
+        while True:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(changed.wait(), clock.real_seconds_until(next_reading))
+            changed.clear()
+            if clock.now() < next_reading:
+                continue
+            next_reading = clock.now() + SENSOR_INTERVAL_SECONDS
+            try:
+                simulation.measure_light()
+            except Exception:
+                # Sensorerna måste fortsätta mäta, annars går ljuset inte att följa.
+                logger.exception("Fel när de simulerade sensorerna mätte")
+    finally:
+        unsubscribe()
