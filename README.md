@@ -621,6 +621,9 @@ hemmet sparas.
   gången, väntar den på databasen som förut. Svarar databasen men något
   annat är fel, till exempel ett fel lösenord i `.env`, startar kärnan inte
   (se **Om något inte fungerar**).
+  Har du ändrat hur länge historiken sparas (eller uppdaterat Homecontrol)
+  medan databasen var nere, kör `docker compose up -d` igen när den är
+  igång, så att ändringen görs i databasen.
 - **Medan databasen är nere:** ändringar i kartredigeraren och resultatet
   av en lampkalibrering nekas med ett meddelande om varför. Historiken
   sparas inte; det som inte hinner skrivas tappas (se **Historik**).

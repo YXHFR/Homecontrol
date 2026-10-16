@@ -237,6 +237,15 @@ jobs:
           test "$status" = 204
           # Kopian kan bara läsas av kärnans egen användare.
           test "$(docker compose exec -T core stat -c '%a %U' /var/lib/homecontrol/hem.json)" = '600 homecontrol'
+      - name: db-setup stoppar kärnan när databasen svarar men något annat är fel
+        run: |
+          # Bara en databas som inte svarar alls får släppa igenom kärnan.
+          if docker compose run --rm -e PGPASSWORD=fel-losenord db-setup; then
+            echo "db-setup lyckades med fel lösenord"; exit 1
+          fi
+          if docker compose run --rm -e HOMECONTROL_HISTORY_KEEP_DAYS=inget-tal db-setup; then
+            echo "db-setup lyckades med en ogiltig inställning för historiken"; exit 1
+          fi
       - name: Visa loggar
         if: failure()
         run: docker compose logs

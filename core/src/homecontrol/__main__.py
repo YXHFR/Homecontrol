@@ -136,7 +136,11 @@ def prepare_database_for_core(database: str, settings: Settings) -> None:
             raise  # till exempel fel lösenord: då ska kärnan inte starta
         # Bara när databasen inte svarar alls får kärnan starta ändå, med sin
         # kopia av hemmet. Alla andra fel stoppar den (se compose.yaml).
-        logger.warning("Databasen svarar inte. Kärnan startar ändå och ansluter när den svarar")
+        logger.warning(
+            "Databasen svarar inte. Kärnan startar ändå och ansluter när den svarar. "
+            "Tabellerna och hur länge historiken sparas ändrades inte; "
+            "kör 'docker compose up -d' igen när databasen är igång"
+        )
         return
     with conn:
         store.migrate(conn)
