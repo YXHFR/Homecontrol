@@ -9,9 +9,9 @@ import math
 
 import pytest
 
-from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved
+from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved, SourceLost
 from homecontrol.fusion import HOLD_SECONDS, STILL_HOLD_MAX_SECONDS, Fusion, Occupancy, Presence
-from homecontrol.home import Home, Point, ZoneKind
+from homecontrol.home import Capability, Home, Point, RoomSettings, ZoneKind
 from homes import home_with_zones, one_room_home, radar_sees, room, side_by_side_home, zone
 
 HOME = one_room_home()
@@ -100,7 +100,7 @@ def test_lost_source_makes_the_room_unknown_until_it_is_heard_again() -> None:
     fusion = Fusion(HOME, now=0)
     fusion.radar(radar_sees((2, 2), source_id="kort"), now=0)
 
-    fusion.source_lost("kort", now=1)
+    fusion.source_lost(SourceLost("kort"), now=1)
     assert fusion.tracks() == ()
     assert fusion.rooms()[ROOM.id].status is Occupancy.UNKNOWN
 
@@ -307,7 +307,39 @@ def test_wifi_from_a_lost_source_releases_the_sofa_from_then() -> None:
     fusion.radar(radar_sees((1, 3), home=home), now=0)
     fusion.radar(radar_sees(home=home), now=1)
 
-    fusion.source_lost("wifi", now=600)
+    fusion.source_lost(SourceLost("wifi"), now=600)
 
     assert fusion.tracks() == ()
     assert fusion.rooms()[ROOM.id].since == 600
+
+
+def test_a_part_that_never_answered_makes_the_room_unknown() -> None:
+    fusion = Fusion(HOME, now=0)
+
+    fusion.source_lost(SourceLost("kort/radar", NODE.id, Capability.RADAR), now=0)
+    assert fusion.rooms()[ROOM.id].status is Occupancy.UNKNOWN
+
+    fusion.radar(radar_sees(source_id="kort/radar"), now=1)
+    assert fusion.rooms()[ROOM.id].status is Occupancy.VACANT
+
+
+def test_wifi_still_talking_does_not_hide_a_silent_radar() -> None:
+    fusion = Fusion(HOME, now=0)
+    fusion.radar(radar_sees((2, 2), source_id="kort/radar"), now=0)
+    fusion.motion(MotionObserved("kort/csi", NODE.id, False), now=0)
+
+    fusion.source_lost(SourceLost("kort/radar"), now=1)
+    fusion.motion(MotionObserved("kort/csi", NODE.id, False), now=2)
+
+    assert fusion.tracks() == ()
+    assert fusion.rooms()[ROOM.id].status is Occupancy.UNKNOWN
+
+
+def test_silent_wifi_does_not_matter_in_a_room_that_does_not_use_it() -> None:
+    home = home_with_zones(settings=RoomSettings(wifi_weight=0))
+    fusion = Fusion(home, now=0)
+    fusion.radar(radar_sees(home=home, source_id="kort/radar"), now=0)
+
+    fusion.source_lost(SourceLost("kort/csi", NODE.id, Capability.CSI), now=1)
+
+    assert fusion.rooms()[ROOM.id].status is Occupancy.VACANT

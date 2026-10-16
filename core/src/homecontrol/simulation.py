@@ -9,12 +9,16 @@ omräkningen och sammanvägningen prövas på samma sätt som med riktiga noder.
 
 Den virtuella radarn ser genom alla väggar. Det gör en riktig radar också,
 mer eller mindre, och sammanvägningen ska klara det.
+
+Riktiga rumskort simuleras inte. Låtsaspersonerna syns bara för de virtuella
+radarerna, och dagsljuset sätts bara i rum utan riktiga kort, så att
+simuleringen aldrig blandas med det de riktiga korten mäter.
 """
 
 import logging
 import math
 from collections import deque
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Set
 from dataclasses import dataclass
 from itertools import count
 from typing import Literal, get_args
@@ -30,7 +34,7 @@ from homecontrol.connectors import (
     RadarTargetsObserved,
     SourceLost,
 )
-from homecontrol.home import Capability, Home, Node, Point, Target
+from homecontrol.home import Capability, Home, Node, Point, Room, Target
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +73,16 @@ class SimulatedSource:
     bort. Id:t stannar i simuleringen; kärnan får bara se det radarna ser.
     """
 
-    def __init__(self, home: Home, source_id: str = "simulering") -> None:
+    def __init__(
+        self,
+        home: Home,
+        source_id: str = "simulering",
+        real_nodes: Callable[[Home], Set[str]] = lambda _: frozenset(),
+    ) -> None:
+        """`real_nodes` ger de riktiga rumskorten i ett hem, som inte ska simuleras."""
         self._source_id = source_id
         self._home = home
+        self._real_nodes = real_nodes
         self._sink: ObservationSink | None = None
         self._persons: dict[str, Target] = {}
         self._unseen: set[str] = set()
@@ -88,6 +99,10 @@ class SimulatedSource:
     @property
     def persons(self) -> Mapping[str, Target]:
         return dict(self._persons)
+
+    @property
+    def home(self) -> Home:
+        return self._home
 
     @property
     def daylight(self) -> float | None:
@@ -164,7 +179,7 @@ class SimulatedSource:
     def set_daylight(self, lux: float) -> None:
         """Samma ljusnivå i alla rum, som när solen går upp eller ner."""
         self._daylight = lux
-        for room in self._home.rooms:
+        for room in self._simulated_rooms(self._home):
             self.set_light_level(room.id, lux)
 
     def use_home(self, home: Home) -> None:
@@ -174,10 +189,15 @@ class SimulatedSource:
         nodes = {node.id for room in home.rooms for node in room.nodes}
         self._motion = {node: moving for node, moving in self._motion.items() if node in nodes}
         if self._daylight is not None:
-            for room in home.rooms:
+            for room in self._simulated_rooms(home):
                 if room.id not in before:
                     self.set_light_level(room.id, self._daylight)
         self._emit_targets()
+
+    def _simulated_rooms(self, home: Home) -> list[Room]:
+        """Rummen utan riktiga rumskort, där simuleringen bestämmer dagsljuset."""
+        real = self._real_nodes(home)
+        return [room for room in home.rooms if not any(node.id in real for node in room.nodes)]
 
     def set_light_level(self, room_id: str, lux: float) -> None:
         """Ljusnivån i ett enda rum."""
@@ -195,10 +215,11 @@ class SimulatedSource:
         seen = [
             person for person_id, person in self._persons.items() if person_id not in self._unseen
         ]
+        real = self._real_nodes(self._home)
         for floor in self._home.floors:
             on_floor = [person.position for person in seen if person.floor_id == floor.id]
             for node in (node for room in floor.rooms for node in room.nodes):
-                if Capability.RADAR in node.capabilities:
+                if Capability.RADAR in node.capabilities and node.id not in real:
                     targets = _targets_seen_by(node, on_floor)
                     self._sink(RadarTargetsObserved(self._source_id, node.id, targets))
 
@@ -264,6 +285,8 @@ class SimulationView:
 
     enabled: bool
     speed: float
+    speed_locked: bool
+    """Tidsfarten är spärrad till 1×, eftersom riktiga sensorer eller lampor används."""
     daylight: float | None
     persons: Mapping[str, Target]
 
@@ -276,8 +299,9 @@ class Simulation:
     ignoreras då.
 
     Tidsfarten gäller hela kärnan, eftersom kärnan har en enda klocka. Det går
-    bra så länge alla lampor är virtuella; med riktiga lampor skulle de släckas
-    60 gånger för tidigt.
+    bra så länge allt är simulerat; med riktiga lampor skulle de släckas 60
+    gånger för tidigt. Så länge `real_hardware` säger att hemmet har riktiga
+    sensorer eller lampor är tidsfarten därför spärrad till 1×.
 
     `floor_ids` är hemmets våningar. Personer på andra våningar avvisas. Utan
     `daylight` lämnas ljusnivån i rummen okänd tills någon ställer den.
@@ -292,8 +316,10 @@ class Simulation:
         floor_ids: Iterable[str],
         enabled: bool = True,
         daylight: float | None = DEFAULT_DAYLIGHT_LUX,
+        real_hardware: Callable[[Home], bool] = lambda _: False,
     ) -> None:
         self._source = source
+        self._real_hardware = real_hardware
         self._sink = sink
         self._clock = clock
         self._floor_ids = frozenset(floor_ids)
@@ -311,6 +337,7 @@ class Simulation:
         return SimulationView(
             enabled=self._enabled,
             speed=self._clock.speed,
+            speed_locked=self._speed_locked(),
             daylight=self._source.daylight,
             persons=self._source.persons,
         )
@@ -327,9 +354,15 @@ class Simulation:
         self._notify()
 
     def use_home(self, home: Home) -> None:
-        """Byter till ett ändrat hem, så att nya rum, noder och våningar också simuleras."""
+        """Byter till ett ändrat hem, så att nya rum, noder och våningar också simuleras.
+
+        Har ett riktigt rumskort just placerats går tiden tillbaka till vanlig takt.
+        """
         self._floor_ids = frozenset(floor.id for floor in home.floors)
         self._source.use_home(home)
+        if self._speed_locked() and self._clock.speed != 1:
+            self._clock.set_speed(1)
+            self._notify()
 
     def add_person(self, floor_id: str, position: Point) -> str | None:
         """Lägger till en person och returnerar dess id, eller None om det inte gick."""
@@ -361,7 +394,7 @@ class Simulation:
     def set_speed(self, speed: Speed) -> None:
         if isinstance(speed, bool) or speed not in SPEEDS:
             raise ValueError(f"Tidsfarten ska vara en av {SPEEDS}, inte {speed}")
-        if self._enabled:
+        if self._enabled and (speed == 1 or not self._speed_locked()):
             self._clock.set_speed(speed)
             self._notify()
 
@@ -369,6 +402,9 @@ class Simulation:
         """Anropar `listener` efter varje ändring. Returnerar en funktion som avslutar."""
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
+
+    def _speed_locked(self) -> bool:
+        return self._real_hardware(self._source.home)
 
     def _known_floor(self, floor_id: str) -> bool:
         if floor_id in self._floor_ids:

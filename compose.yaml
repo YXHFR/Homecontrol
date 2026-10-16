@@ -9,17 +9,27 @@ services:
       dockerfile: core/Dockerfile
     image: homecontrol-core:local
     restart: unless-stopped
+    # Kärnan delar datorns nätverk, så att den hittar rumskorten med mDNS
+    # (multicast når inte in i Dockers eget nät). Därför lyssnar den själv på
+    # BIND_ADDRESS och WEB_PORT, och når inte de andra tjänsterna med deras
+    # namn: databasen nås genom en socket i en delad volym, och övriga
+    # tjänster genom datorns egen adress.
+    network_mode: host
     environment:
+      HOMECONTROL_HOST: ${BIND_ADDRESS:-0.0.0.0}
+      HOMECONTROL_PORT: ${WEB_PORT:-8000}
       HOMECONTROL_ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
       # Hemmodellen sparas i databasen. Lösenordet läses från PGPASSWORD.
-      HOMECONTROL_DATABASE: host=db dbname=homecontrol user=homecontrol
+      HOMECONTROL_DATABASE: host=/var/run/postgresql dbname=homecontrol user=homecontrol
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD saknas – kopiera .env.example till .env och fyll i}
       # Hur länge historiken sparas (se README).
       HOMECONTROL_HISTORY_FULL_HOURS: ${HISTORY_FULL_HOURS:-24}
       # Tomt betyder utan tidsgräns.
       HOMECONTROL_HISTORY_KEEP_DAYS: ${HISTORY_KEEP_DAYS:-}
-    ports:
-      - "${BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
+      # Rumskortens nycklar räknas fram ur den här. Tom: inga kort ansluts.
+      HOMECONTROL_ESPHOME_SECRET: ${ESPHOME_SECRET:-}
+    volumes:
+      - db-socket:/var/run/postgresql
     depends_on:
       db:
         condition: service_healthy
@@ -34,6 +44,8 @@ services:
       TIMESCALEDB_TELEMETRY: "off"
     volumes:
       - db-data:/var/lib/postgresql/data
+      # Databasens socket delas med kärnan. Databasen publiceras inte på någon port.
+      - db-socket:/var/run/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U homecontrol -d homecontrol"]
       interval: 30s
@@ -94,5 +106,6 @@ services:
 
 volumes:
   db-data:
+  db-socket:
   mosquitto-data:
   zigbee2mqtt-data:

@@ -3,6 +3,7 @@ import { mountApp, startFloor, type AppDependencies, type Connection } from "./a
 import type { ConnectionHandlers } from "./connection";
 import {
   MAX_PERSONS,
+  type Card,
   type ClientMessage,
   type Floor,
   type HomeMessage,
@@ -32,6 +33,7 @@ const groundFloor: Floor = {
   name: "Entréplan",
   level: 0,
   rooms: [rectangle("vardagsrum", "Vardagsrum")],
+  nodes: [],
   lamps: [{ id: "taklampa", name: "Taklampa", room_id: "vardagsrum", x: 2.5, y: 2, virtual: true }],
 };
 
@@ -40,6 +42,7 @@ const upstairs: Floor = {
   name: "Övervåning",
   level: 1,
   rooms: [rectangle("sovrum", "Sovrum")],
+  nodes: [],
   lamps: [
     { id: "sovrumslampa", name: "Sovrumslampa", room_id: "sovrum", x: 2.5, y: 2, virtual: true },
   ],
@@ -48,7 +51,13 @@ const upstairs: Floor = {
 const home: HomeMessage = { type: "home", name: "Hemmet", floors: [groundFloor] };
 const twoFloors: HomeMessage = { type: "home", name: "Hemmet", floors: [upstairs, groundFloor] };
 
-const simulationOn: Simulation = { enabled: true, speed: 1, daylight: 10, persons: [] };
+const simulationOn: Simulation = {
+  enabled: true,
+  speed: 1,
+  speed_locked: false,
+  daylight: 10,
+  persons: [],
+};
 
 function state(
   lux: number | null,
@@ -72,8 +81,27 @@ function state(
     lamps: [{ id: "taklampa", on, brightness: 100, explanation: "" }],
     events: [],
     simulation,
+    cards: null,
   };
 }
+
+function card(changes: Partial<Card> = {}): Card {
+  return {
+    id: "homecontrol-vardagsrum",
+    name: "Homecontrol vardagsrum",
+    placed: true,
+    online: true,
+    problems: [],
+    calibrating: false,
+    wifi_signal: null,
+    firmware_version: "0.4.0",
+    update: null,
+    ...changes,
+  };
+}
+
+const text = (root: HTMLElement, selector: string) =>
+  root.querySelector(selector)?.textContent ?? "";
 
 function find<T extends Element>(root: Element, selector: string): T {
   const found = root.querySelector<T>(selector);
@@ -386,6 +414,56 @@ describe("mountApp", () => {
     buttons[2].click();
 
     expect(sent).toEqual([{ type: "set_speed", speed: 60 }]);
+  });
+
+  it("låser tidsfarten när riktiga rumskort används", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false, { ...simulationOn, speed_locked: true }));
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>(".speeds button")];
+
+    expect(buttons.map((b) => b.disabled)).toEqual([false, true, true]);
+    expect(text(root, ".simulation")).toMatch(/vanlig takt så länge riktiga sensorer eller lampor används/);
+  });
+
+  it("varnar för kort som inte svarar och visar nya kort att placera", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    expect(find<HTMLElement>(root, ".cards-panel").hidden).toBe(true);
+
+    handlers.onMessage({
+      ...state(null, false),
+      cards: [
+        card({ problems: ["Radarn skickar inget."] }),
+        card({ id: "homecontrol-kok", name: "Homecontrol kok", placed: false }),
+      ],
+    });
+
+    expect(find<HTMLElement>(root, ".cards-panel").hidden).toBe(false);
+    const warning = find<HTMLLIElement>(root, '.cards li[data-card="homecontrol-vardagsrum"]');
+    expect(warning.dataset.warning).toBe("true");
+    expect(warning.textContent).toBe("⚠ Homecontrol vardagsrum: Radarn skickar inget.");
+    expect(text(root, ".new-cards")).toBe("Homecontrol kok (homecontrol-kok)");
+  });
+
+  it("uppdaterar ett kort först när någon har godkänt det", () => {
+    const { root, sent, handlers } = setup();
+    handlers.onMessage(home);
+    const update = { version: "0.5.0", in_progress: false, progress: null };
+    handlers.onMessage({ ...state(null, false), cards: [card({ update, wifi_signal: -58 })] });
+
+    expect(text(root, ".cards li")).toMatch(/Fungerar\. Wi-Fi -58 dBm \(bra\)\. Version 0\.4\.0\./);
+    expect(sent).toEqual([]);
+
+    find<HTMLButtonElement>(root, ".cards button").click();
+    expect(sent).toEqual([{ type: "install_update", card: "homecontrol-vardagsrum" }]);
+
+    handlers.onMessage({
+      ...state(null, false),
+      cards: [card({ update: { ...update, in_progress: true, progress: 42 } })],
+    });
+    expect(root.querySelector(".cards button")).toBeNull();
+    expect(text(root, ".cards li")).toMatch(/Uppdaterar till 0\.5\.0 … 42 %/);
   });
 });
 

@@ -29,6 +29,11 @@ class Settings:
     Lösenordet står inte här utan läses av databasbiblioteket från PGPASSWORD.
     Utan databas används exempelhemmet, och inget sparas.
     """
+    esphome_secret: str | None = None
+    """Hemligheten som rumskortens nycklar räknas fram ur (se esphome.py).
+
+    Utan den ansluts inga rumskort, och simuleringsläget är påslaget från start.
+    """
     history_full_resolution: timedelta = HISTORY_FULL_RESOLUTION
     """Hur länge historiken sparas med full upplösning innan den bara finns nedsamplad."""
     history_keep: timedelta | None = None
@@ -69,6 +74,7 @@ class Settings:
                 minimum=timedelta(days=1),
                 default=None,
             ),
+            esphome_secret=os.environ.get("HOMECONTROL_ESPHOME_SECRET", "").strip() or None,
         )
 
 

@@ -44,7 +44,7 @@ import {
   placeItem,
   updateItem,
 } from "./placing";
-import type { Point, ZoneKind } from "./protocol";
+import type { Card, Point, ZoneKind } from "./protocol";
 import {
   Drawing,
   INSTRUCTIONS,
@@ -71,6 +71,8 @@ export interface EditorDependencies {
 
 /** Större bilder förminskas; mer än så här syns ändå inte på en skärm. */
 const MAX_IMAGE_SIDE = 4000;
+/** Så ofta redigeraren frågar kärnan om nya rumskort. */
+const CARD_REFRESH_MS = 10_000;
 /** Så nära (i skärmpunkter) ett klick måste vara ett hörn för att träffa det. */
 const SNAP_PIXELS = 12;
 
@@ -172,6 +174,9 @@ export function mountEditor(
   let scalePoints: { a: Point; b: Point } | null = null;
   /** Ändras när en ny bild laddas upp, så att webbläsaren inte visar den gamla. */
   let imageVersion = Date.now();
+  /** Nya kort som kärnan har hittat, och kortet som placeras med nästa klick. */
+  let newCards: Card[] = [];
+  let cardToPlace: Card | null = null;
   /** Ändringarna skickas en i taget. */
   let queue: Promise<void> = Promise.resolve();
   let savedCount = 0;
@@ -192,6 +197,9 @@ export function mountEditor(
   fileInput.hidden = true;
   const uploadButton = button("Ladda upp bild", () => fileInput.click(), "tool");
   const removeImageButton = button("Ta bort bilden", () => removeImage(), "tool");
+  /** Riktiga rumskort som kärnan har hittat men som inte är placerade än. */
+  const newCardsList = element("div", { className: "new-cards", hidden: true });
+  newCardsList.setAttribute("aria-label", "Nya rumskort");
   const toolbox = element(
     "aside",
     { className: "toolbox" },
@@ -208,6 +216,7 @@ export function mountEditor(
     ...zoneToolbox.nodes,
     element("h2", {}, "Placera"),
     toolButton("node"),
+    newCardsList,
     toolButton("router"),
     toolButton("lamp"),
     element("h2", {}, "Kartan"),
@@ -280,12 +289,55 @@ export function mountEditor(
     }
     removeImageButton.disabled = !hasImage;
     uploadButton.disabled = imageChanging;
+    renderNewCards();
+  };
+
+  const renderNewCards = () => {
+    const waiting = newCards.filter((card) => shown === null || findItem(shown, card.id) === null);
+    newCardsList.hidden = waiting.length === 0;
+    newCardsList.replaceChildren(
+      element("p", { className: "muted" }, "Nya rumskort som kärnan har hittat:"),
+      ...waiting.map((card) => {
+        const node = button(
+          `Placera ${card.name}`,
+          () => {
+            chooseTool("node");
+            cardToPlace = card;
+            render();
+          },
+          "tool",
+        );
+        node.dataset.card = card.id;
+        node.setAttribute("aria-pressed", String(cardToPlace?.id === card.id));
+        return node;
+      }),
+    );
+  };
+
+  /** Läser om vilka kort kärnan har hittat. Ett fel här stoppar inte redigeraren. */
+  const refreshCards = () => {
+    deps.api.cards().then(
+      (cards) => {
+        newCards = cards.filter((card) => !card.placed);
+        renderTools();
+      },
+      () => undefined,
+    );
+  };
+
+  const instructionText = (): string => {
+    if (cardToPlace !== null) {
+      return (
+        `Klicka där ${cardToPlace.name} sitter, inne i ett rum. Kärnan börjar använda kortet ` +
+        "när det är placerat. Vrid det sedan så att det tittar åt rätt håll."
+      );
+    }
+    return drawing.tool === "zone" ? zoneInstruction(zoneKind) : INSTRUCTIONS[drawing.tool];
   };
 
   const renderInstruction = () => {
     const draft = drawing.draft;
-    instruction.textContent =
-      drawing.tool === "zone" ? zoneInstruction(zoneKind) : INSTRUCTIONS[drawing.tool];
+    instruction.textContent = instructionText();
     draftActions.replaceChildren();
     if (draft.kind === "polygon") {
       const done = button(drawing.tool === "zone" ? "Stäng zonen" : "Stäng rummet", () =>
@@ -568,6 +620,7 @@ export function mountEditor(
   const chooseTool = (tool: ToolName) => {
     drawing.setTool(tool);
     scalePoints = null;
+    cardToPlace = null;
     if (tool !== "select") {
       selection = null;
     }
@@ -640,17 +693,26 @@ export function mountEditor(
     render();
   }
 
-  /** Placerar ett rumskort, en router eller en lampa och väljer den. */
+  /**
+   * Placerar ett rumskort, en router eller en lampa och väljer den. Ett nytt
+   * riktigt kort får kortets namn som id; då börjar kärnan använda det.
+   */
   const place = (kind: ItemKind, point: Point) => {
     const floor = currentFloor();
+    const card = kind === "node" ? (cardToPlace ?? undefined) : undefined;
     const placed =
-      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point);
+      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point, card);
     if (placed === null || floor === null) {
       showMessage("Klicka inne i ett rum. Rumskort och lampor hör till rummet de sitter i.");
       render();
       return;
     }
     selection = { kind: "item", id: placed.id };
+    if (card !== undefined) {
+      cardToPlace = null;
+      newCards = newCards.filter((other) => other.id !== card.id);
+      drawing.setTool("select");
+    }
     // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
     // gör att den nya saken förblir vald.
     const given = { id: placed.id, name: placed.name };
@@ -805,6 +867,8 @@ export function mountEditor(
   });
 
   chooseTool("select");
+  // Nya kort dyker upp medan redigeraren är öppen, till exempel när ett kort just har installerats.
+  window.setInterval(refreshCards, CARD_REFRESH_MS);
   deps.api.load().then(
     (latest) => {
       saved = latest.document;
@@ -815,6 +879,7 @@ export function mountEditor(
       saveStatus.textContent = "Alla ändringar är sparade.";
       setBusy(false);
       render();
+      refreshCards();
       root.dataset.ready = "true";
     },
     (error: unknown) => {

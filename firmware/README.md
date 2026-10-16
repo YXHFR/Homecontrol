@@ -55,19 +55,22 @@ API:t är krypterat, men nyckeln finns inte i firmware. Kärnan skapar en
 egen nyckel för varje kort och skickar den vid första anslutningen. Efter
 det tar kortet bara emot krypterade anslutningar med just den nyckeln.
 
-Kärnan hittar nya kort själv och kopplar dem. Den delen byggs i
-[#41](https://github.com/YXHFR/Homecontrol/issues/41) och finns inte ännu.
-Starta därför Homecontrol så snart kortet har fått Wi-Fi. Innan kärnan har
-kopplat kortet kan vem som helst i hemnätet ansluta och sätta en egen nyckel.
-Nyckeln tas bara bort om kortet raderas via webbinstalleraren (**Erase
-device**). Om kärnan tappar sina nycklar (till exempel om databasen raderas)
-måste korten raderas och installeras om på samma sätt.
+Kärnan hittar nya kort själv (mDNS) och visar dem i livevyn. Placera kortet
+i kartredigeraren (se README i repots rot); först då ansluter kärnan och
+ger kortet dess nyckel. Nyckeln räknas fram ur `ESPHOME_SECRET` i `.env`
+och kortets namn, så den sparas ingenstans. Placera därför kortet så snart
+det har fått Wi-Fi: innan kärnan har kopplat kortet kan vem som helst i
+hemnätet ansluta och sätta en egen nyckel. Då varnar livevyn att kortet har
+en annan nyckel. Nyckeln tas bara bort om kortet raderas via
+webbinstalleraren (**Erase device**). Byts `ESPHOME_SECRET` måste korten
+raderas och installeras om på samma sätt.
 
 ### Uppdatera
 
 - **Över nätverket:** kortet kollar var 6:e timme om webbinstalleraren har
   en ny version och visar det i entiteten `Firmware`. Uppdateringen startar
-  bara när kärnan ber om det (efter att du har godkänt). Kortet hämtar då
+  bara när kärnan ber om det, efter att du har tryckt på **Godkänn
+  uppdatering** under **Rumskort** i livevyn. Kortet hämtar då
   själv filen över https. Det tar inte emot firmware från någon annan.
   Adressen är `yxhfr.github.io`, så GitHub-kontot **YXHFR får inte byta
   namn**. Då kan någon annan ta namnet och skicka firmware till korten.

@@ -15,6 +15,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_DATABASE",
         "HOMECONTROL_HISTORY_FULL_HOURS",
         "HOMECONTROL_HISTORY_KEEP_DAYS",
+        "HOMECONTROL_ESPHOME_SECRET",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -102,3 +103,15 @@ def test_bad_history_settings_say_which_setting_is_wrong(
 
     with pytest.raises(ValueError, match=message):
         Settings.from_env()
+
+
+def test_reads_esphome_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_ESPHOME_SECRET", " inte-en-riktig-nyckel ")
+
+    assert Settings.from_env().esphome_secret == "inte-en-riktig-nyckel"  # noqa: S105
+
+
+def test_empty_esphome_secret_means_no_cards(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_ESPHOME_SECRET", "")
+
+    assert Settings.from_env().esphome_secret is None
