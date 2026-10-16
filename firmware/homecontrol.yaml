@@ -20,7 +20,8 @@
 substitutions:
   rum: rum
   firmware_version: dev
-  # Var kortet hämtar uppdateringar (webbinstalleraren på GitHub Pages).
+  # Var kortet hämtar uppdateringar (webbinstalleraren). Den är inte
+  # publicerad på webben än, så tills dess hittar kortet inga uppdateringar.
   # Adressen innehåller GitHub-kontots namn. Byts namnet kan någon annan ta
   # det och skicka firmware till korten, så kontot får inte byta namn.
   update_source: https://yxhfr.github.io/Homecontrol

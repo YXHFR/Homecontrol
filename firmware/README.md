@@ -37,8 +37,10 @@ Stiften kan ändras med `substitutions` överst i `homecontrol.yaml`.
 
 ## Installera
 
-1. Öppna webbinstalleraren: <https://yxhfr.github.io/Homecontrol/>
-   (Chrome eller Edge på en dator).
+1. Öppna webbinstalleraren i Chrome eller Edge på en dator. Den är inte
+   publicerad på webben än: den byggs av workflowen Firmware och sparas som
+   artefakten `webbinstallerare`. Hur du hämtar och öppnar den står i
+   [README i repots rot](../README.md#steg-6-installera-rumskorten).
 2. Välj rum. Kortet får namnet `homecontrol-<rum>`.
 3. Anslut kortet med USB. På kort med två USB-uttag: använd det som är
    märkt **USB** (inte **UART**). Annars går det inte att ställa in Wi-Fi.
@@ -67,8 +69,9 @@ raderas och installeras om på samma sätt.
 
 ### Uppdatera
 
-- **Över nätverket:** kortet kollar var 6:e timme om webbinstalleraren har
-  en ny version och visar det i entiteten `Firmware`. Uppdateringen startar
+- **Över nätverket:** fungerar först när webbinstalleraren är publicerad på
+  webben, vilket den inte är än. Kortet kollar var 6:e timme om
+  webbinstalleraren har en ny version och visar det i entiteten `Firmware`. Uppdateringen startar
   bara när kärnan ber om det, efter att du har tryckt på **Godkänn
   uppdatering** under **Rumskort** i livevyn. Kortet hämtar då
   själv filen över https. Det tar inte emot firmware från någon annan.

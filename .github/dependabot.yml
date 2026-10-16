@@ -1,6 +1,7 @@
 # Dependabot föreslår uppdateringar av beroenden en gång i veckan.
 # Commit-meddelandena följer conventional commits så att release-please
-# kan läsa dem.
+# kan läsa dem: fix(deps) för det som hamnar i kärnans avbild eller i
+# compose.yaml, så att det ger en ny release, och chore(deps) för resten.
 version: 2
 updates:
   - package-ecosystem: uv
@@ -8,7 +9,8 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "fix(deps)"
+      prefix-development: "chore(deps)"
   - package-ecosystem: pip
     directory: /firmware
     schedule:
@@ -20,7 +22,8 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "fix(deps)"
+      prefix-development: "chore(deps)"
     groups:
       web-dev:
         dependency-type: development
@@ -33,7 +36,7 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "fix(deps)"
     ignore:
       # Bara LTS-versioner av Node (jämna nummer). Udda versioner är korttidsversioner.
       - dependency-name: node
@@ -43,7 +46,10 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "fix(deps)"
+    ignore:
+      # Kärnans egen avbild. Versionen sätts av release-please.
+      - dependency-name: ghcr.io/yxhfr/homecontrol
   - package-ecosystem: github-actions
     directory: /
     schedule:
