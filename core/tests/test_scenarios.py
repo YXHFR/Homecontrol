@@ -10,6 +10,7 @@ efter att personen gick.
 
 import pytest
 
+from homecontrol.connectors import LampStateReported
 from homecontrol.home import RoomSettings, ZoneKind
 from homes import home_with_settings, home_with_zones, side_by_side_home, two_floor_home, zone
 from scenario import Scenario
@@ -30,12 +31,12 @@ def test_dark_room_person_enters_lamp_turns_on() -> None:
         .expect_lamp_off()
         .person_enters()
         .expect_lamp_on()
-        .expect_explanation("det är mörkt")
+        .expect_event("det var mörkt (10 lux, under 30)")
     )
 
 
-def test_room_empties_lamp_off_after_3_minutes() -> None:
-    """Rummet töms: lampan lyser i 3 minuter till och släcks sedan."""
+def test_room_empties_lamp_dims_after_2_and_a_half_minutes_and_goes_off_after_3() -> None:
+    """Rummet töms: lampan dimras till hälften efter 2 min 30 s och släcks efter 3 minuter."""
     (
         Scenario()
         .light_level(10)
@@ -43,12 +44,36 @@ def test_room_empties_lamp_off_after_3_minutes() -> None:
         .expect_lamp_on()
         .person_leaves()
         .wait_for_hold()
-        .wait(minutes=2, seconds=59)
-        .expect_lamp_on()
+        .wait(minutes=2, seconds=29)
+        .expect_full_brightness()
         .expect_explanation("släcks när det varit tomt i 3 minuter")
         .wait(seconds=1)
+        .expect_dimmed(50)
+        .expect_event("Dimrades till 50 %")
+        .wait(seconds=29)
+        .expect_dimmed(50)
+        .wait(seconds=1)
         .expect_lamp_off()
-        .expect_explanation("har varit tomt i 3 minuter")
+        .expect_event("har varit tomt i 3 minuter")
+    )
+
+
+def test_returning_during_the_warning_dimming_brings_the_light_back() -> None:
+    """Den som rör sig under dimringen får fullt ljus igen, och lampan släcks inte."""
+    (
+        Scenario()
+        .light_level(10)
+        .person_enters()
+        .person_leaves()
+        .wait_for_hold()
+        .wait(minutes=2, seconds=40)
+        .expect_dimmed(50)
+        .person_enters()
+        .expect_full_brightness()
+        .expect_event("Full styrka igen")
+        .wait(minutes=10)
+        .expect_full_brightness()
+        .expect_lamp_switches(True)
     )
 
 
@@ -59,7 +84,7 @@ def test_bright_room_person_enters_lamp_stays_off() -> None:
         .light_level(30)
         .person_enters()
         .expect_lamp_off()
-        .expect_explanation("ljust nog")
+        .expect_explanation("ljust nog (30 lux")
     )
 
 
@@ -85,14 +110,54 @@ def test_darkness_while_present_turns_lamp_on() -> None:
     )
 
 
-def test_lamp_stays_on_when_room_gets_bright() -> None:
-    """Lampan gör själv rummet ljusare, så den släcks inte av det."""
+def test_daylight_for_10_minutes_switches_off_but_9_minutes_is_not_enough() -> None:
+    """Dagsljuset blir starkt medan någon är kvar: lampan släcks efter 10 minuter i sträck."""
     (
         Scenario()
         .light_level(10)
         .person_enters()
+        .expect_lamp_on()
         .light_level(400)
+        .wait(minutes=9)
+        .expect_lamp_on()
+        .light_level(90)  # ett moln: under ljusgränsen bryts sträckan
+        .light_level(400)
+        .wait(minutes=9)
+        .expect_lamp_on()
+        .wait(minutes=1)
+        .expect_lamp_off()
+        .expect_event("över 100 lux i 10 minuter (400 lux nu")
+        .wait(minutes=30)
+        .expect_lamp_off()  # det är fortfarande ljust, så lampan tänds inte igen
+    )
+
+
+def test_the_lamps_own_light_never_switches_it_off() -> None:
+    """Lampan lyser upp ljussensorn med 150 lux, men det räknas aldrig som dagsljus."""
+    settings = RoomSettings()
+    (
+        Scenario(home_with_settings(settings, lamp_lux=150))
+        .light_level(10)
+        .person_enters()
+        .expect_lamp_on()
+        .light_level(160)  # sensorn ser nu dagsljuset och lampans ljus
+        .wait(hours=2)
+        .expect_lamp_on()
+        .light_level(280)  # nu är dagsljuset 130 lux, över gränsen
         .wait(minutes=10)
+        .expect_lamp_off()
+    )
+
+
+def test_windowless_room_is_always_dark() -> None:
+    """Ett rum utan fönster tänds av närvaro oavsett vad ljussensorn säger, eller om den saknas."""
+    (
+        Scenario(home_with_settings(RoomSettings(windowless=True)))
+        .person_enters()
+        .expect_lamp_on()
+        .expect_event("saknar fönster")
+        .light_level(5000)
+        .wait(hours=1)
         .expect_lamp_on()
     )
 
@@ -478,10 +543,127 @@ def test_a_day_of_waiting_takes_no_time() -> None:
 
 def test_failed_expectation_explains_why() -> None:
     """Ett scenario som går fel säger varför lampan gjorde som den gjorde."""
-    with pytest.raises(AssertionError, match=r"skulle vara tänd.*ljusnivån i Vardagsrum är okänd"):
+    with pytest.raises(AssertionError, match=r"skulle vara tänd.*ljusnivån där är okänd"):
         Scenario().person_enters().expect_lamp_on()
 
 
 def test_negative_wait_is_refused() -> None:
     with pytest.raises(ValueError, match="negativ"):
         Scenario().wait(seconds=-1)
+
+
+# --- Manuell styrning ---
+
+
+def test_manual_switch_off_pauses_the_automation_until_the_room_has_been_empty() -> None:
+    """Den som släcker för att sova får ha det släckt. När rummet är tomt tar automatiken över."""
+    (
+        Scenario()
+        .light_level(10)
+        .person_enters()
+        .expect_lamp_on()
+        .switch_lamp(False)
+        .expect_lamp_off()
+        .expect_manual()
+        .expect_event("Taklampa släcktes för hand")
+        .wait(hours=1)
+        .expect_lamp_off()
+        .person_leaves()
+        .wait_for_hold()
+        .wait(minutes=2, seconds=59)
+        .expect_manual()
+        .wait(seconds=1)
+        .expect_manual(False)
+        .expect_event("Automatiken tar över igen")
+        .person_enters()
+        .expect_lamp_on()
+    )
+
+
+def test_returning_before_the_delay_keeps_the_manual_mode() -> None:
+    (
+        Scenario()
+        .light_level(10)
+        .person_enters()
+        .switch_lamp(False)
+        .person_leaves()
+        .wait(minutes=2)
+        .person_enters()
+        .wait(minutes=5)
+        .expect_manual()
+        .expect_lamp_off()
+    )
+
+
+def test_manual_switch_on_in_a_bright_room_stays_on_until_the_room_is_empty() -> None:
+    """Tänd för hand i ett ljust rum: varken mörker- eller dagsljusregeln går emot det."""
+    (
+        Scenario()
+        .light_level(500)
+        .person_enters()
+        .expect_lamp_off()
+        .switch_lamp(True)
+        .wait(minutes=30)
+        .expect_lamp_on()
+        .person_leaves()
+        .wait_for_hold()
+        .wait(minutes=3)
+        .expect_manual(False)
+        .expect_lamp_off()
+    )
+
+
+def test_manual_mode_can_be_ended_at_once() -> None:
+    (
+        Scenario()
+        .light_level(10)
+        .person_enters()
+        .switch_lamp(False)
+        .resume_automation()
+        .expect_manual(False)
+        .expect_lamp_on()
+        .expect_event("Automatiken i Vardagsrum slogs på igen för hand")
+    )
+
+
+# --- Lampans läge ---
+
+
+def test_unknown_lamp_state_gets_no_commands_until_the_room_should_be_lit() -> None:
+    """Kärnan antar inte att lampan är släckt vid start, och släcker inte på chans."""
+    (
+        Scenario(lamps_report=False)
+        .light_level(10)
+        .wait(hours=1)
+        .expect_lamp_switches()
+        .person_enters()
+        .expect_lamp_on()
+        .person_leaves()
+        .wait_for_hold()
+        .wait(minutes=3)
+        .expect_lamp_off()
+    )
+
+
+def test_manual_mode_ending_in_an_empty_room_warns_by_dimming_first() -> None:
+    """Den som tänt för hand och sitter så still att radarn inte ser hen får en varning."""
+    (
+        Scenario()
+        .light_level(500)
+        .switch_lamp(True)
+        .wait(minutes=2, seconds=29)
+        .expect_full_brightness()
+        .wait(seconds=1)
+        .expect_dimmed(50)
+        .expect_manual()
+        .person_enters()
+        .expect_full_brightness()
+        .expect_manual()
+    )
+
+
+def test_lamp_dimmed_with_a_remote_is_not_turned_up_by_presence() -> None:
+    scenario = Scenario().light_level(10).person_enters().expect_lamp_on()
+    scenario.controller.observe(LampStateReported("taklampa", on=True, brightness=30))
+    scenario.wait(minutes=5)
+    assert len(scenario.lamps.history) == 1  # inga nya kommandon efter rapporten

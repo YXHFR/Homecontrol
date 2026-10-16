@@ -90,7 +90,15 @@ describe("parseServerMessage", () => {
   });
 
   it("känner igen läget och avvisar annat", () => {
-    const state = { type: "state", tracks: [], rooms: [], zones: [], lamps: [], simulation: null };
+    const state = {
+      type: "state",
+      tracks: [],
+      rooms: [],
+      zones: [],
+      lamps: [],
+      events: [],
+      simulation: null,
+    };
     const simulation = { enabled: true, speed: 10, daylight: 5, persons: [] };
     expect(parseServerMessage(JSON.stringify(state))).toEqual(state);
     expect(parseServerMessage(JSON.stringify({ ...state, simulation }))).toEqual({

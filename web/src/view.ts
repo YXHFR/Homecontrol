@@ -1,12 +1,15 @@
 import Konva from "konva";
 import { corners, fitTransform, wallSegments, type Transform } from "./geometry";
 import type { Floor, Person, Point, StateMessage, WallKind } from "./protocol";
+import { lampStateText } from "./roomPanels";
 import { ROOM_FILLS, trackStyle, tracksOnFloor } from "./trackStyles";
 import { ZONE_STYLES } from "./zoneStyles";
 
 export interface LiveViewCallbacks {
   /** En låtsasperson har dragits till en ny plats, i hemmets meter. */
   onMovePerson(personId: string, position: Point): void;
+  /** Någon har klickat på en lampa för att tända eller släcka den för hand. */
+  onToggleLamp(lampId: string): void;
 }
 
 /**
@@ -53,6 +56,7 @@ const COLORS = {
   wall: "#4a4a4a",
   lampOn: "#ffc933",
   lampOff: "#b8b8b8",
+  lampUnknown: "#ececec",
   person: "#d64545",
   text: "#222222",
 };
@@ -153,14 +157,16 @@ function drawWalls(layer: Konva.Layer, t: Transform, floor: Floor) {
   }
 }
 
-function drawRoomNames(layer: Konva.Layer, t: Transform, floor: Floor) {
+/** Rummens namn. Ett rum där automatiken pausar efter manuell styrning märks "manuellt". */
+function drawRoomNames(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
+  const manual = new Set(state?.rooms.filter((room) => room.manual).map((room) => room.id));
   for (const room of floor.rooms) {
     const points = corners(room).map((p) => t.toScreen(p));
     layer.add(
       new Konva.Text({
         x: Math.min(...points.map((p) => p.x)) + 8,
         y: Math.min(...points.map((p) => p.y)) + 8,
-        text: room.name,
+        text: manual.has(room.id) ? `${room.name} · manuellt` : room.name,
         fontSize: 16,
         fill: COLORS.text,
       }),
@@ -168,38 +174,48 @@ function drawRoomNames(layer: Konva.Layer, t: Transform, floor: Floor) {
   }
 }
 
+/** Lamporna. Varje lampa bär sitt id (`lampId`) så att ett klick på den går att känna igen. */
 function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
   for (const lamp of floor.lamps) {
-    const on = state?.lamps.find((l) => l.id === lamp.id)?.on ?? false;
+    const lampState = state?.lamps.find((l) => l.id === lamp.id);
+    const on = lampState?.on === true;
     const center = t.toScreen(lamp);
     if (on) {
+      // En dimrad lampa har svagare sken.
       layer.add(
         new Konva.Circle({
           ...center,
           radius: GLOW_RADIUS_METERS * t.scale,
           fill: COLORS.lampOn,
-          opacity: GLOW_OPACITY,
+          opacity: (GLOW_OPACITY * (lampState?.brightness ?? 100)) / 100,
+          listening: false,
         }),
       );
     }
+    const unknown = lampState === undefined || lampState.on === null;
     // En virtuell lampa finns bara i simuleringen och ritas streckad.
+    const bulb = new Konva.Circle({
+      ...center,
+      radius: LAMP_RADIUS,
+      fill: on ? COLORS.lampOn : unknown ? COLORS.lampUnknown : COLORS.lampOff,
+      stroke: COLORS.wall,
+      strokeWidth: lamp.virtual ? 1.5 : 1,
+      dash: lamp.virtual ? [4, 3] : undefined,
+      lampId: lamp.id,
+    });
+    bulb.on("mouseenter", () => (layer.getStage().container().style.cursor = "pointer"));
+    bulb.on("mouseleave", () => (layer.getStage().container().style.cursor = ""));
     layer.add(
-      new Konva.Circle({
-        ...center,
-        radius: LAMP_RADIUS,
-        fill: on ? COLORS.lampOn : COLORS.lampOff,
-        stroke: COLORS.wall,
-        strokeWidth: lamp.virtual ? 1.5 : 1,
-        dash: lamp.virtual ? [4, 3] : undefined,
-      }),
+      bulb,
       new Konva.Text({
         x: center.x - LAMP_LABEL_WIDTH / 2,
         y: center.y + LAMP_RADIUS + 6,
         width: LAMP_LABEL_WIDTH,
         align: "center",
-        text: `${lamp.name} (${lamp.virtual ? "virtuell, " : ""}${on ? "tänd" : "släckt"})`,
+        text: `${lamp.name} (${lamp.virtual ? "virtuell, " : ""}${lampStateText(lampState)})`,
         fontSize: 13,
         fill: COLORS.text,
+        listening: false,
       }),
     );
   }
@@ -315,11 +331,30 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
     drawRoomFloors(roomLayer, transform, shownFloor, state);
     drawZones(roomLayer, transform, shownFloor, state);
     drawWalls(roomLayer, transform, shownFloor);
-    drawRoomNames(roomLayer, transform, shownFloor);
+    drawRoomNames(roomLayer, transform, shownFloor, state);
     drawLamps(roomLayer, transform, shownFloor, state);
     drawTracks(roomLayer, transform, shownFloor, state);
     placePersons(transform, shownFloor);
   };
+
+  // Ett klick på en lampa tänder eller släcker den för hand. Kartan ritas om
+  // när läget ändras, upp till tio gånger i sekunden, så klicket känns igen på
+  // lampans id och inte på att samma form trycktes ned och släpptes.
+  let pressedLamp: string | null = null;
+  const lampIdOf = (target: Konva.Node): string | null => {
+    const id: unknown = target.getAttr("lampId");
+    return typeof id === "string" ? id : null;
+  };
+  stage.on("pointerdown", (event) => {
+    pressedLamp = lampIdOf(event.target);
+  });
+  stage.on("pointerup", (event) => {
+    const lampId = lampIdOf(event.target);
+    if (lampId !== null && lampId === pressedLamp) {
+      callbacks.onToggleLamp(lampId);
+    }
+    pressedLamp = null;
+  });
 
   const onResize = () => render();
   window.addEventListener("resize", onResize);

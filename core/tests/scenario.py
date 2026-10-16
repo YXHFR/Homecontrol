@@ -35,16 +35,21 @@ from homecontrol.simulation import SimulatedLampOutput, SimulatedSource, Simulat
 from homes import one_room_home
 
 _PERSON = "personen"
+MAX_WAKES = 10_000
+"""Fler väckningar än så under en enda väntan betyder att regeln aldrig blir klar."""
 RADAR_INTERVAL = 0.1
 """Radarn skickar det den ser tio gånger i sekunden."""
 
 
 class Scenario:
-    def __init__(self, home: Home | None = None) -> None:
+    def __init__(self, home: Home | None = None, *, lamps_report: bool = True) -> None:
+        """Utan `lamps_report` säger de virtuella lamporna aldrig hur de är, och läget är okänt."""
         self.home = home if home is not None else one_room_home()
         self.clock = ManualClock()
         self.lamps = SimulatedLampOutput()
-        self.controller = Controller(self.home, self.clock, [self.lamps])
+        self.controller = Controller(self.home, self.clock, [self.lamps], wall_clock=self.clock.now)
+        if lamps_report:
+            self.lamps.report_new_lamps(self.home, self.controller.observe)
         # Samma simuleringsläge som i livevyn, men med en klocka som scenariot styr.
         self.source = SimulatedSource(self.home)
         self.simulation = Simulation(
@@ -137,18 +142,35 @@ class Scenario:
         self.source.start(self.controller.observe)
         return self
 
+    def switch_lamp(self, on: bool, lamp: str | None = None) -> Self:
+        """Någon klickar på lampan i livevyn och tänder eller släcker den för hand."""
+        self.controller.set_lamp(self._lamp_view(lamp).lamp_id, on)
+        return self
+
+    def resume_automation(self, room: str | None = None) -> Self:
+        """Någon ber om automatiken igen i livevyn, utan att vänta tills rummet är tomt."""
+        self.controller.resume_automation(self._room_id(room))
+        return self
+
     def person_leaves(self, *, who: str = _PERSON) -> Self:
         """Personen lämnar hemmet och syns inte längre."""
         self.simulation.remove_person(self._persons.pop(who))
         return self
 
-    def wait(self, *, minutes: float = 0, seconds: float = 0) -> Self:
+    def wait(self, *, hours: float = 0, minutes: float = 0, seconds: float = 0) -> Self:
         """Spolar fram klockan och låter kärnan reagera vid varje tidpunkt den väntar på."""
-        duration = minutes * 60 + seconds
+        duration = (hours * 60 + minutes) * 60 + seconds
         if duration < 0:
             raise ValueError("Ett scenario kan inte vänta en negativ tid")
         until = self.clock.now() + duration
+        wakes = 0
         while (wake_at := self.controller.wake_at) is not None and wake_at <= until:
+            wakes += 1
+            if wakes > MAX_WAKES:
+                raise RuntimeError(
+                    f"Kärnan bad om att väckas mer än {MAX_WAKES} gånger under en väntan. "
+                    "Scenariot skulle fastna, så det avbryts."
+                )
             self.clock.advance_to(max(wake_at, self.clock.now()))
             self.controller.tick()
             if self.controller.wake_at == wake_at:
@@ -173,6 +195,25 @@ class Scenario:
         view = next(z for z in self.controller.snapshot().zones if z.zone_id == zone)
         return self._expect_status(zone, view.status, status)
 
+    def expect_manual(self, manual: bool = True, room: str | None = None) -> Self:
+        """Om automatiken i rummet pausar efter manuell styrning."""
+        room_id = self._room_id(room)
+        view = next(r for r in self.controller.snapshot().rooms if r.room_id == room_id)
+        if view.manual != manual:
+            wanted = "i manuellt läge" if manual else "automatiskt"
+            raise AssertionError(
+                f"{room_id} skulle vara {wanted} efter {self.clock.now():g} s. "
+                f"Förklaring: {view.explanation}"
+            )
+        return self
+
+    def expect_event(self, text: str) -> Self:
+        """Någon händelse i "Varför hände det?" innehåller texten."""
+        events = [event.text for event in self.controller.snapshot().events]
+        if not any(text in event for event in events):
+            raise AssertionError(f"Ingen händelse innehåller {text!r}: {events}")
+        return self
+
     def expect_tracks(self, count: int, *, held: int = 0) -> Self:
         """Så många spår finns, och så många av dem är tappade men kvarhållna."""
         tracks = self.controller.snapshot().tracks
@@ -190,10 +231,28 @@ class Scenario:
     def expect_lamp_off(self, lamp: str | None = None) -> Self:
         return self._expect_lamp(lamp, on=False)
 
-    def expect_lamp_switches(self, *switches: bool, lamp: str | None = None) -> Self:
-        """Lampan har tänts (True) och släckts (False) i exakt den här ordningen."""
+    def expect_dimmed(self, percent: int, lamp: str | None = None) -> Self:
+        """Lampan lyser med lägre ljusstyrka, som under varningsdimringen."""
+        self._expect_lamp(lamp, on=True)
         lamp_id = self._lamp_view(lamp).lamp_id
-        actual = tuple(c.on for c in self.lamps.history if c.lamp_id == lamp_id)
+        actual = self.lamps.brightness[lamp_id]
+        if actual != percent:
+            raise AssertionError(
+                f"{lamp_id} lyser med {actual} % efter {self.clock.now():g} s, väntade {percent} %"
+            )
+        return self
+
+    def expect_full_brightness(self, lamp: str | None = None) -> Self:
+        return self.expect_dimmed(100, lamp)
+
+    def expect_lamp_switches(self, *switches: bool, lamp: str | None = None) -> Self:
+        """Lampan har tänts (True) och släckts (False) i exakt den här ordningen.
+
+        En ändrad ljusstyrka på en lampa som redan lyser, som en dimring, räknas inte.
+        """
+        lamp_id = self._lamp_view(lamp).lamp_id
+        commands = [c.on for c in self.lamps.history if c.lamp_id == lamp_id]
+        actual = tuple(on for i, on in enumerate(commands) if i == 0 or commands[i - 1] != on)
         if actual != switches:
             raise AssertionError(f"{lamp_id} slogs om {actual}, väntade {switches}")
         return self

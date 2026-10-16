@@ -13,6 +13,7 @@ mer eller mindre, och sammanvägningen ska klara det.
 
 import logging
 import math
+from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from itertools import count
@@ -21,6 +22,7 @@ from typing import Literal, get_args
 from homecontrol.clock import SpeedControl
 from homecontrol.connectors import (
     LampCommand,
+    LampStateReported,
     LightLevelObserved,
     MotionObserved,
     ObservationSink,
@@ -48,6 +50,9 @@ RADAR_RANGE = 6.0
 RADAR_HALF_ANGLE = 60.0
 """Så många grader åt varje sida om riktningen den tittar åt som radarn ser."""
 RADAR_MAX_TARGETS = 3
+
+MAX_HISTORY = 1000
+"""Så många av de senaste kommandona minns de virtuella lamporna."""
 
 DEFAULT_DAYLIGHT_LUX = 10.0
 """Dagsljuset när simuleringen startar: mörkt, så att lamporna tänds."""
@@ -219,15 +224,38 @@ def _in_view(target: Point) -> bool:
 
 
 class SimulatedLampOutput:
-    """En lamputgång som bara minns vad lamporna senast fick för kommando."""
+    """En lamputgång med virtuella lampor, som bara minns vad de senast fick för kommando.
+
+    Den virtuella lampan lyser inte upp någon ljussensor; dagsljuset i
+    simuleringen är det enda ljuset som mäts.
+    """
 
     def __init__(self) -> None:
         self.states: dict[str, bool] = {}
-        self.history: list[LampCommand] = []
+        self.brightness: dict[str, int] = {}
+        # De senaste kommandona, för scenariotesterna. Begränsat så att
+        # förklaringarna (var någon har varit) inte samlas i minnet för alltid.
+        self.history: deque[LampCommand] = deque(maxlen=MAX_HISTORY)
 
     def send(self, command: LampCommand) -> None:
         self.states[command.lamp_id] = command.on
+        self.brightness[command.lamp_id] = command.brightness
         self.history.append(command)
+
+    def report_new_lamps(self, home: Home, sink: ObservationSink) -> None:
+        """Berättar att hemmets virtuella lampor som inte har styrts än är släckta.
+
+        En virtuell lampa finns bara här, så utgången vet alltid hur den är,
+        precis som en riktig lampa som rapporterar sitt läge. Anropas när
+        utgången startar och när hemmet har ändrats.
+        """
+        # En lampa som har tagits bort glöms, så att den rapporteras igen om den läggs tillbaka.
+        lamp_ids = {lamp.id for lamp in home.lamps}
+        self.states = {lamp_id: on for lamp_id, on in self.states.items() if lamp_id in lamp_ids}
+        for lamp in home.lamps:
+            if lamp.id not in self.states:
+                self.states[lamp.id] = False
+                sink(LampStateReported(lamp.id, on=False))
 
 
 @dataclass(frozen=True)
