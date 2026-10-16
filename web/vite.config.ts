@@ -10,5 +10,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Webbläsartesterna i e2e/ körs av Playwright.
+    include: ["src/**/*.test.ts"],
   },
 });

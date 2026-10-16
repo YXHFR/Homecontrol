@@ -1,0 +1,170 @@
+/* Kartredigeraren: verktyg, karta och egenskaper bredvid varandra, staplade på mobil. */
+body[data-page="editor"] {
+  max-width: 1400px;
+}
+
+.editor {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 260px;
+  gap: 16px;
+  align-items: start;
+}
+
+.editor h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+  margin: 16px 0 6px;
+}
+
+.editor .toolbox h2:first-child,
+.editor .properties section:first-child h2 {
+  margin-top: 0;
+}
+
+.editor button,
+.editor input {
+  font: inherit;
+}
+
+.editor button {
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  min-height: 40px;
+}
+
+.editor button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.toolbox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolbox .tool {
+  text-align: left;
+}
+
+.toolbox .tool[aria-pressed="true"] {
+  background: #2f6fed;
+  border-color: #2f6fed;
+  color: #fff;
+}
+
+.toolbox .zoom {
+  display: flex;
+  gap: 6px;
+}
+
+.toolbox .zoom .tool {
+  text-align: center;
+  flex: 1;
+}
+
+.editor-stage {
+  width: 100%;
+  height: min(70vh, 640px);
+  min-height: 320px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  overflow: hidden;
+  /* Fingrarna ritar på kartan i stället för att rulla sidan. */
+  touch-action: none;
+}
+
+.map .floors {
+  margin-bottom: 8px;
+}
+
+.save-status {
+  color: #666;
+  margin: 8px 0 0;
+}
+
+.message {
+  color: #a32020;
+  background: #fdecec;
+  border-radius: 8px;
+  padding: 8px 12px;
+  white-space: pre-line;
+}
+
+.properties section {
+  margin-bottom: 16px;
+}
+
+.properties .instruction {
+  margin-top: 0;
+}
+
+.properties .actions,
+.properties .scale-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.properties label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.properties input {
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.properties .danger {
+  color: #a32020;
+  border-color: #e3b0b0;
+}
+
+.muted {
+  color: #666;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.summary dd {
+  margin: 0;
+  text-align: right;
+}
+
+@media (max-width: 800px) {
+  .editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Verktygen läggs i rader ovanför kartan. */
+  .toolbox {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .toolbox h2 {
+    display: none;
+  }
+
+  .toolbox .tool {
+    white-space: nowrap;
+  }
+
+  .editor-stage {
+    height: 60vh;
+  }
+}

@@ -8,7 +8,8 @@ och släcks efter det.
 > Zigbee2MQTT) och det finns en första livevy som ritar hemmet från
 > databasen, en våning i taget. Första gången visas ett påhittat exempelhem.
 > Dra en låtsasperson in i ett rum så tänds de virtuella lamporna när det är
-> mörkt, och de släcks när rummet har varit tomt en stund. Riktiga sensorer
+> mörkt, och de släcks när rummet har varit tomt en stund. I kartredigeraren
+> ritar du dina egna rum ovanpå en bild av planritningen. Riktiga sensorer
 > och lampor kopplas in i senare steg.
 
 ## Snabbstart
@@ -37,6 +38,7 @@ Första gången tar det några minuter. Därefter finns:
 | Vad                                   | Adress                       |
 | ------------------------------------- | ---------------------------- |
 | Homecontrol (livevyn)                 | http://localhost:8000        |
+| Kartredigeraren                       | http://localhost:8000/#redigera |
 | Sida som visar att kärnan är igång    | http://localhost:8000/health |
 | Zigbee2MQTT (lösenord: `ZIGBEE2MQTT_AUTH_TOKEN` i `.env`) | http://localhost:8080 |
 
@@ -75,6 +77,30 @@ docker compose logs    # visar vad tjänsterna skriver, leta efter fel
 
 Ett vanligt fel är att `.env` saknas eller att ett värde är tomt. Då säger
 `docker compose up` vilken inställning som saknas.
+
+### Rita hemmet i kartredigeraren
+
+Öppna **Kartredigerare** högst upp på sidan. Verktygen finns till vänster,
+kartan i mitten och en instruktion för det verktyg du har valt till höger. På
+mobilen ligger verktygen ovanför kartan och instruktionen under.
+
+1. **Ladda upp bild** av planritningen, till exempel från mäklarannonsen.
+   Bilden förminskas och rensas från extra uppgifter (som var bilden togs)
+   innan den sparas i databasen. Den följer inte med när hemmet exporteras.
+2. **Skala bilden**: klicka på två punkter som du vet avståndet mellan, till
+   exempel båda ändarna av en vägg, och skriv in avståndet i meter. Gör det
+   innan du ritar rummen.
+3. Rita rummen. **Rum, fri form**: klicka ut hörnen ett i taget och stäng
+   rummet genom att klicka på det första hörnet igen (passar L-formade rum).
+   **Rum, rektangel**: dra från ett hörn till hörnet snett emot. Ett klick
+   nära ett hörn som redan finns hamnar exakt på det, så att rummen möts.
+4. **Välj och flytta**: klicka på ett rum för att byta namn på det eller ta
+   bort det, och dra det för att flytta det.
+
+Allt sparas direkt, och livevyn visar ändringen utan omstart. Under
+**Hemmet** står hur många rum, zoner, rumskort, routrar och lampor hemmet
+har. Väggarnas material, rumskort, routrar, lampor och zoner ritas i kommande
+versioner; tills dess får nya rum gipsväggar.
 
 ### Hemmet: spara, flytta och läsa in
 
@@ -119,14 +145,18 @@ Så läser du filen:
   åt höger (`rotation`), om kortet sitter upp och ned (`mirrored`) och vad
   det kan mäta (`radar`, `csi`, `lux`).
 - `signal_sources` är routrar och andra Wi-Fi-sändare.
+- `plan_image` säger var bilden av planritningen ligger (`position`, bildens
+  övre vänstra hörn) och hur många meter en bildpunkt är
+  (`meters_per_pixel`). Bilden själv finns bara i databasen.
 - `lamps` har en plats, kan höra till en zon (`zone_id`) och har en
   `profile` som säger hur lampan styrs (`generisk` eller `ikea-tradfri`).
 
 Zonerna, lampornas zon och profil, `bright_above_lux` och rumskortens
 placering sparas redan men används först i kommande versioner.
 
-Livevyn kräver ingen inloggning än, så alla i hemnätverket som når
-Homecontrol kan se planlösningen. Vill du att bara den här datorn ska nå den
+Livevyn och kartredigeraren kräver ingen inloggning än, så alla i
+hemnätverket som når Homecontrol kan se och ändra planlösningen och bilden av
+planritningen. Vill du att bara den här datorn ska nå den
 sätter du `BIND_ADDRESS=127.0.0.1` i `.env`.
 
 ### Stoppa och uppdatera
@@ -176,8 +206,19 @@ npm run lint && npm test && npm run build
 npm run dev    # utvecklingsserver som skickar API-anrop till kärnan
 ```
 
+Webbläsartesterna (Playwright) bygger webben och startar en egen kärna på
+port 8123. Med `HOMECONTROL_DATABASE` sparar den i databasen, annars i minnet:
+
+```sh
+npx playwright install chromium   # första gången
+npm run test:e2e
+```
+
 Nya API-vägar i kärnan läggs under `/api/...` så att de inte krockar med
 webbgränssnittets filer. Livevyn får sin realtidsström från `/api/live`.
+Kartredigeraren läser och sparar hemmet med `/api/home` och bilden av
+planritningen med `/api/floors/{id}/plan-image` (se `editor.py`). Ett sparat
+hem går till kärnan med `Controller.replace_home`, så livevyn får det direkt.
 
 Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
 närvarobedömningen avgör vilka rum som är upptagna, regelmotorn

@@ -69,6 +69,55 @@ jobs:
       - name: Bygg
         run: npm run build
 
+  e2e:
+    name: Webbläsartest (kartredigeraren)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    services:
+      # Kärnan sparar i en riktig databas, som i compose.yaml.
+      db:
+        image: timescale/timescaledb:2.30.2-pg17
+        env:
+          POSTGRES_DB: homecontrol_e2e
+          POSTGRES_USER: homecontrol
+          # Databasen finns bara under testkörningen, så den behöver inget lösenord.
+          POSTGRES_HOST_AUTH_METHOD: trust
+          TIMESCALEDB_TELEMETRY: "off"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U homecontrol -d homecontrol_e2e"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      HOMECONTROL_DATABASE: host=localhost dbname=homecontrol_e2e user=homecontrol
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: uv sync --frozen --project ../core
+      - name: Installera Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Webbläsartester
+        run: npm run test:e2e
+      - name: Spara rapporten om något gick fel
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-rapport
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+
   gitleaks:
     name: Hemligheter (gitleaks)
     runs-on: ubuntu-latest
