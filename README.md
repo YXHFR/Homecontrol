@@ -123,9 +123,10 @@ för vart och ett:
 openssl rand -hex 24   # kör en gång per lösenord och klistra in resultatet
 ```
 
-Lösenorden behöver du inte komma ihåg, utom `ZIGBEE2MQTT_AUTH_TOKEN` som
-du loggar in på Zigbee2MQTT med. Filen stannar på datorn och ska inte
-delas med någon.
+Varje lösenord ska vara olika. Lösenorden behöver du inte komma ihåg,
+utom `ZIGBEE2MQTT_AUTH_TOKEN` som du loggar in på Zigbee2MQTT med. Filen
+stannar på datorn och ska inte delas med någon. Vad varje lösenord används
+till står under **Lösenorden och vem som får vad**.
 
 Starta sedan:
 
@@ -627,6 +628,31 @@ rumskort och godkänna uppdateringar av dem.
   öppnar för MQTT och Zigbee2MQTT går däremot förbi brandväggen. Använd
   `BIND_ADDRESS` eller routern för dem.
 
+### Lösenorden och vem som får vad
+
+Delarna har var sitt lösenord i `.env` och får bara göra det de behöver.
+Blir en del angripen eller går fel kommer den inte åt resten.
+
+| Lösenord i `.env` | Vem som använder det | Vad det ger |
+| --- | --- | --- |
+| `POSTGRES_PASSWORD` | Databasens ägare (`homecontrol`) | Allt i databasen. Används bara av `db-setup`, som körs en kort stund vid varje `docker compose up` och sedan avslutas. |
+| `CORE_DATABASE_PASSWORD` | Kärnan (databasrollen `homecontrol_core`) | Läsa och skriva hemmet, historiken och händelseloggen, men inte skapa, ändra eller ta bort tabeller. |
+| `MQTT_CORE_PASSWORD` | Kärnan (MQTT-användaren `homecontrol_core`) | Läsa allt från Zigbee2MQTT och tända, släcka och gruppera lamporna. Inte släppa in eller ta bort enheter eller ändra Zigbee2MQTT:s inställningar. |
+| `MQTT_ZIGBEE2MQTT_PASSWORD` | Zigbee2MQTT (MQTT-användaren `zigbee2mqtt`) | Läsa och skriva sina egna ämnen (`zigbee2mqtt/...`). |
+| `ZIGBEE2MQTT_AUTH_TOKEN` | Du, i webbläsaren | Logga in på Zigbee2MQTT:s webbsida. |
+
+- **Databasen:** `db-setup` skapar och uppdaterar tabellerna, ställer in
+  hur länge historiken sparas och skapar kärnans roll om den saknas. Först
+  därefter startar kärnan. Alla inloggningar i databasen kräver lösenord,
+  även inifrån datorn (se `postgres/pg_hba.conf`), och databasen nås inte
+  från nätverket.
+- **MQTT:** vilka ämnen varje användare får läsa och skriva står i
+  `mosquitto/acl`. Allt annat är förbjudet, och utan lösenord kommer ingen in.
+  Mosquittos hälsokontroll har en egen användare med ett lösenord som
+  slumpas fram vid varje start.
+- Kärnan kan bara styra lampor vars namn i Zigbee2MQTT har högst två
+  snedstreck (`/`). Det förvalda namnet (lampans adress) har inga.
+
 Kärnan svarar bara när den nås på de adresser och namn den känner till
 (`localhost`, IP-adresser och `ALLOWED_HOSTS`), och inte till andra
 webbsidor. Det gäller även lampstyrningen och uppdateringen av korten. Det hindrar att en främmande
@@ -641,8 +667,17 @@ docker compose ps      # alla fyra ska stå som "Up", de flesta även "healthy"
 docker compose logs    # visar vad tjänsterna skriver, leta efter fel
 ```
 
+`docker compose ps -a` visar också `db-setup`, som ska stå som
+"Exited (0)": den gör i ordning databasen och avslutas sedan.
+
 Ett vanligt fel är att `.env` saknas eller att ett värde är tomt. Då säger
 `docker compose up` vilken inställning som saknas.
+
+Står kärnan inte som "Up", titta i `docker compose logs db-setup`. Står
+det `password authentication failed for user "homecontrol"` är
+`POSTGRES_PASSWORD` i `.env` inte samma som när databasen skapades första
+gången; databasen minns det första lösenordet. Sätt tillbaka det. Ge inte
+`POSTGRES_PASSWORD` samma lösenord som någon annan rad i `.env`.
 
 Syns inte en ny lampa under **Placera** i kartredigeraren? Kontrollera i
 Zigbee2MQTT att den är ihopparad och klar (inte "interviewing"). Står en lampa
@@ -685,6 +720,19 @@ du inte är på någon gren. Säkerhetskopian `hem.json`
 hamnar i din hemmapp på datorn. Dela den inte; den innehåller din
 planlösning.
 
+Säger `docker compose up -d` att en inställning saknas, har den nya
+versionen fått en ny inställning. Kopiera raden från `.env.example` till
+`.env` och fyll i ett eget lösenord på varje ny rad med
+`openssl rand -hex 24`, som i **Steg 3**.
+
+Kommer du från en version där kärnan och Zigbee2MQTT delade på
+`MQTT_USER` och `MQTT_PASSWORD`, behöver du lägga till
+`CORE_DATABASE_PASSWORD`, `MQTT_CORE_PASSWORD` och
+`MQTT_ZIGBEE2MQTT_PASSWORD` (se **Lösenorden och vem som får vad**).
+`MQTT_USER` och `MQTT_PASSWORD` används inte längre och kan tas bort.
+Databasen behåller allt; kärnans nya roll skapas av `db-setup` vid nästa
+`docker compose up -d`.
+
 Stoppa Homecontrol med `docker compose down`. Inget sparat försvinner;
 `docker compose up -d` startar allt igen.
 
@@ -695,7 +743,8 @@ Stoppa Homecontrol med `docker compose down`. Inget sparat försvinner;
 | `core/`      | Kärnan i Python. Svarar på `/health` och serverar webbgränssnittet. |
 | `web/`       | Webbgränssnittet i TypeScript.                             |
 | `firmware/` | ESPHome-firmware för rumskorten och webbinstalleraren, se [firmware/README.md](firmware/README.md). |
-| `mosquitto/` | Inställningar för MQTT-brokern.                            |
+| `mosquitto/` | Inställningar för MQTT-brokern, med användarnas rättigheter (`acl`). |
+| `postgres/`  | Vilka som får logga in i databasen och hur (`pg_hba.conf`). |
 | `scripts/`   | Hjälpskript, t.ex. för att klassa ändringar inför granskning. |
 | `.claude/agents/` | Granskningsagenter för Claude Code.                   |
 
@@ -712,7 +761,11 @@ HOMECONTROL_WEB_DIR=../web/dist uv run homecontrol
 ```
 
 Utan `HOMECONTROL_DATABASE` visar kärnan exempelhemmet, och ändringar från
-kartredigeraren sparas bara så länge kärnan är igång.
+kartredigeraren sparas bara så länge kärnan är igång. Utanför Docker Compose
+skapar och uppdaterar kärnan själv tabellerna. I `compose.yaml` gör
+`homecontrol förbered-databasen` (tjänsten `db-setup`) det i stället, och
+kärnan har `HOMECONTROL_PREPARE_DATABASE=false` och en roll som bara får
+läsa och skriva.
 Testerna av databasdelen behöver en Postgres med TimescaleDB och hoppas
 annars över. En sådan startar du till exempel så här (den nås bara från
 den här datorn och försvinner när den stoppas):

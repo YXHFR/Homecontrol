@@ -55,6 +55,20 @@ def test_empty_database_setting_means_no_database(monkeypatch: pytest.MonkeyPatc
     assert Settings.from_env().database is None
 
 
+def test_core_prepares_the_database_itself_unless_told_not_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("HOMECONTROL_PREPARE_DATABASE", raising=False)
+    assert Settings.from_env().prepare_database is True
+
+    monkeypatch.setenv("HOMECONTROL_PREPARE_DATABASE", "false")
+    assert Settings.from_env().prepare_database is False
+
+    monkeypatch.setenv("HOMECONTROL_PREPARE_DATABASE", "kanske")
+    with pytest.raises(ValueError, match="HOMECONTROL_PREPARE_DATABASE"):
+        Settings.from_env()
+
+
 def test_full_resolution_history_lasts_one_day_unless_changed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

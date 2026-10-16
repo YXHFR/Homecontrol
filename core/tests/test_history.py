@@ -4,30 +4,27 @@ TimescaleDB kör nedsamplingen, lagringstiden och komprimeringen som jobb i
 bakgrunden. Testerna kör jobben direkt i stället för att vänta på dem.
 """
 
-import itertools
 import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from history_helpers import ANNA, NOW, anna_at, events, lit, positions, snapshot, ticking
 
 from homecontrol import history
 from homecontrol.app import create_app
 from homecontrol.connectors import LightLevelObserved
-from homecontrol.controller import Controller, Event, RoomView, Snapshot
-from homecontrol.fusion import Occupancy, Track
+from homecontrol.controller import Controller
+from homecontrol.fusion import Occupancy
 from homecontrol.history import History
 from homecontrol.home import Point, Room
 from homecontrol.homefile import example_home
 from homes import radar_sees
 
 DAY = timedelta(days=1)
-NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
-ANNA = str(uuid.uuid4())
 BO = str(uuid.uuid4())
 
 
@@ -189,40 +186,6 @@ def test_history_can_be_kept_for_a_limited_time(conn: psycopg.Connection) -> Non
 
     for table in ("track_position_per_second", "event_log"):
         assert policy(conn, "policy_retention", table, "drop_after") == []
-
-
-def snapshot(
-    *tracks: Track, kitchen: Occupancy = Occupancy.VACANT, events: tuple[Event, ...] = ()
-) -> Snapshot:
-    room = RoomView("kok", kitchen, None, None, manual=False, explanation="")
-    return Snapshot(tracks=tracks, rooms=(room,), zones=(), lamps=(), events=events)
-
-
-def lit(number: int = 1) -> Event:
-    """Kärnans händelse när lampan i köket tändes."""
-    return Event(number, 0.0, "kok", "Tändes: någon är i Kök och det var mörkt.")
-
-
-def anna_at(x: float, *, held: bool = False) -> Track:
-    return Track(ANNA, "plan", Point(x, 2), held)
-
-
-def ticking(start: datetime = NOW) -> Callable[[], datetime]:
-    """En klocka som går en sekund framåt varje gång den läses."""
-    times = (start + timedelta(seconds=i) for i in itertools.count())
-    return lambda: next(times)
-
-
-def positions(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
-    return conn.execute(
-        "SELECT time, track_id::text, floor_id, x, y, held FROM track_position ORDER BY time"
-    ).fetchall()
-
-
-def events(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
-    return conn.execute(
-        "SELECT time, kind, room_id, detail FROM event_log ORDER BY time, seq"
-    ).fetchall()
 
 
 def test_tracks_room_changes_and_explanations_are_written(
