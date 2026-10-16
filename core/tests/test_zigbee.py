@@ -425,13 +425,15 @@ def test_a_held_command_is_forgotten_when_the_lamp_is_changed_with_a_remote() ->
     harness = started()
     for _ in range(LIMIT_BURST + 1):
         harness.send(off(FONSTERLAMPA))
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "OFF"}')  # lampan svarar
     harness.take()
 
-    harness.now = 10.0
+    harness.now = 0.5
     harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+    assert harness.take_reports()[-1].external
+    harness.now = 1.0
     harness.output.tick()
 
-    assert harness.take_reports()[-1].external
     assert not [topic for topic, _ in harness.take() if topic.endswith("/set")]
 
 
@@ -443,6 +445,7 @@ def test_held_commands_are_forgotten_when_the_broker_is_lost() -> None:
 
     harness.output.disconnected()
     harness.output.connected(lambda topic, payload: harness.published.append((topic, payload)))
+    harness.receive("start", "lampornas_svar")
     harness.now = 5.0
     harness.output.tick()
 
