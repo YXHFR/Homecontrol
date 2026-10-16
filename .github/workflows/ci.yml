@@ -47,6 +47,9 @@ jobs:
         run: uv run mypy
       - name: Tester
         run: uv run pytest tests ../scripts/tests
+      # Firmware-flödet kör skripten med Python 3.13, så de testas även där.
+      - name: Skripten med Python 3.13
+        run: uv run --no-project --python 3.13 --with pytest pytest ../scripts/tests
 
   web:
     name: Webbgränssnittet (TypeScript)
