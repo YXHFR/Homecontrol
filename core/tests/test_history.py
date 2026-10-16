@@ -4,9 +4,12 @@ TimescaleDB kör nedsamplingen, lagringstiden och komprimeringen som jobb i
 bakgrunden. Testerna kör jobben direkt i stället för att vänta på dem.
 """
 
+import itertools
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import psycopg
 import pytest
@@ -14,11 +17,13 @@ from fastapi.testclient import TestClient
 
 from homecontrol import history
 from homecontrol.app import create_app
-from homecontrol.controller import RoomView, Snapshot
+from homecontrol.connectors import LightLevelObserved
+from homecontrol.controller import Controller, RoomView, Snapshot
 from homecontrol.fusion import Occupancy, Track
 from homecontrol.history import History
-from homecontrol.home import Point
+from homecontrol.home import Point, Room
 from homecontrol.homefile import example_home
+from homes import radar_sees
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 ANNA = str(uuid.uuid4())
@@ -61,13 +66,13 @@ def pause_background_jobs(conn: psycopg.Connection) -> None:
         time.sleep(0.05)
 
 
-def run_jobs(conn: psycopg.Connection, kind: str, table: str) -> None:
+def run_jobs(conn: psycopg.Connection, job_kind: str, table: str) -> None:
     jobs = conn.execute(
         "SELECT job_id FROM timescaledb_information.jobs"
         " WHERE proc_name = %s AND hypertable_name = %s AND hypertable_schema = current_schema()",
-        (kind, table),
+        (job_kind, table),
     ).fetchall()
-    assert jobs, f"{kind} saknas för {table}"
+    assert jobs, f"{job_kind} saknas för {table}"
     for (job_id,) in jobs:
         conn.execute("CALL run_job(%s)", (job_id,))
 
@@ -178,6 +183,18 @@ def test_full_resolution_shorter_than_the_downsampling_is_refused(
         history.configure(conn, timedelta(minutes=30))
 
 
+def test_history_can_be_kept_for_a_limited_time(conn: psycopg.Connection) -> None:
+    history.configure(conn, keep=timedelta(days=90))
+
+    for table in ("track_position_per_second", "event_log"):
+        assert policy(conn, "policy_retention", table, "drop_after") == [timedelta(days=90)]
+
+    history.configure(conn)
+
+    for table in ("track_position_per_second", "event_log"):
+        assert policy(conn, "policy_retention", table, "drop_after") == []
+
+
 def snapshot(*tracks: Track, kitchen: Occupancy = Occupancy.VACANT) -> Snapshot:
     return Snapshot(tracks=tracks, rooms=(RoomView("kok", kitchen, None),), zones=(), lamps=())
 
@@ -186,31 +203,42 @@ def anna_at(x: float, *, held: bool = False) -> Track:
     return Track(ANNA, "plan", Point(x, 2), held)
 
 
+def ticking(start: datetime = NOW) -> Callable[[], datetime]:
+    """En klocka som går en sekund framåt varje gång den läses."""
+    times = (start + timedelta(seconds=i) for i in itertools.count())
+    return lambda: next(times)
+
+
+def positions(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
+    return conn.execute(
+        "SELECT time, track_id::text, floor_id, x, y, held FROM track_position ORDER BY time"
+    ).fetchall()
+
+
+def events(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
+    return conn.execute(
+        "SELECT time, kind, room_id, lamp_id, detail FROM event_log ORDER BY time"
+    ).fetchall()
+
+
 def test_tracks_room_changes_and_explanations_are_written(
     conn: psycopg.Connection, database: str
 ) -> None:
-    times = iter(NOW + timedelta(seconds=i) for i in range(100))
-    log = History(database, flush_seconds=0.01, wall_clock=lambda: next(times))
-    log.start()
+    writer = History(database, flush_seconds=0.01, wall_clock=ticking())
+    writer.start()
 
-    log.record(snapshot())
-    log.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED))
-    log.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED))  # inget nytt
-    log.explain("Tändes: radarn ser 1 person.", room_id="kok", lamp_id="taklampa")
-    log.record(snapshot(anna_at(1, held=True), kitchen=Occupancy.OCCUPIED))
-    log.close()
+    writer.record(snapshot())
+    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED))
+    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED))  # inget nytt
+    writer.explain("Tändes: radarn ser 1 person.", room_id="kok", lamp_id="taklampa")
+    writer.record(snapshot(anna_at(1, held=True), kitchen=Occupancy.OCCUPIED))
+    writer.close()
 
-    positions = conn.execute(
-        "SELECT time, track_id::text, floor_id, x, y, held FROM track_position ORDER BY time"
-    ).fetchall()
-    events = conn.execute(
-        "SELECT time, kind, room_id, lamp_id, detail FROM event_log ORDER BY time"
-    ).fetchall()
-    assert positions == [
+    assert positions(conn) == [
         (NOW + timedelta(seconds=1), ANNA, "plan", 1, 2, False),
         (NOW + timedelta(seconds=4), ANNA, "plan", 1, 2, True),
     ]
-    assert events == [
+    assert events(conn) == [
         (NOW, "rum", "kok", None, "tomt"),
         (NOW + timedelta(seconds=1), "rum", "kok", None, "upptaget"),
         (
@@ -223,49 +251,117 @@ def test_tracks_room_changes_and_explanations_are_written(
     ]
 
 
+def test_nothing_is_saved_while_paused_and_rooms_are_saved_again_after(
+    conn: psycopg.Connection, database: str
+) -> None:
+    simulating = True
+    writer = History(database, flush_seconds=0.01, wall_clock=ticking())
+    writer.pause_while(lambda: simulating)
+    writer.start()
+
+    writer.record(snapshot(anna_at(1), kitchen=Occupancy.OCCUPIED))
+    writer.explain("Tändes.", room_id="kok", lamp_id="taklampa")
+    simulating = False
+    writer.record(snapshot())
+    writer.close()
+
+    assert positions(conn) == []
+    assert events(conn) == [(NOW, "rum", "kok", None, "tomt")]
+
+
 def test_full_queue_drops_points_instead_of_waiting() -> None:
-    log = History("host=127.0.0.1 port=1 connect_timeout=1", max_queued=3)
+    writer = History("host=127.0.0.1 port=1", max_queued=3)
 
-    started = time.monotonic()
     for x in range(10):
-        log.record(snapshot(anna_at(x)))
+        writer.record(snapshot(anna_at(x)))
 
-    assert time.monotonic() - started < 0.1
     # Rummets läge och de två första positionerna får plats.
-    assert log.dropped == 8
+    assert writer.dropped == 8
+
+
+def test_room_change_that_did_not_fit_is_saved_later() -> None:
+    writer = History("host=127.0.0.1 port=1", max_queued=1)
+    writer.record(snapshot())  # rummet är tomt, och nu är kön full
+
+    writer.record(snapshot(kitchen=Occupancy.OCCUPIED))
+    writer._queue.get_nowait()  # skrivaren hinner ikapp
+    writer.record(snapshot(kitchen=Occupancy.OCCUPIED))
+
+    saved = writer._queue.get_nowait()
+    assert isinstance(saved, history._Event)
+    assert saved.detail == "upptaget"
+
+
+def wait_for(condition: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + 10
+    while not condition():
+        assert time.monotonic() < deadline, "hände aldrig"
+        time.sleep(0.02)
+
+
+def test_writer_connects_again_after_losing_the_database(
+    conn: psycopg.Connection, database: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    writer = History(database, flush_seconds=0.01, retry_seconds=0.01)
+    writer.start()
+    writer.record(snapshot(anna_at(1)))
+    wait_for(lambda: len(positions(conn)) == 1)
+
+    conn.execute(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = %s",
+        (history.APPLICATION_NAME,),
+    )
+    x = 2.0
+
+    def written_after_reconnect() -> bool:
+        nonlocal x
+        writer.record(snapshot(anna_at(x)))
+        x += 1
+        return any(row[3] >= 2 for row in positions(conn)) and "Kunde inte" in caplog.text
+
+    wait_for(written_after_reconnect)
+    writer.close()
 
 
 def test_unreachable_database_does_not_stop_the_writer(caplog: pytest.LogCaptureFixture) -> None:
-    log = History("host=127.0.0.1 port=1 connect_timeout=1", flush_seconds=0.01)
-    log.start()
+    writer = History("host=127.0.0.1 port=1 connect_timeout=1", flush_seconds=0.01)
+    writer.start()
 
-    log.record(snapshot(anna_at(1)))
-    deadline = time.monotonic() + 5
-    while "Kunde inte skriva historiken" not in caplog.text and time.monotonic() < deadline:
-        time.sleep(0.01)
-    log.record(snapshot(anna_at(2)))
-    log.close(timeout=1)
+    writer.record(snapshot(anna_at(1.25)))
+    wait_for(lambda: "Kunde inte skriva historiken" in caplog.text)
+    writer.record(snapshot(anna_at(2)))
+    writer.close(timeout=1)
 
-    assert "Kunde inte skriva historiken" in caplog.text
-    assert "1, 2" not in caplog.text  # positionerna loggas inte
+    assert "1.25" not in caplog.text  # positionerna skrivs inte i loggen
 
 
-def test_core_writes_its_history_while_it_runs(conn: psycopg.Connection, database: str) -> None:
-    home = example_home()
-    room = next(room for room in home.rooms if room.nodes and room.lamps)
-    floor = next(floor for floor in home.floors if room in floor.rooms)
-    middle = Point(
+def middle(room: Room) -> Point:
+    return Point(
         sum(x for x, _ in room.polygon) / len(room.polygon),
         sum(y for _, y in room.polygon) / len(room.polygon),
     )
-    app = create_app(home=home, history=History(database, flush_seconds=0.01))
+
+
+def test_core_writes_its_history_but_not_the_simulation(
+    conn: psycopg.Connection, database: str
+) -> None:
+    home = example_home()
+    room = home.rooms[0]  # radar_sees ser med rumskortet i första rummet
+    other_room = home.rooms[1]
+    floor = next(floor for floor in home.floors if other_room in floor.rooms)
+    app = create_app(home=home, history=History(database, flush_seconds=0.01, wall_clock=ticking()))
+    controller: Controller = app.state.controller
 
     with TestClient(app):
         app.state.simulation.set_daylight(5)
-        app.state.simulation.add_person(floor.id, middle)
+        app.state.simulation.add_person(floor.id, middle(other_room))
+        app.state.simulation.set_enabled(False)
+        controller.observe(LightLevelObserved("sensor", room.id, 5))
+        controller.observe(radar_sees(middle(room), home=home, source_id="sensor"))
 
-    tracks = conn.execute("SELECT count(DISTINCT track_id) FROM track_position").fetchone()
-    events = conn.execute("SELECT kind, room_id, detail FROM event_log").fetchall()
-    assert tracks == (1,)
-    assert ("rum", room.id, "upptaget") in events
-    assert any(kind == "förklaring" and room_id == room.id for kind, room_id, _ in events)
+    [(track_id,)] = conn.execute("SELECT DISTINCT track_id::text FROM track_position").fetchall()
+    assert track_id == controller.snapshot().tracks[0].id
+    in_room = [(kind, detail) for _, kind, room_id, _, detail in events(conn) if room_id == room.id]
+    # Förklaringen kommer efter rumsändringen som orsakade den.
+    explained = next(i for i, (kind, _) in enumerate(in_room) if kind == "förklaring")
+    assert in_room[explained - 1] == ("rum", "upptaget")

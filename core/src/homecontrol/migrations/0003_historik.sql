@@ -4,11 +4,11 @@
 -- Positionerna sparas med full upplösning (cirka 10 punkter per sekund och
 -- spår) i track_position. Ett kontinuerligt aggregat i TimescaleDB nedsamplar
 -- dem till en punkt per sekund och spår i track_position_per_second, som
--- sparas utan tidsgräns och komprimeras. Hur länge full upplösning sparas
--- ställs in när kärnan startar (history.configure), inte här, eftersom
--- tiden går att ändra.
+-- komprimeras. Hur länge historiken sparas ställs in när kärnan startar
+-- (history.configure), inte här, eftersom tiderna går att ändra.
 --
--- Aggregatet uppdateras bara för de senaste minuterna (se policyn nedan).
+-- Aggregatet uppdateras bara för den senaste halvtimmen (se policyn nedan),
+-- så att ett kortare avbrott i databasen inte lämnar hål.
 -- Det som redan är nedsamplat ligger kvar när de fullupplösta punkterna
 -- tas bort. Uppdatera aldrig aggregatet för hela tiden
 -- (refresh_continuous_aggregate med NULL), för då försvinner det
@@ -43,7 +43,7 @@ WITH NO DATA;
 
 SELECT add_continuous_aggregate_policy(
     'track_position_per_second',
-    start_offset => interval '10 minutes',
+    start_offset => interval '30 minutes',
     end_offset => interval '2 seconds',
     schedule_interval => interval '1 minute'
 );
@@ -53,8 +53,8 @@ ALTER MATERIALIZED VIEW track_position_per_second
 
 -- Händelseloggen: varje gång ett rum blir upptaget, tomt eller okänt
 -- (kind 'rum', detail är det nya läget), och regelmotorns förklaringar
--- (kind 'förklaring', detail är förklaringen i klartext). Den sparas utan
--- tidsgräns och komprimeras efter en vecka.
+-- (kind 'förklaring', detail är förklaringen i klartext). Den komprimeras
+-- efter en vecka.
 CREATE TABLE event_log (
     time timestamptz NOT NULL,
     kind text NOT NULL CHECK (kind IN ('rum', 'förklaring')),

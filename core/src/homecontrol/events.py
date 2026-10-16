@@ -1,8 +1,11 @@
 """Händelseloggens gränssnitt: dit förklaringarna av kärnans beslut skickas.
 
-Den som fattar ett beslut, till exempel regelmotorn, förklarar det i klartext
-med `EventLog.explain`. Historiken (`history.History`) sparar förklaringarna,
-och i tester kan vad som helst med samma metod ta emot dem.
+Bara `Controller` anropar `explain`. Regelmotorn är en ren funktion och
+förklarar sina beslut i `LampCommand.reason`; `Controller` skickar varje
+kommandos förklaring hit, efter att rummets nya läge har skickats till sina
+lyssnare. Nya regler gör likadant och anropar aldrig `explain` själva.
+Historiken (`history.History`) sparar förklaringarna, och i tester kan vad
+som helst med samma metod ta emot dem.
 
 `explain` anropas från händelseloopen och får aldrig vänta på något, så att
 lamporna inte fördröjs. En förklaring säger vad som hände i ett rum och

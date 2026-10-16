@@ -42,7 +42,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    settings = Settings.from_env()
+    try:
+        settings = Settings.from_env()
+    except ValueError as error:
+        sys.exit(str(error))
     if args.command is None:
         serve(settings)
         return
@@ -134,17 +137,17 @@ def load_or_seed_home(settings: Settings) -> Home:
 
 
 def prepare_history(settings: Settings) -> history.History | None:
-    """Ställer in hur länge historiken sparas med full upplösning. Utan databas sparas ingen."""
+    """Ställer in hur länge historiken sparas. Utan databas sparas ingen historik."""
     if settings.database is None:
         return None
     with store.connect(settings.database) as conn:
-        try:
-            history.configure(conn, settings.history_full_resolution)
-        except ValueError as error:
-            sys.exit(f"HOMECONTROL_HISTORY_FULL_HOURS: {error}")
+        history.configure(conn, settings.history_full_resolution, settings.history_keep)
     logger.info(
-        "Historiken sparas med full upplösning i %g timmar, sedan nedsamplad",
+        "Historiken sparas med full upplösning i %g timmar, sedan nedsamplad %s",
         settings.history_full_resolution / timedelta(hours=1),
+        "utan tidsgräns"
+        if settings.history_keep is None
+        else f"i {settings.history_keep / timedelta(days=1):g} dagar",
     )
     return history.History(settings.database)
 

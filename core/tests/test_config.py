@@ -14,6 +14,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_ALLOWED_HOSTS",
         "HOMECONTROL_DATABASE",
         "HOMECONTROL_HISTORY_FULL_HOURS",
+        "HOMECONTROL_HISTORY_KEEP_DAYS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -61,3 +62,39 @@ def test_full_resolution_history_lasts_one_day_unless_changed(
     monkeypatch.setenv("HOMECONTROL_HISTORY_FULL_HOURS", "48")
 
     assert Settings.from_env().history_full_resolution == timedelta(days=2)
+
+
+def test_history_is_kept_without_time_limit_unless_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("HOMECONTROL_HISTORY_KEEP_DAYS", raising=False)
+    assert Settings.from_env().history_keep is None
+
+    monkeypatch.setenv("HOMECONTROL_HISTORY_KEEP_DAYS", "90")
+
+    assert Settings.from_env().history_keep == timedelta(days=90)
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        (
+            "HOMECONTROL_HISTORY_FULL_HOURS",
+            "ett dygn",
+            "HISTORY_FULL_HOURS i .env ska vara ett tal",
+        ),
+        ("HOMECONTROL_HISTORY_FULL_HOURS", "nan", "HISTORY_FULL_HOURS i .env ska vara ett tal"),
+        ("HOMECONTROL_HISTORY_FULL_HOURS", "inf", "HISTORY_FULL_HOURS i .env ska vara ett tal"),
+        ("HOMECONTROL_HISTORY_FULL_HOURS", "0.5", "HISTORY_FULL_HOURS i .env ska vara minst 1"),
+        ("HOMECONTROL_HISTORY_KEEP_DAYS", "0", "HISTORY_KEEP_DAYS i .env ska vara minst 1"),
+        ("HOMECONTROL_HISTORY_KEEP_DAYS", "1", "HISTORY_KEEP_DAYS i .env ska vara längre"),
+    ],
+)
+def test_bad_history_settings_say_which_setting_is_wrong(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str, message: str
+) -> None:
+    monkeypatch.delenv("HOMECONTROL_HISTORY_FULL_HOURS", raising=False)
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=message):
+        Settings.from_env()

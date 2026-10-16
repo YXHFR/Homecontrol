@@ -38,8 +38,8 @@ def create_app(
     `home_store` är där kartredigerarens ändringar sparas. Utan den sparas de
     bara så länge kärnan är igång.
 
-    `history` sparar spåren, rummens läge och förklaringarna. Utan den sparas
-    ingen historik.
+    `history` sparar spåren, rummens läge och förklaringarna, utom medan
+    simuleringsläget är på. Utan den sparas ingen historik.
     """
     clock = clock if clock is not None else SystemClock()
     home = home if home is not None else example_home()
@@ -50,13 +50,15 @@ def create_app(
     # och tidsfarten spärras så länge riktiga lampor styrs (se Simulation).
     lamps = SimulatedLampOutput()
     controller = Controller(home, clock, [lamps], event_log=history)
-    if history is not None:
-        history.record(controller.snapshot())
-        controller.subscribe(lambda: history.record(controller.snapshot()))
     source = SimulatedSource(home)
     simulation = Simulation(
         source, controller.observe, clock, floor_ids=(floor.id for floor in home.floors)
     )
+    if history is not None:
+        # Låtsaspersonerna ska inte hamna i historiken bland de riktiga spåren.
+        history.pause_while(lambda: simulation.enabled)
+        history.record(controller.snapshot())
+        controller.subscribe(lambda: history.record(controller.snapshot()))
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

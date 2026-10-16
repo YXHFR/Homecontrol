@@ -14,8 +14,9 @@ services:
       # Hemmodellen sparas i databasen. Lösenordet läses från PGPASSWORD.
       HOMECONTROL_DATABASE: host=db dbname=homecontrol user=homecontrol
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD saknas – kopiera .env.example till .env och fyll i}
-      # Hur många timmar historiken sparas med full upplösning (se README).
+      # Hur länge historiken sparas (se README). Tomt betyder utan tidsgräns.
       HOMECONTROL_HISTORY_FULL_HOURS: ${HISTORY_FULL_HOURS:-24}
+      HOMECONTROL_HISTORY_KEEP_DAYS: ${HISTORY_KEEP_DAYS:-}
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
     depends_on:

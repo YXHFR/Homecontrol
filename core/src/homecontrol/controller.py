@@ -79,6 +79,7 @@ class Controller:
         self._clock = clock
         self._outputs = tuple(outputs)
         self._event_log = event_log
+        self._explanations_to_log: list[tuple[str, str | None, str]] = []
         # Ljusnivån per rum och källa. Det senast mätta värdet gäller, och en
         # källa som tappas tar sina värden med sig.
         self._lux: dict[str, dict[str, float]] = {}
@@ -209,7 +210,7 @@ class Controller:
         self._wake_at = result.wake_at
 
     def _send(self, command: LampCommand) -> None:
-        self._log(command)
+        self._explain(command)
         for output in self._outputs:
             # En trasig utgång får inte hindra de andra eller stoppa kärnan.
             try:
@@ -217,23 +218,33 @@ class Controller:
             except Exception:
                 logger.exception("Lamputgången kunde inte ta emot %s", command)
 
-    def _log(self, command: LampCommand) -> None:
-        if self._event_log is None:
-            return
-        room_id = next(
+    def _explain(self, command: LampCommand) -> None:
+        """Lägger förklaringen åt sidan. Den skickas efter ändringen som orsakade den."""
+        if self._event_log is not None:
+            self._explanations_to_log.append(
+                (command.reason, self._room_of_lamp(command.lamp_id), command.lamp_id)
+            )
+
+    def _room_of_lamp(self, lamp_id: str) -> str | None:
+        return next(
             (
                 room.id
                 for room in self._home.rooms
-                if any(lamp.id == command.lamp_id for lamp in room.lamps)
+                if any(lamp.id == lamp_id for lamp in room.lamps)
             ),
             None,
         )
-        # Loggen får inte hindra lamporna, precis som en trasig utgång.
-        try:
-            self._event_log.explain(command.reason, room_id=room_id, lamp_id=command.lamp_id)
-        except Exception:
-            logger.exception("Händelseloggen kunde inte ta emot förklaringen")
 
     def _notify(self) -> None:
         for listener in list(self._listeners):
             listener()
+        # Efter lyssnarna, så att historiken får rummets nya läge före förklaringen.
+        explanations, self._explanations_to_log = self._explanations_to_log, []
+        if self._event_log is None:
+            return
+        for text, room_id, lamp_id in explanations:
+            # Loggen får inte hindra lamporna, precis som en trasig utgång.
+            try:
+                self._event_log.explain(text, room_id=room_id, lamp_id=lamp_id)
+            except Exception:
+                logger.exception("Händelseloggen kunde inte ta emot förklaringen")

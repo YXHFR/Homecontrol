@@ -7,6 +7,7 @@ testerna över, utom i CI där de måste köras.
 """
 
 import os
+import time
 import uuid
 from collections.abc import Iterator
 
@@ -32,7 +33,19 @@ def database() -> Iterator[str]:
         try:
             yield make_conninfo(base, options=f"-c search_path={schema},public")
         finally:
+            _drop_schema(admin, schema)
+
+
+def _drop_schema(admin: psycopg.Connection, schema: str) -> None:
+    """Tar bort schemat. Försöker igen om TimescaleDB:s bakgrundsjobb rör det just då."""
+    for attempt in range(10):
+        try:
             admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+            return
+        except psycopg.errors.InternalError_:
+            if attempt == 9:
+                raise
+            time.sleep(0.2)
 
 
 @pytest.fixture
