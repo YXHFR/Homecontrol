@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from homecontrol.app import create_app
 from homecontrol.editor import MAX_HOME_BYTES, MAX_IMAGE_BYTES, MemoryStore
-from homecontrol.home import Home
+from homecontrol.home import Home, Point
 from homecontrol.homefile import to_document
 from homecontrol.images import StoredImage
 from homes import FLOOR, one_room_home, room
@@ -250,3 +250,16 @@ def test_image_changes_also_refuse_an_old_revision() -> None:
         )
         assert c.delete(image, headers={"if-match": old}).status_code == 409
         assert c.get(image).status_code == 404
+
+
+def test_new_room_gets_the_simulated_daylight_and_floors_are_known() -> None:
+    with client() as c:
+        controller = c.app.state.controller  # type: ignore[attr-defined]
+        simulation = c.app.state.simulation  # type: ignore[attr-defined]
+
+        c.put("/api/home", json=to_document(with_kitchen()))
+
+        lux = {room.room_id: room.lux for room in controller.snapshot().rooms}
+        assert lux["kok"] is not None
+        assert lux["kok"] == lux["vardagsrum"]
+        assert simulation.add_person(FLOOR, Point(6, 2)) is not None

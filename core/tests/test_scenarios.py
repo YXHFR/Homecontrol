@@ -179,6 +179,50 @@ def test_room_settings_decide_darkness_and_delay() -> None:
     )
 
 
+def test_lamp_stays_on_while_someone_is_left() -> None:
+    """Två personer i rummet: lampan lyser så länge en av dem är kvar."""
+    (
+        Scenario()
+        .daylight(10)
+        .person_enters(who="Anna")
+        .person_enters(who="Bo")
+        .person_leaves(who="Anna")
+        .wait(minutes=10)
+        .expect_lamp_on()
+        .person_leaves(who="Bo")
+        .wait(minutes=3)
+        .expect_lamp_off()
+    )
+
+
+def test_daylight_slider_decides_darkness_in_every_room() -> None:
+    """Dagsljuset gäller alla rum: ljust ute tänder inget, mörkt ute tänder."""
+    (
+        Scenario(two_floor_home())
+        .daylight(200)
+        .person_enters(room="sovrum")
+        .expect_lamp_off(lamp="lampa-uppe")
+        .daylight(5)
+        .expect_lamp_on(lamp="lampa-uppe")
+        .expect_explanation("5 lux", lamp="lampa-uppe")
+    )
+
+
+def test_switching_off_the_simulation_empties_the_rooms() -> None:
+    """Simuleringsläget slås av: låtsaspersonen är borta och lampan släcks efter 3 minuter."""
+    (
+        Scenario()
+        .daylight(10)
+        .person_enters()
+        .expect_lamp_on()
+        .simulation_off()
+        .wait(minutes=2, seconds=59)
+        .expect_lamp_on()
+        .wait(seconds=1)
+        .expect_lamp_off()
+    )
+
+
 # fmt: on
 
 

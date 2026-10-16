@@ -29,12 +29,30 @@
       .status {
         color: #666;
       }
-      .floors {
+      .floors,
+      .speeds {
         display: flex;
         gap: 8px;
         margin: 0 0 12px;
       }
-      .floors button {
+      .speeds {
+        display: inline-flex;
+        margin: 0;
+      }
+      .persons {
+        padding-left: 20px;
+      }
+      .persons li {
+        margin: 4px 0;
+      }
+      .simulation {
+        margin: 12px 0;
+        padding: 0 12px 4px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+      }
+      .floors button,
+      .speeds button {
         font: inherit;
         padding: 6px 12px;
         border: 1px solid #ccc;
@@ -42,7 +60,8 @@
         background: #fff;
         cursor: pointer;
       }
-      .floors button[aria-pressed="true"] {
+      .floors button[aria-pressed="true"],
+      .speeds button[aria-pressed="true"] {
         background: #2f6fed;
         border-color: #2f6fed;
         color: #fff;

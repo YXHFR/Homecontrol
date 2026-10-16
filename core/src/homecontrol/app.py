@@ -13,20 +13,20 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from homecontrol import __version__
-from homecontrol.clock import Clock, SystemClock
+from homecontrol.clock import SystemClock
 from homecontrol.controller import Controller
 from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
 from homecontrol.home import Home
 from homecontrol.homefile import example_home
 from homecontrol.live import create_live_router, run_timer
-from homecontrol.simulation import SimulatedLampOutput, SimulatedSource
+from homecontrol.simulation import SimulatedLampOutput, SimulatedSource, Simulation
 
 logger = logging.getLogger(__name__)
 
 
 def create_app(
     web_dir: Path | None = None,
-    clock: Clock | None = None,
+    clock: SystemClock | None = None,
     allowed_hosts: Set[str] = frozenset(),
     home: Home | None = None,
     home_store: HomeStore | None = None,
@@ -37,12 +37,20 @@ def create_app(
     bara så länge kärnan är igång.
     """
     clock = clock if clock is not None else SystemClock()
-    # Än så länge finns bara Simulering: en låtsasperson och virtuella lampor.
-    # Riktiga kopplingar ansluts på samma sätt.
-    source = SimulatedSource()
+    home = home if home is not None else example_home()
+    # Än så länge finns bara Simulering: låtsaspersoner och virtuella lampor.
+    # Riktiga kopplingar ansluts på samma sätt. Eftersom inga riktiga källor
+    # eller lampor finns börjar simuleringsläget påslaget, så att det finns
+    # något att se. När riktiga kopplingar läggs till ska läget börja avslaget,
+    # och tidsfarten spärras så länge riktiga lampor styrs (se Simulation).
     lamps = SimulatedLampOutput()
-    controller = Controller(home if home is not None else example_home(), clock, [lamps])
-    source.start(controller.observe)
+    # Alla lampor är virtuella tills en riktig lamputgång styr dem.
+    virtual_lamps = frozenset(lamp.id for lamp in home.lamps)
+    controller = Controller(home, clock, [lamps])
+    source = SimulatedSource(room_ids=(room.id for room in home.rooms))
+    simulation = Simulation(
+        source, controller.observe, clock, floor_ids=(floor.id for floor in home.floors)
+    )
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -62,16 +70,19 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.controller = controller
-    app.state.source = source
+    app.state.simulation = simulation
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    app.include_router(create_live_router(controller, source, allowed_hosts))
+    app.include_router(create_live_router(controller, simulation, allowed_hosts, virtual_lamps))
     app.include_router(
         create_editor_router(
-            controller, home_store if home_store is not None else MemoryStore(), allowed_hosts
+            controller,
+            home_store if home_store is not None else MemoryStore(),
+            allowed_hosts,
+            on_home_replaced=simulation.use_home,
         )
     )
 

@@ -93,9 +93,16 @@ class MemoryStore:
 
 
 def create_editor_router(
-    controller: Controller, home_store: HomeStore, allowed_hosts: Set[str] = frozenset()
+    controller: Controller,
+    home_store: HomeStore,
+    allowed_hosts: Set[str] = frozenset(),
+    on_home_replaced: Callable[[Home], None] | None = None,
 ) -> APIRouter:
-    """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som kärnan får nås på."""
+    """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som kärnan får nås på.
+
+    `on_home_replaced` anropas med det nya hemmet efter varje ändring, för det
+    utöver kärnan som behöver veta vilka rum och våningar som finns (simuleringen).
+    """
 
     def only_trusted(request: Request) -> None:
         # Utan kontrollen kunde en främmande sida som någon i hemmet besöker
@@ -140,6 +147,8 @@ def create_editor_router(
             # Nu är hemmet sparat och har en ny revision, vad som än händer i kärnan.
             change_count += 1
             controller.replace_home(home)
+            if on_home_replaced is not None:
+                on_home_replaced(home)
             return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"ETag": revision()})
 
     def require_floor(home: Home, floor_id: str) -> Floor:
