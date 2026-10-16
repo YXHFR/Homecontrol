@@ -24,6 +24,7 @@ from homecontrol.esphome import (
     defer_in_loop,
     placed_cards,
 )
+from homecontrol.history import History
 from homecontrol.home import Home
 from homecontrol.homefile import example_home
 from homecontrol.lampdevices import create_lamp_devices_router
@@ -40,6 +41,7 @@ def create_app(
     allowed_hosts: Set[str] = frozenset(),
     home: Home | None = None,
     home_store: HomeStore | None = None,
+    history: History | None = None,
     esphome_secret: str | None = None,
     card_network: Network | None = None,
     mqtt: Connect | None = None,
@@ -48,6 +50,9 @@ def create_app(
 
     `home_store` är där kartredigerarens ändringar sparas. Utan den sparas de
     bara så länge kärnan är igång.
+
+    `history` sparar spåren, rummens läge och förklaringarna, utom medan
+    simuleringsläget är på. Utan den sparas ingen historik.
 
     Med `esphome_secret` ansluts rumskorten som är placerade på kartan (se
     esphome.py), via `card_network` eller annars det riktiga nätverket.
@@ -87,6 +92,11 @@ def create_app(
         enabled=cards is None and zigbee is None,
         real_hardware=lambda changed: bool(real_nodes(changed) or real_lamps(changed)),
     )
+    if history is not None:
+        # Låtsaspersonerna ska inte hamna i historiken bland de riktiga spåren.
+        history.pause_while(lambda: simulation.enabled)
+        history.record(controller.snapshot())
+        controller.subscribe(lambda: history.record(controller.snapshot()))
 
     def use_home(changed: Home) -> None:
         simulation.use_home(changed)
@@ -98,6 +108,8 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if history is not None:
+            history.start()
         tasks = [asyncio.create_task(run_timer(controller, clock))]
         if cards is not None:
             tasks.append(asyncio.create_task(cards.run(controller.observe)))
@@ -111,6 +123,8 @@ def create_app(
             for task in tasks:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            if history is not None:
+                await asyncio.to_thread(history.close)
 
     app = FastAPI(
         title="Homecontrol",

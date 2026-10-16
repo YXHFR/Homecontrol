@@ -53,6 +53,7 @@ from typing import Any, Protocol
 
 import aiomqtt
 
+from homecontrol.config import MqttSettings
 from homecontrol.connectors import LampCommand, LampStateReported, ObservationSink
 from homecontrol.home import Home, LampProfile
 from homecontrol.lampdevices import FoundLamp
@@ -289,14 +290,6 @@ class MqttConnection(Protocol):
 
 Connect = Callable[[], AbstractAsyncContextManager[MqttConnection]]
 """Ansluter till brokern. Ger ConnectionError om det inte går."""
-
-
-@dataclass(frozen=True)
-class MqttSettings:
-    host: str
-    port: int = 1883
-    username: str | None = None
-    password: str | None = None
 
 
 def mqtt_connect(settings: MqttSettings) -> Connect:

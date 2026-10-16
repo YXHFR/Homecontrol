@@ -41,8 +41,9 @@ var någon är.
 
 import logging
 import math
+import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved, SourceLost
@@ -105,6 +106,8 @@ class Presence:
 class Track:
     """Ett anonymt spår av en person, som det visas utanför modulen."""
 
+    id: str
+    """Slumpat när spåret skapas. Säger inget om personen eller radarns numrering."""
     floor_id: str
     position: Point
     held: bool
@@ -123,6 +126,7 @@ class _Track:
     lost_at: float | None = None
     wifi_held_at: float = -math.inf
     """Senast Wi-Fi-rörelsen höll kvar spåret efter att radarn tappade det."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 @dataclass(frozen=True)
@@ -161,7 +165,7 @@ class Fusion:
 
     def tracks(self) -> tuple[Track, ...]:
         return tuple(
-            Track(track.floor_id, track.position, held=track.lost_at is not None)
+            Track(track.id, track.floor_id, track.position, held=track.lost_at is not None)
             for track in self._tracks
         )
 
