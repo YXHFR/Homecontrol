@@ -24,7 +24,8 @@ body[data-page="editor"] {
 }
 
 .editor button,
-.editor input {
+.editor input,
+.editor select {
   font: inherit;
 }
 
@@ -56,6 +57,16 @@ body[data-page="editor"] {
   background: #2f6fed;
   border-color: #2f6fed;
   color: #fff;
+}
+
+/* Zonknapparna har zonens färg, så att det syns vilken färg zonen får på kartan. */
+.toolbox .zone-tool {
+  border-left: 6px solid var(--zone-color);
+}
+
+.toolbox .zone-tool[aria-pressed="true"] {
+  background: var(--zone-color);
+  border-color: var(--zone-color);
 }
 
 .toolbox .zoom {
@@ -118,10 +129,15 @@ body[data-page="editor"] {
   gap: 4px;
 }
 
-.properties input {
+.properties input,
+.properties select {
   padding: 6px 8px;
   border: 1px solid #ccc;
   border-radius: 6px;
+}
+
+.selection label + label {
+  margin-top: 8px;
 }
 
 .properties .danger {

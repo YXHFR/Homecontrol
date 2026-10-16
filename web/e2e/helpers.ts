@@ -6,7 +6,12 @@ export interface HomeDocument {
     floors: {
       id: string;
       level: number;
-      rooms: { id: string; name: string; polygon: [number, number][] }[];
+      rooms: {
+        id: string;
+        name: string;
+        polygon: [number, number][];
+        zones?: { id: string; name: string; kind: string; polygon: [number, number][] }[];
+      }[];
       plan_image?: { position: [number, number]; meters_per_pixel: number } | null;
     }[];
   };

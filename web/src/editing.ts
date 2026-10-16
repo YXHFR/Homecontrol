@@ -151,7 +151,7 @@ function updateFloors(
   return { ...document, home: { ...document.home, floors: document.home.floors.map(update) } };
 }
 
-function updateRoom(
+export function updateRoom(
   document: HomeDocument,
   roomId: string,
   update: (room: RoomModel) => RoomModel,

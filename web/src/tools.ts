@@ -6,9 +6,10 @@
 import { distance, rectangleCorners } from "./editing";
 import type { Point } from "./protocol";
 
-export type ToolName = "select" | "polygon" | "rectangle" | "scale";
+/** Med "zone" ritas en zon med fri form, av den sort som kartredigeraren har valt. */
+export type ToolName = "select" | "polygon" | "rectangle" | "scale" | "zone";
 
-/** Det som håller på att ritas och ska visas på kartan. */
+/** Det som håller på att ritas och ska visas på kartan. Zoner ritas som en polygon. */
 export type Draft =
   | { kind: "none" }
   | { kind: "polygon"; points: Point[]; pointer: Point | null }
@@ -18,17 +19,21 @@ export type Draft =
 /** Vad ett avslutat ritande blev. */
 export type Outcome =
   | { kind: "room"; corners: Point[] }
+  | { kind: "zone"; corners: Point[] }
   | { kind: "scale"; a: Point; b: Point }
   | null;
 
 export const INSTRUCTIONS: Record<ToolName, string> = {
   select:
-    "Klicka på ett rum för att välja det. Dra ett valt rum för att flytta det. " +
+    "Klicka på ett rum eller en zon för att välja det. Dra ett valt rum för att flytta det. " +
     "Dra i en tom del av kartan för att se en annan del.",
   polygon:
     "Klicka där rummets hörn är, ett i taget runt rummet. " +
     "Stäng rummet genom att klicka på det första hörnet igen.",
   rectangle: "Tryck där ett hörn av rummet är och dra till hörnet snett emot. Släpp för att spara.",
+  zone:
+    "Klicka där zonens hörn är, ett i taget, inne i ett rum. " +
+    "Stäng zonen genom att klicka på det första hörnet igen.",
   scale:
     "Klicka på två punkter på bilden som du vet avståndet mellan, till exempel båda ändarna " +
     "av en vägg. Skriv sedan in avståndet.",
@@ -75,7 +80,8 @@ export class Drawing {
   pointerDown(point: Point, closeRadius: number): Outcome {
     const draft = this.current;
     switch (this.toolName) {
-      case "polygon": {
+      case "polygon":
+      case "zone": {
         const points = draft.kind === "polygon" ? draft.points : [];
         if (points.length >= 3 && distance(point, points[0]) <= closeRadius) {
           return this.finish();
@@ -121,13 +127,13 @@ export class Drawing {
     return { kind: "room", corners };
   }
 
-  /** Stänger rummet som håller på att ritas med fri form, om det har minst tre hörn. */
+  /** Stänger rummet eller zonen som håller på att ritas med fri form, om den har minst tre hörn. */
   finish(): Outcome {
     const draft = this.current;
     if (draft.kind !== "polygon" || draft.points.length < 3) {
       return null;
     }
     this.cancel();
-    return { kind: "room", corners: draft.points };
+    return { kind: this.toolName === "zone" ? "zone" : "room", corners: draft.points };
   }
 }

@@ -38,6 +38,9 @@ function home(): HomeDocument {
               walls: ["gips", "betong", "gips", "dörröppning"],
               zones: [
                 {
+                  id: "spis",
+                  name: "Spis",
+                  kind: "ignorera",
                   polygon: [
                     [2, 2],
                     [3, 2],

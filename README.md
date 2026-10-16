@@ -97,18 +97,31 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    rummet genom att klicka på det första hörnet igen (passar L-formade rum).
    **Rum, rektangel**: dra från ett hörn till hörnet snett emot. Ett klick
    nära ett hörn som redan finns hamnar exakt på det, så att rummen möts.
-4. **Välj och flytta**: klicka på ett rum för att byta namn på det eller ta
-   bort det, och dra det för att flytta det.
+4. Rita zonerna i rummen på samma sätt som ett rum med fri form. Varje sorts
+   zon har en egen färg:
+   - **Vanlig zon**: en plats som systemet ska känna till, till exempel
+     skrivbordet.
+   - **Stillhetszon**: där man sitter eller ligger still, till exempel
+     soffan och sängen. Där ska närvaron hållas kvar även när radarn tappar
+     personen.
+   - **Ignorera-zon**: störkällor som en fläkt, en gardin eller en växt.
+   - **Entrézon**: vid en dörr, där den som försvinner ur sikte har gått ut.
+
+   Alla hörn i en zon ska ligga i samma rum. Zonerna syns i livevyn, men
+   närvaron tar hänsyn till dem först i en kommande version.
+5. **Välj och flytta**: klicka på ett rum eller en zon för att byta namn på
+   det eller ta bort det. En zon kan också byta sort. Dra ett rum för att
+   flytta det; zonerna i rummet följer med.
 
 Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
 Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
-och Enter stänger rummet.
+och Enter stänger rummet eller zonen.
 
 Allt sparas direkt, och livevyn visar ändringen utan omstart. Har du
 redigeraren öppen i två fönster och ändrar i båda, visar det ena fönstret
 det andras ändring i stället för att skriva över den. Under
 **Hemmet** står hur många rum, zoner, rumskort, routrar och lampor hemmet
-har. Väggarnas material, rumskort, routrar, lampor och zoner ritas i kommande
+har. Väggarnas material, rumskort, routrar och lampor ritas i kommande
 versioner; tills dess får nya rum gipsväggar.
 
 ### Hemmet: spara, flytta och läsa in
@@ -151,7 +164,8 @@ Så läser du filen:
   lamporna släcks när rummet har varit tomt i `off_after_empty_seconds`
   sekunder.
 - `zones` är delar av ett rum: `vanlig`, `stillhet` (soffa, säng),
-  `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr).
+  `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr). Alla
+  hörn i en zon ska ligga i rummet (på väggen räknas som i rummet).
 - `nodes` är rumskorten: var de sitter (`position`), monteringshöjd i
   meter (`height`), åt vilket håll radarn tittar i grader medurs där 0 är
   åt höger (`rotation`), om kortet sitter upp och ned (`mirrored`) och vad

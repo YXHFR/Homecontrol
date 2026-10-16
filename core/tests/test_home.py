@@ -108,6 +108,18 @@ def test_lamp_zone_must_be_in_the_same_room() -> None:
     assert l_room(zones=(sofa,), lamps=(lamp,)).lamps[0].zone_id == "soffa"
 
 
+def test_zone_must_be_inside_its_room() -> None:
+    def zone(polygon: tuple[Point, ...]) -> Zone:
+        return Zone(id="z", name="Z", kind=ZoneKind.IGNORE, polygon=polygon)
+
+    # Längs väggen är fortfarande i rummet, till exempel en entrézon vid dörren.
+    assert l_room(zones=(zone(rectangle(0, 3, 2, 1)),)).zones
+    with pytest.raises(ValidationError, match="går utanför rummet"):
+        l_room(zones=(zone(rectangle(3, 3, 0.5, 0.5)),))  # i hacket
+    with pytest.raises(ValidationError, match="går utanför rummet"):
+        l_room(zones=(zone(rectangle(3, 1, 2, 0.5)),))  # sticker ut genom väggen
+
+
 def test_room_settings_have_defaults_and_keep_the_limits_in_order() -> None:
     assert RoomSettings() == RoomSettings(
         dark_below_lux=30, bright_above_lux=100, off_after_empty_seconds=180

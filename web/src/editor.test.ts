@@ -180,6 +180,93 @@ describe("kartredigeraren", () => {
     expect(text(root, ".selection")).toMatch(/Inget valt/);
   });
 
+  it("en zon ritas i ett rum, väljs, byter namn och sort och tas bort", async () => {
+    const { root, core, scenes, map, click, settled } = await setup();
+    const zones = () => core.document.home.floors[0].rooms[0].zones ?? [];
+
+    click("Stillhetszon");
+    expect(text(root, ".instruction")).toMatch(/Stillhetszon: Där man sitter/);
+    expect(root.querySelector('[data-zone-kind="stillhet"]')?.getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    for (const point of [
+      { x: 0.5, y: 0.5 },
+      { x: 2, y: 0.5 },
+      { x: 2, y: 1.5 },
+      { x: 0.5, y: 1.5 },
+    ]) {
+      map.onPointerDown(point);
+    }
+    expect(scenes.at(-1)?.draft.kind).toBe("polygon");
+    click("Stäng zonen");
+    await settled();
+
+    expect(zones()).toEqual([
+      {
+        id: "stillhet-1",
+        name: "Stillhet 1",
+        kind: "stillhet",
+        polygon: [
+          [0.5, 0.5],
+          [2, 0.5],
+          [2, 1.5],
+          [0.5, 1.5],
+        ],
+      },
+    ]);
+    expect(text(root, ".summary")).toContain("Zoner1");
+    // Den nya zonen är vald.
+    expect(text(root, ".properties")).toContain("Vald zon");
+    expect(text(root, ".selection")).toContain("Ligger i Kök.");
+
+    const name = root.querySelector<HTMLInputElement>('input[name="name"]');
+    if (name === null) {
+      throw new Error("Inget namnfält");
+    }
+    name.value = "Soffa";
+    name.dispatchEvent(new Event("change"));
+    await settled();
+    expect(zones()[0]).toMatchObject({ id: "stillhet-1", name: "Soffa" });
+
+    const kind = root.querySelector<HTMLSelectElement>('select[name="kind"]');
+    if (kind === null) {
+      throw new Error("Ingen väljare för sort");
+    }
+    kind.value = "entré";
+    kind.dispatchEvent(new Event("change"));
+    await settled();
+    expect(zones()[0]).toMatchObject({ id: "stillhet-1", kind: "entré" });
+
+    // Välj bort zonen och välj den igen på kartan.
+    click("Välj och flytta");
+    map.onSelectRoom(null);
+    expect(text(root, ".selection")).toMatch(/Inget valt/);
+    map.onSelectZone("stillhet-1");
+    expect(scenes.at(-1)?.selectedZoneId).toBe("stillhet-1");
+    expect(root.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe("Soffa");
+
+    click("Ta bort zonen");
+    await settled();
+    expect(zones()).toEqual([]);
+    expect(text(root, ".selection")).toMatch(/Inget valt/);
+  });
+
+  it("en zon utanför rummen sparas inte", async () => {
+    const { root, core, map, click } = await setup();
+    click("Vanlig zon");
+    for (const point of [
+      { x: 2, y: 1 },
+      { x: 5, y: 1 },
+      { x: 5, y: 1.5 },
+    ]) {
+      map.onPointerDown(point);
+    }
+    click("Stäng zonen");
+
+    expect(core.saved).toEqual([]);
+    expect(text(root, ".message")).toMatch(/inne i ett rum/);
+  });
+
   it("hörn nära ett befintligt hörn hamnar exakt på det", async () => {
     const { core, map, click, settled } = await setup();
     click("Rum, fri form");

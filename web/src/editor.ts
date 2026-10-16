@@ -1,6 +1,7 @@
 /**
  * Kartredigeraren: verktygen till vänster, kartan i mitten och egenskaperna
- * till höger (se #34). På en smal skärm staplas de.
+ * till höger (se #34). På en smal skärm staplas de. Zonerna (#36) har sina
+ * delar i zones.ts och zonePanel.ts.
  *
  * Varje ändring sparas direkt i kärnan, som kontrollerar hemmet och visar det
  * i livevyn. Säger kärnan nej visas varför, och kartan läses om från kärnan,
@@ -25,11 +26,23 @@ import {
   toPoint,
   toXY,
 } from "./editing";
+import { button, element } from "./dom";
 import { createKonvaEditorView, type EditorViewFactory } from "./editorView";
 import { coreApi, CoreError, type HomeApi } from "./homeApi";
 import type { FloorModel, HomeDocument } from "./homefile";
-import type { Point } from "./protocol";
+import type { Point, ZoneKind } from "./protocol";
 import { Drawing, INSTRUCTIONS, type Outcome, type ToolName } from "./tools";
+import { zoneProperties, zoneTools } from "./zonePanel";
+import {
+  addZone,
+  deleteZone,
+  findZone,
+  renameZone,
+  roomAround,
+  setZoneKind,
+  ZONE_STYLES,
+  zoneProblem,
+} from "./zones";
 
 /** En bild som är klar att skickas till kärnan, och hur många bildpunkter bred den är. */
 export interface PreparedImage {
@@ -91,23 +104,8 @@ const TOOL_LABELS: Record<ToolName, string> = {
   polygon: "Rum, fri form",
   rectangle: "Rum, rektangel",
   scale: "Skala bilden",
+  zone: "Zon",
 };
-
-function element<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = Object.assign(document.createElement(tag), props);
-  node.append(...children);
-  return node;
-}
-
-function button(label: string, onClick: () => void, className = ""): HTMLButtonElement {
-  const node = element("button", { type: "button", className }, label);
-  node.addEventListener("click", onClick);
-  return node;
-}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -131,6 +129,9 @@ export function mountEditor(
   let shown: HomeDocument | null = null;
   let floorId: string | null = null;
   let selectedRoomId: string | null = null;
+  let selectedZoneId: string | null = null;
+  /** Sorten av zon som ritas med verktyget Zon. */
+  let zoneKind: ZoneKind = "vanlig";
   /** Punkterna som ska skalas mellan, när användaren har klickat ut två. */
   let scalePoints: { a: Point; b: Point } | null = null;
   /** Ändras när en ny bild laddas upp, så att webbläsaren inte visar den gamla. */
@@ -141,6 +142,10 @@ export function mountEditor(
 
   // --- Verktygen ---
   const toolButtons = new Map<ToolName, HTMLButtonElement>();
+  const zoneToolbox = zoneTools((kind) => {
+    zoneKind = kind;
+    chooseTool("zone");
+  });
   const toolButton = (tool: ToolName) => {
     const node = button(TOOL_LABELS[tool], () => chooseTool(tool), "tool");
     node.dataset.tool = tool;
@@ -163,6 +168,7 @@ export function mountEditor(
     toolButton("select"),
     toolButton("polygon"),
     toolButton("rectangle"),
+    ...zoneToolbox.nodes,
     element("h2", {}, "Kartan"),
     element(
       "div",
@@ -194,13 +200,14 @@ export function mountEditor(
   // --- Egenskaperna ---
   const instruction = element("p", { className: "instruction" });
   const draftActions = element("div", { className: "actions" });
+  const selectionHeading = element("h2", {}, "Valt rum");
   const selection = element("div", { className: "selection" });
   const summary = element("dl", { className: "summary" });
   const properties = element(
     "aside",
     { className: "properties" },
     element("section", {}, element("h2", {}, "Instruktion"), instruction, draftActions),
-    element("section", {}, element("h2", {}, "Valt rum"), selection),
+    element("section", {}, selectionHeading, selection),
     element("section", {}, element("h2", {}, "Hemmet"), summary),
   );
 
@@ -222,6 +229,7 @@ export function mountEditor(
     for (const [tool, node] of toolButtons) {
       node.setAttribute("aria-pressed", String(tool === drawing.tool));
     }
+    zoneToolbox.render(drawing.tool === "zone" ? zoneKind : null);
     // Medan en bild laddas upp eller tas bort visar kartan fortfarande den
     // gamla, så den går inte att skala eller ta bort förrän kärnan är klar.
     const imageChanging = waiting.some((change) => change.kind === "image");
@@ -236,10 +244,15 @@ export function mountEditor(
 
   const renderInstruction = () => {
     const draft = drawing.draft;
-    instruction.textContent = INSTRUCTIONS[drawing.tool];
+    instruction.textContent =
+      drawing.tool === "zone"
+        ? `${ZONE_STYLES[zoneKind].label}: ${ZONE_STYLES[zoneKind].description} ${INSTRUCTIONS.zone}`
+        : INSTRUCTIONS[drawing.tool];
     draftActions.replaceChildren();
     if (draft.kind === "polygon") {
-      const done = button("Stäng rummet", () => handle(drawing.finish()));
+      const done = button(drawing.tool === "zone" ? "Stäng zonen" : "Stäng rummet", () =>
+        handle(drawing.finish()),
+      );
       done.disabled = draft.points.length < 3;
       draftActions.append(
         done,
@@ -284,10 +297,27 @@ export function mountEditor(
   };
 
   const renderSelection = () => {
+    const zone = shown === null ? null : findZone(shown, selectedZoneId);
+    selectionHeading.textContent = zone === null ? "Valt rum" : "Vald zon";
+    if (zone !== null) {
+      const zoneId = zone.zone.id;
+      selection.replaceChildren(
+        ...zoneProperties(zone.zone, zone.room.name, {
+          rename: (name) => commit((document) => renameZone(document, zoneId, name)),
+          setKind: (kind) => commit((document) => setZoneKind(document, zoneId, kind)),
+          remove: () => {
+            selectedZoneId = null;
+            commit((document) => deleteZone(document, zoneId));
+          },
+          complain: showMessage,
+        }),
+      );
+      return;
+    }
     const room = selectedRoomId === null || shown === null ? null : findRoom(shown, selectedRoomId);
     if (room === null) {
       selection.replaceChildren(
-        element("p", { className: "muted" }, "Inget valt. Välj ett rum på kartan."),
+        element("p", { className: "muted" }, "Inget valt. Välj ett rum eller en zon på kartan."),
       );
       return;
     }
@@ -352,6 +382,7 @@ export function mountEditor(
         const node = button(floor.name, () => {
           floorId = floor.id;
           selectedRoomId = null;
+          selectedZoneId = null;
           cancelDrawing();
         });
         node.setAttribute("aria-pressed", String(floor.id === floorId));
@@ -374,6 +405,8 @@ export function mountEditor(
           ? null
           : { url: `${deps.api.planImageUrl(floor.id)}?v=${imageVersion}`, plan: floor.plan_image },
       selectedRoomId,
+      selectedZoneId,
+      zoneKind,
       tool: drawing.tool,
       draft: drawing.draft,
     });
@@ -394,7 +427,7 @@ export function mountEditor(
     root.dataset.busy = String(busy);
   };
 
-  /** Räknar fram det som visas och glömmer ett valt rum som inte längre finns. */
+  /** Räknar fram det som visas och glömmer ett valt rum eller en vald zon som inte längre finns. */
   const refreshShown = () => {
     shown = saved;
     for (const change of waiting) {
@@ -404,6 +437,9 @@ export function mountEditor(
     }
     if (selectedRoomId !== null && shown !== null && findRoom(shown, selectedRoomId) === null) {
       selectedRoomId = null;
+    }
+    if (selectedZoneId !== null && shown !== null && findZone(shown, selectedZoneId) === null) {
+      selectedZoneId = null;
     }
   };
 
@@ -486,6 +522,7 @@ export function mountEditor(
     scalePoints = null;
     if (tool !== "select") {
       selectedRoomId = null;
+      selectedZoneId = null;
     }
     render();
   };
@@ -505,7 +542,11 @@ export function mountEditor(
    */
   const snap = (point: Point): Point => {
     const radius = SNAP_PIXELS * view.metersPerPixel();
-    const corners = currentFloor()?.rooms.flatMap((room) => room.polygon.map(toPoint)) ?? [];
+    const corners =
+      currentFloor()?.rooms.flatMap((room) => [
+        ...room.polygon.map(toPoint),
+        ...(room.zones ?? []).flatMap((zone) => zone.polygon.map(toPoint)),
+      ]) ?? [];
     let best: Point | null = null;
     for (const corner of corners) {
       if (
@@ -529,6 +570,22 @@ export function mountEditor(
         selectedRoomId = roomId;
         commit(
           (document) => addRoom(document, floor.id, outcome.corners, { roomId, name }).document,
+        );
+        return;
+      }
+    } else if (outcome?.kind === "zone") {
+      const floor = currentFloor();
+      const problem = floor === null ? null : zoneProblem(floor, outcome.corners);
+      const room = floor === null ? null : roomAround(floor, outcome.corners);
+      if (problem !== null) {
+        showMessage(problem);
+      } else if (shown !== null && room !== null) {
+        const kind = zoneKind;
+        const { zoneId, name } = addZone(shown, room.id, kind, outcome.corners);
+        selectedZoneId = zoneId;
+        commit(
+          (document) =>
+            addZone(document, room.id, kind, outcome.corners, { zoneId, name }).document,
         );
         return;
       }
@@ -646,6 +703,12 @@ export function mountEditor(
     },
     onSelectRoom: (roomId) => {
       selectedRoomId = roomId;
+      selectedZoneId = null;
+      render();
+    },
+    onSelectZone: (zoneId) => {
+      selectedZoneId = zoneId;
+      selectedRoomId = null;
       render();
     },
     onMoveRoom: (roomId, dx, dy) => {

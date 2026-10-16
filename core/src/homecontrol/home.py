@@ -149,6 +149,8 @@ class RoomSettings(_Model):
 
 
 class Zone(_Model):
+    """En del av ett rum som betyder något särskilt för närvaron. Hörnen ligger i rummet."""
+
     id: Id
     name: Name
     kind: ZoneKind
@@ -202,6 +204,11 @@ class Room(_Model):
             raise ValueError(
                 f"Rummet {self.id} har {len(self.polygon)} sidor men {len(self.walls)} väggar"
             )
+        for zone in self.zones:
+            # Hörnen räcker: en zon ritas inne i rummet, och sammanvägningen
+            # frågar bara om en punkt ligger i zonen.
+            if not all(self.contains(corner) for corner in zone.polygon):
+                raise ValueError(f"Zonen {zone.id} går utanför rummet {self.id}")
         zone_ids = {zone.id for zone in self.zones}
         for lamp in self.lamps:
             if lamp.zone_id is not None and lamp.zone_id not in zone_ids:
