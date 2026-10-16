@@ -103,7 +103,7 @@ class Controller:
             case MotionObserved():
                 self._fusion.motion(observation, now)
             case SourceLost(source_id=source_id):
-                self._fusion.source_lost(source_id, now)
+                self._fusion.source_lost(observation, now)
                 for by_source in self._lux.values():
                     by_source.pop(source_id, None)
             case LightLevelObserved(source_id=source_id, room_id=room_id, lux=lux):

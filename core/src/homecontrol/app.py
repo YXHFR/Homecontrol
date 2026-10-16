@@ -16,6 +16,7 @@ from homecontrol import __version__
 from homecontrol.clock import SystemClock
 from homecontrol.controller import Controller
 from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
+from homecontrol.esphome import AioesphomeNetwork, EsphomeSource, Network, defer_in_loop
 from homecontrol.home import Home
 from homecontrol.homefile import example_home
 from homecontrol.live import create_live_router, run_timer
@@ -30,35 +31,66 @@ def create_app(
     allowed_hosts: Set[str] = frozenset(),
     home: Home | None = None,
     home_store: HomeStore | None = None,
+    esphome_secret: str | None = None,
+    card_network: Network | None = None,
 ) -> FastAPI:
     """`home` är hemmet från databasen. Utan det används exempelhemmet.
 
     `home_store` är där kartredigerarens ändringar sparas. Utan den sparas de
     bara så länge kärnan är igång.
+
+    Med `esphome_secret` ansluts rumskorten som är placerade på kartan (se
+    esphome.py), via `card_network` eller annars det riktiga nätverket.
     """
     clock = clock if clock is not None else SystemClock()
     home = home if home is not None else example_home()
-    # Än så länge finns bara Simulering: låtsaspersoner och virtuella lampor.
-    # Riktiga kopplingar ansluts på samma sätt. Eftersom inga riktiga källor
-    # eller lampor finns börjar simuleringsläget påslaget, så att det finns
-    # något att se. När riktiga kopplingar läggs till ska läget börja avslaget,
-    # och tidsfarten spärras så länge riktiga lampor styrs (se Simulation).
+    # Lamporna är än så länge virtuella. Riktiga lamputgångar läggs till här.
     lamps = SimulatedLampOutput()
     controller = Controller(home, clock, [lamps])
-    source = SimulatedSource(home)
-    simulation = Simulation(
-        source, controller.observe, clock, floor_ids=(floor.id for floor in home.floors)
+    cards = (
+        None
+        if esphome_secret is None
+        else EsphomeSource(
+            esphome_secret,
+            home,
+            card_network if card_network is not None else AioesphomeNetwork(),
+            defer=defer_in_loop,
+        )
     )
+    real_nodes = cards.placed_cards if cards is not None else frozenset
+    # Simuleringsläget börjar påslaget bara när inga riktiga kort kan anslutas,
+    # så att det finns något att se. Tidsfarten gäller hela kärnan och spärras
+    # därför till 1× så länge riktiga kort är placerade (se Simulation).
+    # Riktiga lampor ska spärra den på samma sätt när de kopplas in.
+    source = SimulatedSource(home, real_nodes=real_nodes)
+    simulation = Simulation(
+        source,
+        controller.observe,
+        clock,
+        floor_ids=(floor.id for floor in home.floors),
+        enabled=cards is None,
+        real_hardware=lambda: bool(real_nodes()),
+    )
+
+    def use_home(changed: Home) -> None:
+        # Korten först, så att simuleringen vet vilka noder som är riktiga.
+        if cards is not None:
+            cards.use_home(changed)
+        simulation.use_home(changed)
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        timer = asyncio.create_task(run_timer(controller, clock))
+        tasks = [asyncio.create_task(run_timer(controller, clock))]
+        if cards is not None:
+            tasks.append(asyncio.create_task(cards.run(controller.observe)))
         try:
             yield
         finally:
-            timer.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await timer
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     app = FastAPI(
         title="Homecontrol",
@@ -69,18 +101,21 @@ def create_app(
     )
     app.state.controller = controller
     app.state.simulation = simulation
+    app.state.cards = cards
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    app.include_router(create_live_router(controller, simulation, allowed_hosts, _virtual_lamps))
+    app.include_router(
+        create_live_router(controller, simulation, allowed_hosts, _virtual_lamps, cards)
+    )
     app.include_router(
         create_editor_router(
             controller,
             home_store if home_store is not None else MemoryStore(),
             allowed_hosts,
-            on_home_replaced=simulation.use_home,
+            on_home_replaced=use_home,
         )
     )
 

@@ -12,6 +12,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_WEB_DIR",
         "HOMECONTROL_ALLOWED_HOSTS",
         "HOMECONTROL_DATABASE",
+        "HOMECONTROL_ESPHOME_SECRET",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -48,3 +49,15 @@ def test_empty_database_setting_means_no_database(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("HOMECONTROL_DATABASE", "")
 
     assert Settings.from_env().database is None
+
+
+def test_reads_esphome_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_ESPHOME_SECRET", " inte-en-riktig-nyckel ")
+
+    assert Settings.from_env().esphome_secret == "inte-en-riktig-nyckel"  # noqa: S105
+
+
+def test_empty_esphome_secret_means_no_cards(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_ESPHOME_SECRET", "")
+
+    assert Settings.from_env().esphome_secret is None

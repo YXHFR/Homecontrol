@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from homecontrol.home import Capability
+
 
 @dataclass(frozen=True)
 class RadarTarget:
@@ -73,9 +75,17 @@ class SourceLost:
     """Källan har tappat kontakten eller stoppats. Det den såg senast gäller inte längre.
 
     Rummen som källans noder sitter i får läget okänt tills källan hörs av igen.
+
+    Med `node_id` gäller bortfallet bara den noden, och med `capability` bara
+    den delen av noden, till exempel radarn på ett kort vars Wi-Fi-mätning
+    fortfarande fungerar. Det gäller även en nod som källan aldrig har hörts
+    från, som ett placerat kort som inte har svarat sedan kärnan startade.
+    Utan `node_id` gäller det alla noder som senast hördes från källan.
     """
 
     source_id: str
+    node_id: str | None = None
+    capability: Capability | None = None
 
 
 Observation = RadarTargetsObserved | MotionObserved | LightLevelObserved | SourceLost

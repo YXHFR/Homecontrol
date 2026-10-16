@@ -1,0 +1,892 @@
+{
+ "comment": "Exempelmeddelanden i den form aioesphomeapi lämnar dem (to_dict), med firmware-paketets entiteter (firmware/homecontrol.yaml). Inga nycklar, nätverksnamn eller adresser. t är sekunder från anslutningen.",
+ "device": {
+  "name": "homecontrol-vardagsrum",
+  "friendly_name": "Homecontrol vardagsrum",
+  "project_name": "yxhfr.homecontrol",
+  "project_version": "0.4.0",
+  "esphome_version": "2026.9.1"
+ },
+ "entities": [
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_count",
+   "key": 4196101537,
+   "name": "Radar Target Count",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "",
+   "unit_of_measurement": "",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 0,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_1_x",
+   "key": 668609584,
+   "name": "Radar Target 1 X",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "distance",
+   "unit_of_measurement": "mm",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_1_y",
+   "key": 668609585,
+   "name": "Radar Target 1 Y",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "distance",
+   "unit_of_measurement": "mm",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_1_speed",
+   "key": 1327719793,
+   "name": "Radar Target 1 Speed",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "speed",
+   "unit_of_measurement": "mm/s",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_2_x",
+   "key": 668756647,
+   "name": "Radar Target 2 X",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "distance",
+   "unit_of_measurement": "mm",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_2_y",
+   "key": 668756646,
+   "name": "Radar Target 2 Y",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "distance",
+   "unit_of_measurement": "mm",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_2_speed",
+   "key": 4222725918,
+   "name": "Radar Target 2 Speed",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "speed",
+   "unit_of_measurement": "mm/s",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_3_x",
+   "key": 1742671438,
+   "name": "Radar Target 3 X",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "distance",
+   "unit_of_measurement": "mm",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_3_y",
+   "key": 1742671439,
+   "name": "Radar Target 3 Y",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "distance",
+   "unit_of_measurement": "mm",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "radar_target_3_speed",
+   "key": 3716840819,
+   "name": "Radar Target 3 Speed",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "speed",
+   "unit_of_measurement": "mm/s",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "illuminance",
+   "key": 1797020032,
+   "name": "Illuminance",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "illuminance",
+   "unit_of_measurement": "lx",
+   "accuracy_decimals": 1,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "wifi_signal",
+   "key": 799351157,
+   "name": "WiFi Signal",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": "signal_strength",
+   "unit_of_measurement": "dBm",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "uptime",
+   "key": 1324261225,
+   "name": "Uptime",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": "duration",
+   "unit_of_measurement": "s",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 2,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "free_heap",
+   "key": 3331574148,
+   "name": "Free Heap",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": "",
+   "unit_of_measurement": "B",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 0,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "loop_time",
+   "key": 4013087533,
+   "name": "Loop Time",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": "",
+   "unit_of_measurement": "ms",
+   "accuracy_decimals": 0,
+   "force_update": false,
+   "state_class": 0,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "SensorInfo",
+   "object_id": "csi_movement_score",
+   "key": 3553858883,
+   "name": "CSI Movement Score",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "",
+   "unit_of_measurement": "",
+   "accuracy_decimals": 2,
+   "force_update": false,
+   "state_class": 1,
+   "legacy_last_reset_type": 0
+  },
+  {
+   "type": "BinarySensorInfo",
+   "object_id": "radar_presence",
+   "key": 2996869253,
+   "name": "Radar Presence",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "occupancy",
+   "is_status_binary_sensor": false
+  },
+  {
+   "type": "BinarySensorInfo",
+   "object_id": "radar_online",
+   "key": 1310757795,
+   "name": "Radar Online",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": "connectivity",
+   "is_status_binary_sensor": false
+  },
+  {
+   "type": "BinarySensorInfo",
+   "object_id": "csi_motion",
+   "key": 1423493497,
+   "name": "CSI Motion",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "motion",
+   "is_status_binary_sensor": false
+  },
+  {
+   "type": "BinarySensorInfo",
+   "object_id": "csi_calibrating",
+   "key": 1345282451,
+   "name": "CSI Calibrating",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": "",
+   "is_status_binary_sensor": false
+  },
+  {
+   "type": "ButtonInfo",
+   "object_id": "csi_recalibrate",
+   "key": 565850859,
+   "name": "CSI Recalibrate",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": ""
+  },
+  {
+   "type": "TextSensorInfo",
+   "object_id": "radar_firmware",
+   "key": 3810431513,
+   "name": "Radar Firmware",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": ""
+  },
+  {
+   "type": "TextSensorInfo",
+   "object_id": "firmware_version",
+   "key": 1459297423,
+   "name": "Firmware Version",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": ""
+  },
+  {
+   "type": "TextSensorInfo",
+   "object_id": "esphome_version",
+   "key": 2314437119,
+   "name": "ESPHome Version",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 2,
+   "device_id": 0,
+   "device_class": ""
+  },
+  {
+   "type": "UpdateInfo",
+   "object_id": "firmware",
+   "key": 2978842618,
+   "name": "Firmware",
+   "disabled_by_default": false,
+   "icon": "",
+   "entity_category": 0,
+   "device_id": 0,
+   "device_class": "firmware"
+  }
+ ],
+ "states": [
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 4196101537,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 668609584,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 668609585,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 1327719793,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 668756647,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 668756646,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 4222725918,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 1742671438,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 1742671439,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 3716840819,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 1797020032,
+   "device_id": 0,
+   "state": 12.5,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 799351157,
+   "device_id": 0,
+   "state": -61,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 1324261225,
+   "device_id": 0,
+   "state": 3605,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 3331574148,
+   "device_id": 0,
+   "state": 151204,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 4013087533,
+   "device_id": 0,
+   "state": 9,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.08,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "BinarySensorState",
+   "key": 2996869253,
+   "device_id": 0,
+   "state": false,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "BinarySensorState",
+   "key": 1310757795,
+   "device_id": 0,
+   "state": true,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "BinarySensorState",
+   "key": 1423493497,
+   "device_id": 0,
+   "state": false,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "BinarySensorState",
+   "key": 1345282451,
+   "device_id": 0,
+   "state": false,
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "TextSensorState",
+   "key": 3810431513,
+   "device_id": 0,
+   "state": "2.04.23101915",
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "TextSensorState",
+   "key": 1459297423,
+   "device_id": 0,
+   "state": "0.4.0",
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "TextSensorState",
+   "key": 2314437119,
+   "device_id": 0,
+   "state": "2026.9.1",
+   "missing_state": false
+  },
+  {
+   "t": 0.0,
+   "type": "UpdateState",
+   "key": 2978842618,
+   "device_id": 0,
+   "missing_state": false,
+   "in_progress": false,
+   "has_progress": false,
+   "progress": 0.0,
+   "current_version": "0.4.0",
+   "latest_version": "0.5.0",
+   "title": "Homecontrol rumskort",
+   "release_summary": "",
+   "release_url": "https://github.com/YXHFR/Homecontrol/releases/tag/v0.5.0"
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 4196101537,
+   "device_id": 0,
+   "state": 1,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 668609584,
+   "device_id": 0,
+   "state": 400,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 668609585,
+   "device_id": 0,
+   "state": 1500,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 1327719793,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 668756647,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 668756646,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 4222725918,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 1742671438,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 1742671439,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "SensorState",
+   "key": 3716840819,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 1.0,
+   "type": "BinarySensorState",
+   "key": 2996869253,
+   "device_id": 0,
+   "state": true,
+   "missing_state": false
+  },
+  {
+   "t": 1.25,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.11,
+   "missing_state": false
+  },
+  {
+   "t": 1.5,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.12000000000000001,
+   "missing_state": false
+  },
+  {
+   "t": 1.75,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.13,
+   "missing_state": false
+  },
+  {
+   "t": 2.0,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.14,
+   "missing_state": false
+  },
+  {
+   "t": 2.25,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.15000000000000002,
+   "missing_state": false
+  },
+  {
+   "t": 2.5,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.16,
+   "missing_state": false
+  },
+  {
+   "t": 2.75,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.17,
+   "missing_state": false
+  },
+  {
+   "t": 3.0,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.18,
+   "missing_state": false
+  },
+  {
+   "t": 3.1,
+   "type": "BinarySensorState",
+   "key": 1310757795,
+   "device_id": 0,
+   "state": false,
+   "missing_state": false
+  },
+  {
+   "t": 3.35,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.2,
+   "missing_state": false
+  },
+  {
+   "t": 3.6,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.2,
+   "missing_state": false
+  },
+  {
+   "t": 3.85,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.2,
+   "missing_state": false
+  },
+  {
+   "t": 4.1,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.2,
+   "missing_state": false
+  },
+  {
+   "t": 4.35,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.2,
+   "missing_state": false
+  },
+  {
+   "t": 4.6,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.2,
+   "missing_state": false
+  },
+  {
+   "t": 4.85,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.2,
+   "missing_state": false
+  },
+  {
+   "t": 5.1,
+   "type": "SensorState",
+   "key": 3553858883,
+   "device_id": 0,
+   "state": 0.2,
+   "missing_state": false
+  },
+  {
+   "t": 6.0,
+   "type": "BinarySensorState",
+   "key": 1310757795,
+   "device_id": 0,
+   "state": true,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 4196101537,
+   "device_id": 0,
+   "state": 1,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 668609584,
+   "device_id": 0,
+   "state": 420,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 668609585,
+   "device_id": 0,
+   "state": 1480,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 1327719793,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 668756647,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 668756646,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 4222725918,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 1742671438,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 1742671439,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "SensorState",
+   "key": 3716840819,
+   "device_id": 0,
+   "state": 0,
+   "missing_state": false
+  },
+  {
+   "t": 6.1,
+   "type": "BinarySensorState",
+   "key": 2996869253,
+   "device_id": 0,
+   "state": true,
+   "missing_state": false
+  }
+ ]
+}
