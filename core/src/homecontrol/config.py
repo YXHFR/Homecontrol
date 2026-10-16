@@ -22,6 +22,11 @@ class Settings:
     Lösenordet står inte här utan läses av databasbiblioteket från PGPASSWORD.
     Utan databas används exempelhemmet, och inget sparas.
     """
+    esphome_secret: str | None = None
+    """Hemligheten som rumskortens nycklar räknas fram ur (se esphome.py).
+
+    Utan den ansluts inga rumskort, och simuleringsläget är påslaget från start.
+    """
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -35,4 +40,5 @@ class Settings:
                 if name.strip()
             ),
             database=os.environ.get("HOMECONTROL_DATABASE", "").strip() or None,
+            esphome_secret=os.environ.get("HOMECONTROL_ESPHOME_SECRET", "").strip() or None,
         )

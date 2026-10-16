@@ -220,3 +220,36 @@ def test_wifi_motion_is_reported_and_repeated_after_a_restart() -> None:
     source.start(seen.append)
 
     assert not any(isinstance(o, MotionObserved) for o in seen)
+
+
+def test_real_cards_are_not_simulated() -> None:
+    observed: list[Observation] = []
+    source = SimulatedSource(HOME, real_nodes=lambda _: {NODE.id})
+    source.start(observed.append)
+
+    source.add_person(FLOOR, Point(2.5, 2))
+    source.set_daylight(5)
+
+    assert observed == []
+
+
+def test_time_cannot_go_faster_while_real_cards_are_used() -> None:
+    clock = SystemClock()
+    real = False
+    simulation = Simulation(
+        SimulatedSource(HOME),
+        lambda _: None,
+        clock,
+        floor_ids=[FLOOR],
+        real_hardware=lambda _: real,
+    )
+    simulation.set_speed(60)
+    assert clock.speed == 60
+
+    real = True
+    simulation.use_home(HOME)
+    assert clock.speed == 1
+    assert simulation.view().speed_locked
+
+    simulation.set_speed(10)
+    assert clock.speed == 1

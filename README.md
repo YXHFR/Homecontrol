@@ -19,7 +19,9 @@ och släcks efter det.
 > vänta. I kartredigeraren ritar du dina egna rum ovanpå en bild av
 > planritningen, väljer vad väggarna är gjorda av och var dörröppningarna är,
 > och placerar rumskort, routrar och lampor. Varje rum kan få egna ljusgränser
-> och en egen fördröjning. Riktiga sensorer och lampor kopplas in i senare steg.
+> och en egen fördröjning. Riktiga rumskort (ESP32) hittas av sig själva och
+> används när de har placerats på kartan; deras prickar, Wi-Fi-rörelse och
+> ljusnivå syns i livevyn. Riktiga lampor kopplas in i ett senare steg.
 
 ## Snabbstart
 
@@ -76,6 +78,48 @@ Har du en adapter som ansluts via nätverket i stället sätter du
 
 Starta om med `docker compose up -d`. Öppna sedan Zigbee2MQTT i webbläsaren
 och följ guiden. MQTT-uppgifterna är redan ifyllda.
+
+### Rumskort
+
+Ett rumskort (ESP32 med radar, Wi-Fi-mätning och ljussensor) installeras med
+webbinstalleraren, se [firmware/README.md](firmware/README.md). Kärnan
+behöver sedan en hemlighet som kortens krypteringsnycklar räknas fram ur.
+Skapa den en gång och skriv in den i `.env`:
+
+```sh
+openssl rand -hex 32     # skriv resultatet efter ESPHOME_SECRET= i .env
+docker compose up -d     # starta om kärnan med hemligheten
+```
+
+Byt aldrig hemligheten; då får varje kort en ny nyckel och måste raderas och
+installeras om. Med hemligheten satt börjar simuleringsläget avslaget.
+
+1. Starta Homecontrol innan eller strax efter att kortet har fått Wi-Fi.
+   Kärnan hittar korten i hemnätet av sig själv (med mDNS). Ett nytt kort
+   syns i livevyn under **Rumskort** som ett nytt kort att placera.
+2. Öppna kartredigeraren och välj **Placera Homecontrol <rum>** under
+   **Placera**. Klicka där kortet sitter och vrid det åt rätt håll. Först nu
+   ansluter kärnan till kortet och ger det dess nyckel. Gör det snart: tills
+   kortet har fått kärnans nyckel kan vem som helst i hemnätet ge det en
+   egen. Kortet måste ha ström; kärnan erbjuder nyckeln bara under tio
+   minuter efter placeringen. Ett kort som inte är placerat används aldrig.
+3. I livevyn syns det kortets radar ser som prickar, och Wi-Fi-rörelsen och
+   ljusnivån påverkar rummet.
+
+Svarar ett kort inte, eller bara en del av det (till exempel radarn), blir
+kortet rött med ⚠ på kartan, varningen står under **Rumskort** och rummet
+får läget okänt. Lamporna i rummet lämnas då som de är.
+
+Finns en ny version av kortets firmware visas knappen **Godkänn uppdatering**
+under **Rumskort**. Kortet uppdateras bara när någon trycker på den; det
+hämtar då själv filen från webbinstalleraren och startar om.
+
+Kärnan använder datorns eget nätverk (`network_mode: host` i
+`compose.yaml`), eftersom mDNS inte når in i Dockers nät. Det fungerar på
+Linux, som Raspberry Pi. I Docker Desktop (Mac och Windows) måste
+värdnätverket slås på, se [Dockers beskrivning](https://docs.docker.com/engine/network/drivers/host/#docker-desktop).
+Kärnan lyssnar då direkt på datorn, så sätt gärna `BIND_ADDRESS` i `.env`
+till datorns adress i hemnätet, så att den bara nås därifrån.
 
 ### Om något inte fungerar
 
@@ -161,7 +205,10 @@ Tappar radarn någon räknas personen som kvar en stund, beroende på var:
 
 En person som hålls kvar visas som en streckad ring i livevyn. Under
 **Just nu** står om varje rum är upptaget, tomt eller okänt. Okänt betyder att
-ett rumskort i rummet har slutat svara; då lämnas lamporna som de är.
+radarn på ett rumskort i rummet har slutat svara, eller Wi-Fi-mätningen när
+rummet använder Wi-Fi (vikten är över 0); då lämnas lamporna som de är.
+Wi-Fi-mätningen kalibrerar sig några minuter efter att kortet har startat,
+och under tiden räknas den som tyst.
 
 Wi-Fi-rörelsens vikt ställs per rum, från 0 till 1. Vikten gånger hur säker
 mätningen är (också 0–1) avgör vad rörelsen räcker till. Från en fjärdedel
@@ -285,7 +332,8 @@ Lampornas zon och profil sparas redan men används först i kommande versioner.
 
 Homecontrol har inga konton och ingen inloggning: alla i hushållet har samma
 åtkomst. Den som når livevyn kan alltså se var någon är, tända och släcka
-lamporna och ändra planlösningen och bilden av planritningen.
+lamporna, ändra planlösningen och bilden av planritningen, placera nya
+rumskort och godkänna uppdateringar av dem.
 
 - Som standard (`BIND_ADDRESS=0.0.0.0`) nås Homecontrol från alla nätverk
   som datorn är ansluten till: hemnätverket, och Tailscale om det är
@@ -300,13 +348,14 @@ lamporna och ändra planlösningen och bilden av planritningen.
   routern.
 - Släpper du in gäster på hemnätverket kan de nå Homecontrol. Ett gästnätverk
   i routern, skilt från hemnätverket, hindrar det.
-- Portarna som Docker öppnar går förbi datorns egen brandvägg (till exempel
-  ufw), så en regel där begränsar inte vem som når Homecontrol. Använd
-  `BIND_ADDRESS` eller routern.
+- Kärnan lyssnar direkt på datorn (se **Rumskort**), så datorns egen
+  brandvägg (till exempel ufw) gäller för port 8000. Portarna som Docker
+  öppnar för MQTT och Zigbee2MQTT går däremot förbi brandväggen. Använd
+  `BIND_ADDRESS` eller routern för dem.
 
 Kärnan svarar bara när den nås på de adresser och namn den känner till
 (`localhost`, IP-adresser och `ALLOWED_HOSTS`), och inte till andra
-webbsidor. Det gäller även lampstyrningen. Det hindrar att en främmande
+webbsidor. Det gäller även lampstyrningen och uppdateringen av korten. Det hindrar att en främmande
 webbsida som någon i hemmet besöker styr lamporna eller läser kartan genom
 webbläsaren. Program och skript i nätverket släpps däremot in, eftersom det
 inte finns några konton.
@@ -390,7 +439,19 @@ ett rum. Manuell styrning från livevyn går till
 (`simulation.py`) är både en källa och en utgång. Simuleringsläget i livevyn
 styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
 når kärnan genom samma ingång som en riktig källa, som radarmål i varje
-rumskorts egna koordinater.
+rumskorts egna koordinater. Tidsfarten gäller hela kärnan och är därför
+spärrad till 1× så länge hemmet har riktiga rumskort.
+
+Rumskorten ansluts av källkopplingen ESPHome (`esphome.py`). Den hittar nya
+kort med mDNS, ansluter krypterat med aioesphomeapi till de kort som är
+placerade (en nod vars id är kortets namn, `homecontrol-<rum>`) och tolkar
+entiteterna från firmware-paketet till observationer. Radarn,
+Wi-Fi-mätningen och ljussensorn på ett kort är var sin källa, så att en del
+som tystnar ger `SourceLost` för just den delen. Kopplingen testas mot
+exempelmeddelanden i `core/tests/esphome_exempel/`, i den form aioesphomeapi
+lämnar dem. De innehåller inga nycklar, nätverksnamn eller adresser. Spelas
+nya exempel in från ett riktigt kort ska nycklar, nätverksnamn och adresser
+tas bort ur dem först.
 
 Hemmodellen finns i `home.py` och kontrolleras där. `homefile.py` gör om den
 till och från ett JSON-dokument, och `store.py` sparar samma dokument i
