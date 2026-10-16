@@ -106,8 +106,8 @@ class SimulatedSource:
         """Om varje nods Wi-Fi-mätning känner rörelse."""
         self._next_id = count(1)
         self._daylight: float | None = None
-        self._lamp_light: dict[str, float] = {}
-        """Ljuset från de virtuella lamporna i varje rum, utöver dagsljuset."""
+        self._lamp_light: Callable[[], Mapping[str, float]] = dict
+        """Ljuset från de virtuella lamporna i varje rum just nu, utöver dagsljuset."""
 
     @property
     def source_id(self) -> str:
@@ -199,13 +199,12 @@ class SimulatedSource:
         for room in self._simulated_rooms(self._home):
             self._measure(room.id)
 
-    def measure_light(self, lamp_light: Mapping[str, float]) -> None:
-        """Varje simulerad sensor mäter dagsljuset och lampornas ljus, som ett rumskort gör.
+    def use_lamp_light(self, lamp_light: Callable[[], Mapping[str, float]]) -> None:
+        """`lamp_light` ger ljuset från de virtuella lamporna per rum, som sensorerna mäter."""
+        self._lamp_light = lamp_light
 
-        `lamp_light` är ljuset från de virtuella lamporna per rum. Det mäts
-        ihop med dagsljuset från och med nu.
-        """
-        self._lamp_light = dict(lamp_light)
+    def measure_light(self) -> None:
+        """Varje simulerad sensor mäter dagsljuset och lampornas ljus, som ett rumskort gör."""
         for room in self._simulated_rooms(self._home):
             self._measure(room.id)
 
@@ -234,7 +233,7 @@ class SimulatedSource:
     def _measure(self, room_id: str) -> None:
         """Den simulerade sensorn i rummet mäter dagsljuset och lampornas ljus."""
         if self._daylight is not None:
-            self.set_light_level(room_id, self._daylight + self._lamp_light.get(room_id, 0.0))
+            self.set_light_level(room_id, self._daylight + self._lamp_light().get(room_id, 0.0))
 
     def _emit_targets(self) -> None:
         """Varje radar skickar personerna den ser, i sina egna koordinater.
@@ -384,7 +383,8 @@ class Simulation:
         lamps: SimulatedLampOutput | None = None,
     ) -> None:
         self._source = source
-        self._lamps = lamps
+        if lamps is not None:
+            source.use_lamp_light(lambda: lamps.light_by_room(source.home))
         self._real_hardware = real_hardware
         self._sink = sink
         self._clock = clock
@@ -469,8 +469,7 @@ class Simulation:
     def measure_light(self) -> None:
         """De simulerade ljussensorerna mäter, med de virtuella lampornas ljus."""
         if self._enabled:
-            light = {} if self._lamps is None else self._lamps.light_by_room(self._source.home)
-            self._source.measure_light(light)
+            self._source.measure_light()
 
     def set_speed(self, speed: Speed) -> None:
         if isinstance(speed, bool) or speed not in SPEEDS:

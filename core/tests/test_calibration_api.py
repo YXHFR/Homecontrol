@@ -77,7 +77,12 @@ def test_start_shows_progress_and_cancel_puts_the_lamp_back() -> None:
 
 
 def test_the_whole_way_from_the_button_to_the_saved_home() -> None:
-    """Kalibreringen följer kärnans klocka, så i 60× tar den bara en stund."""
+    """Kalibreringen följer kärnans klocka, så i 60× tar den bara en stund.
+
+    Testet går med riktig tid, så att timern och de simulerade sensorerna i
+    appen också prövas. Varje mätning får 90 sekunder i kärnans tid, alltså
+    en och en halv sekund i 60×, så det finns gott om marginal.
+    """
     with client() as c, c.websocket_connect("/api/live") as ws:
         ws.send_json({"type": "set_speed", "speed": 60})
         assert c.post(START).status_code == 202

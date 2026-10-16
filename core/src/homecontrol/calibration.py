@@ -13,6 +13,10 @@ jämnt, om dagsljuset ändras kraftigt mellan två mätningar med lamporna
 släckta (till exempel av ett moln), om sensorn tappas eller om en lampa
 slutar svara.
 
+Har rummet flera rumskort med ljussensor mäts lamporna vid det kort som mätte
+senast när kalibreringen startade. Reglerna drar av samma bidrag oavsett
+vilket kort som mätte, så med flera kort blir avräkningen bara ungefärlig.
+
 `RoomCalibration` är bara själva mätningen och gör inget av sig själv. Kärnan
 (`Controller`) lämnar ljusnivåerna till den, frågar vilka lampkommandon som
 behövs och väcker den vid `wake_at`. Det gör att mätningen går att köra i
@@ -133,12 +137,12 @@ class _Measurement:
     def wake_at(self, now: float) -> float:
         """När mätningen kan vara klar, om inget nytt mäts innan dess.
 
-        Väntar mätningen på sensorn är det när den ger upp; nästa avläsning
-        väcker kärnan ändå.
+        Väntar mätningen på fler avläsningar är det när den ger upp; nästa
+        avläsning väcker kärnan ändå.
         """
         if now < self.settled_at:
             return self.settled_at
-        if self._window_start is not None and self._window_start + STABLE_SECONDS > now:
+        if self._window_start is not None and len(self._samples) >= MIN_SAMPLES:
             return min(self._window_start + STABLE_SECONDS, self.gives_up_at)
         return self.gives_up_at
 

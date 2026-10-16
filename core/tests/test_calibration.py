@@ -63,6 +63,23 @@ def test_a_faint_lamp_in_daylight_is_measured_whenever_the_sensor_measures(phase
     )
 
 
+def test_each_measurement_ends_when_the_light_has_been_even_long_enough() -> None:
+    """Kalibreringen väntar inte på nästa avläsning när ljuset redan har varit jämnt länge nog.
+
+    Sensorn mäter efter 4, 9 och 14 sekunder. Ljuset utan lampor har då varit
+    jämnt i 12 sekunder efter 16 sekunder, och då tänds taklampan.
+    """
+    (
+        Scenario(lamp_light=True, sensor_phase=4)
+        .daylight(10)
+        .start_calibration()
+        .wait(seconds=15.9)
+        .expect_lamp_off()
+        .wait(seconds=0.1)
+        .expect_lamp_on()
+    )
+
+
 def test_a_silent_sensor_stops_the_calibration_without_spinning() -> None:
     """Slutar sensorn mäta, utan att kortet tappas, väntar kalibreringen en stund och ger upp."""
     (
