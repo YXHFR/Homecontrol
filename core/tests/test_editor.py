@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from homecontrol.app import create_app
 from homecontrol.editor import MAX_HOME_BYTES, MAX_IMAGE_BYTES, MemoryStore
-from homecontrol.home import Home, Point
+from homecontrol.home import Home, Lamp, Point
 from homecontrol.homefile import to_document
 from homecontrol.images import StoredImage
 from homes import FLOOR, one_room_home, room
@@ -263,3 +263,29 @@ def test_new_room_gets_the_simulated_daylight_and_floors_are_known() -> None:
         assert lux["kok"] is not None
         assert lux["kok"] == lux["vardagsrum"]
         assert simulation.add_person(FLOOR, Point(6, 2)) is not None
+
+
+def test_lamp_added_in_the_editor_is_virtual_and_lights_up_without_restart() -> None:
+    home = with_kitchen()
+    floor = home.floors[0]
+    kitchen = floor.rooms[1]
+    kitchen = kitchen.model_copy(
+        update={"lamps": (Lamp(id="koksbank", name="Köksbänk", position=Point(6, 2)),)}
+    )
+    home = home.model_copy(
+        update={"floors": (floor.model_copy(update={"rooms": (floor.rooms[0], kitchen)}),)}
+    )
+    with client() as c, c.websocket_connect("/api/live") as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        c.put("/api/home", json=to_document(home))
+        message = ws.receive_json()
+        lamps = {lamp["id"]: lamp for lamp in message["floors"][0]["lamps"]}
+        assert lamps["koksbank"]["virtual"] is True
+        assert lamps["koksbank"]["room_id"] == "kok"
+
+        simulation = c.app.state.simulation  # type: ignore[attr-defined]
+        simulation.add_person(FLOOR, Point(6, 2))
+        snapshot = c.app.state.controller.snapshot()  # type: ignore[attr-defined]
+        assert {lamp.lamp_id: lamp.on for lamp in snapshot.lamps}["koksbank"]
