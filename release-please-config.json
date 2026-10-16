@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
+  "initial-version": "0.1.0",
+  "pull-request-title-pattern": "chore: release ${version}",
+  "changelog-sections": [
+    { "type": "feat", "section": "Nytt" },
+    { "type": "fix", "section": "Rättat" },
+    { "type": "perf", "section": "Snabbare" },
+    { "type": "revert", "section": "Återställt" },
+    { "type": "docs", "section": "Dokumentation" },
+    { "type": "chore", "section": "Övrigt", "hidden": true },
+    { "type": "ci", "section": "CI", "hidden": true },
+    { "type": "build", "section": "Bygge", "hidden": true },
+    { "type": "refactor", "section": "Omstrukturerat", "hidden": true },
+    { "type": "test", "section": "Tester", "hidden": true },
+    { "type": "style", "section": "Stil", "hidden": true }
+  ],
+  "packages": {
+    ".": {
+      "skip-changelog": true,
+      "extra-files": [
+        { "type": "generic", "path": "compose.yaml" },
+        { "type": "toml", "path": "core/pyproject.toml", "jsonpath": "$.project.version" },
+        {
+          "type": "toml",
+          "path": "core/uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='homecontrol')].version"
+        },
+        { "type": "json", "path": "web/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "web/package-lock.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "web/package-lock.json", "jsonpath": "$.packages[''].version" }
+      ]
+    }
+  }
+}
