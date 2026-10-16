@@ -2,8 +2,9 @@
 
 Protokollet är JSON. Kärnan skickar:
 
-* ``{"type": "home", ...}`` en gång vid anslutning: våningarna med sina rum,
-  väggar och lampor. Punkter är ``[x, y]`` i meter med origo uppe till vänster.
+* ``{"type": "home", ...}`` vid anslutning och när hemmet har ändrats, till
+  exempel i kartredigeraren: våningarna med sina rum, väggar och lampor.
+  Punkter är ``[x, y]`` i meter med origo uppe till vänster.
 * ``{"type": "state", ...}`` vid anslutning och efter varje ändring.
 
 Livevyn skickar kommandon till låtsaskällan:
@@ -18,11 +19,9 @@ Utan simulering ignoreras de, men läget strömmas ändå.
 
 import asyncio
 import contextlib
-import ipaddress
 import logging
 from collections.abc import Set
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
 
 import anyio
 import anyio.abc
@@ -33,6 +32,7 @@ from homecontrol.clock import Clock
 from homecontrol.controller import Controller, Snapshot
 from homecontrol.home import Home, Point
 from homecontrol.simulation import SimulatedSource
+from homecontrol.trust import trusted
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def create_live_router(
     async def live(websocket: WebSocket) -> None:
         # Utan kontrollerna kunde vilken webbsida som helst som någon i hemmet
         # besöker läsa strömmen och styra simuleringen.
-        if not _trusted(websocket, allowed_hosts):
+        if not trusted(websocket.headers, allowed_hosts):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         await websocket.accept()
@@ -139,10 +139,13 @@ def create_live_router(
         unsubscribe = controller.subscribe(changed.set)
 
         async def send_states() -> None:
-            await websocket.send_json(home_message(controller.home))
+            sent_home: Home | None = None
             while True:
                 await changed.wait()
                 changed.clear()
+                if controller.home is not sent_home:
+                    sent_home = controller.home
+                    await websocket.send_json(home_message(sent_home))
                 await websocket.send_json(state_message(controller.snapshot()))
 
         async def receive_commands(group: anyio.abc.TaskGroup) -> None:
@@ -165,30 +168,6 @@ def create_live_router(
             unsubscribe()
 
     return router
-
-
-def _trusted(websocket: WebSocket, allowed_hosts: Set[str]) -> bool:
-    host = websocket.headers.get("host")
-    if host is None or not _known_host(host, allowed_hosts):
-        # Skyddar mot DNS rebinding: en främmande sida som pekar sitt eget
-        # namn på kärnans adress har ett namn som inte står i listan.
-        return False
-    origin = websocket.headers.get("origin")
-    # Webbläsare skickar alltid Origin; saknas den är det t.ex. ett skript.
-    return origin is None or urlsplit(origin).netloc.lower() == host.lower()
-
-
-def _known_host(host: str, allowed_hosts: Set[str]) -> bool:
-    hostname = urlsplit(f"//{host}").hostname
-    if hostname is None:
-        return False
-    if hostname == "localhost" or hostname in allowed_hosts:
-        return True
-    try:
-        ipaddress.ip_address(hostname)
-    except ValueError:
-        return False
-    return True
 
 
 def _handle(source: SimulatedSource | None, text: str) -> None:

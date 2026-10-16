@@ -60,7 +60,7 @@ def test_migrating_again_changes_nothing(conn: psycopg.Connection) -> None:
     store.migrate(conn)
 
     assert store.load_home(conn) == example_home()
-    assert conn.execute("SELECT version FROM schema_migration").fetchall() == [(1,)]
+    assert conn.execute("SELECT version FROM schema_migration").fetchall() == [(1,), (2,)]
 
 
 def test_file_round_trip_through_the_database(database: str, tmp_path: Path) -> None:
@@ -95,3 +95,43 @@ def test_import_of_a_broken_file_leaves_the_home_alone(database: str, tmp_path: 
 
     with store.connect(database, attempts=1) as conn:
         assert store.load_home(conn) == example_home()
+
+
+def test_plan_image_is_stored_per_floor(conn: psycopg.Connection) -> None:
+    store.save_home(conn, example_home())
+    floor_id = example_home().floors[0].id
+    image = store.StoredImage("image/png", b"\x89PNG\r\n\x1a\nbild")
+
+    store.save_plan_image(conn, floor_id, image)
+
+    assert store.load_plan_image(conn, floor_id) == image
+    assert store.load_plan_image(conn, example_home().floors[1].id) is None
+    store.delete_plan_image(conn, floor_id)
+    assert store.load_plan_image(conn, floor_id) is None
+
+
+def test_saving_a_home_forgets_images_of_removed_floors(conn: psycopg.Connection) -> None:
+    store.save_home(conn, example_home())
+    image = store.StoredImage("image/jpeg", b"\xff\xd8\xffbild")
+    for floor in example_home().floors:
+        store.save_plan_image(conn, floor.id, image)
+
+    store.save_home(conn, one_room_home())
+
+    assert conn.execute("SELECT count(*) FROM plan_image").fetchone() == (0,)
+
+
+def test_database_store_saves_what_the_editor_changes(database: str) -> None:
+    with store.connect(database, attempts=1) as conn:
+        store.migrate(conn)
+    database_store = store.DatabaseStore(database)
+    image = store.StoredImage("image/webp", b"RIFF\0\0\0\0WEBP")
+
+    database_store.save_home(one_room_home())
+    database_store.save_plan_image("plan", image)
+
+    with store.connect(database, attempts=1) as conn:
+        assert store.load_home(conn) == one_room_home()
+    assert database_store.load_plan_image("plan") == image
+    database_store.delete_plan_image("plan")
+    assert database_store.load_plan_image("plan") is None

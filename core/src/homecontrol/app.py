@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from homecontrol import __version__
 from homecontrol.clock import Clock, SystemClock
 from homecontrol.controller import Controller
+from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
 from homecontrol.home import Home
 from homecontrol.homefile import example_home
 from homecontrol.live import create_live_router, run_timer
@@ -28,8 +29,13 @@ def create_app(
     clock: Clock | None = None,
     allowed_hosts: Set[str] = frozenset(),
     home: Home | None = None,
+    home_store: HomeStore | None = None,
 ) -> FastAPI:
-    """`home` är hemmet från databasen. Utan det används exempelhemmet."""
+    """`home` är hemmet från databasen. Utan det används exempelhemmet.
+
+    `home_store` är där kartredigerarens ändringar sparas. Utan den sparas de
+    bara så länge kärnan är igång.
+    """
     clock = clock if clock is not None else SystemClock()
     # Än så länge finns bara Simulering: en låtsasperson och virtuella lampor.
     # Riktiga kopplingar ansluts på samma sätt.
@@ -63,6 +69,11 @@ def create_app(
         return {"status": "ok", "version": __version__}
 
     app.include_router(create_live_router(controller, source, allowed_hosts))
+    app.include_router(
+        create_editor_router(
+            controller, home_store if home_store is not None else MemoryStore(), allowed_hosts
+        )
+    )
 
     # Webbgränssnittet monteras sist så att API-vägarna ovan har företräde.
     if web_dir is not None:
