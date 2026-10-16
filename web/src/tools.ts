@@ -10,6 +10,14 @@ import type { Point } from "./protocol";
 /** Verktygen som placerar ut något med ett klick heter som det de placerar. */
 export type ToolName = "select" | "polygon" | "rectangle" | "scale" | "walls" | ItemKind;
 
+/**
+ * Om kartan själv tar hand om klicken med verktyget (väljer, drar eller byter
+ * väggmaterial), så att redigeraren inte ska rita om mitt i klicket.
+ */
+export function mapHandlesClicks(tool: ToolName): boolean {
+  return tool === "select" || tool === "walls";
+}
+
 /** Om verktyget placerar ut ett rumskort, en router eller en lampa. */
 export function isPlacingTool(tool: ToolName): tool is ItemKind {
   return tool === "node" || tool === "router" || tool === "lamp";

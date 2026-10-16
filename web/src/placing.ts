@@ -6,7 +6,7 @@
  * dokument. En ändring som pekar på något som inte längre finns (någon
  * hann ta bort det) lämnar dokumentet som det var.
  */
-import { distance, toPoint, toXY, uniqueId } from "./editing";
+import { distance, toPoint, toXY, uniqueId, updateFloors } from "./editing";
 import type {
   FloorModel,
   HomeDocument,
@@ -45,7 +45,8 @@ export type ItemKind = "node" | "router" | "lamp";
 const DEFAULT_NODE_HEIGHT = 2;
 const DEFAULT_ROUTER_HEIGHT = 1;
 
-const ITEM_NAMES: Record<ItemKind, string> = {
+/** Vad sakerna heter i gränssnittet och i påhittade namn ("Lampa 1"). */
+export const ITEM_LABELS: Record<ItemKind, string> = {
   node: "Rumskort",
   router: "Router",
   lamp: "Lampa",
@@ -66,7 +67,7 @@ export function nextWallKind(kind: WallKind): WallKind {
 }
 
 /** Om sträckorna a–b och c–d ligger på samma linje och delar en bit (som i home.py). */
-export function overlapping(a: Point, b: Point, c: Point, d: Point, tolerance = 1e-6): boolean {
+export function sharesStretch(a: Point, b: Point, c: Point, d: Point, tolerance = 1e-6): boolean {
   const [dx, dy] = [b.x - a.x, b.y - a.y];
   const length = Math.hypot(dx, dy);
   if (length < tolerance) {
@@ -126,7 +127,7 @@ export function cycleWall(document: HomeDocument, roomId: string, index: number)
       if (
         !shared.includes(other) &&
         other.roomId !== wall.roomId &&
-        overlapping(wall.start, wall.end, other.start, other.end)
+        sharesStretch(wall.start, wall.end, other.start, other.end)
       ) {
         shared.push(other);
       }
@@ -183,7 +184,7 @@ export function settingsProblem(settings: RoomSettings): string | null {
     return "Fyll i alla tre värdena.";
   }
   if (dark < 0 || bright > MAX_LUX) {
-    return `Ljusgränserna ska vara mellan 0 och ${MAX_LUX} lux.`;
+    return `Ljusgränserna ska vara mellan 0 och ${MAX_LUX.toLocaleString("sv-SE")} lux.`;
   }
   if (dark >= bright) {
     return "Mörkergränsen måste vara lägre än ljusgränsen.";
@@ -236,10 +237,10 @@ function nextName(document: HomeDocument, kind: ItemKind): string {
     ]),
   );
   let n = 1;
-  while (names.has(`${ITEM_NAMES[kind]} ${n}`)) {
+  while (names.has(`${ITEM_LABELS[kind]} ${n}`)) {
     n++;
   }
-  return `${ITEM_NAMES[kind]} ${n}`;
+  return `${ITEM_LABELS[kind]} ${n}`;
 }
 
 /**
@@ -395,13 +396,6 @@ export function bearing(from: Point, to: Point): number {
 }
 
 // --- Hjälpfunktioner ---
-
-function updateFloors(
-  document: HomeDocument,
-  update: (floor: FloorModel) => FloorModel,
-): HomeDocument {
-  return { ...document, home: { ...document.home, floors: document.home.floors.map(update) } };
-}
 
 function updateFloor(
   document: HomeDocument,

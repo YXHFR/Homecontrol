@@ -100,7 +100,19 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    **Rum, rektangel**: dra från ett hörn till hörnet snett emot. Ett klick
    nära ett hörn som redan finns hamnar exakt på det, så att rummen möts.
 4. **Välj och flytta**: klicka på ett rum för att byta namn på det eller ta
-   bort det, och dra det för att flytta det.
+   bort det, och dra det för att flytta det. Här ställer du också in rummets
+   ljus: under vilken ljusnivå lamporna tänds, över vilken nivå dagsljuset
+   räcker och hur många minuter rummet ska ha varit tomt innan de släcks.
+5. **Väggar och dörrar**: klicka på en vägg för att byta material, ett steg
+   per klick: gips → betong → trä → glas → dörröppning och sedan gips igen.
+   En vägg som två rum delar byts i båda.
+6. **Placera** rumskort, routrar och lampor genom att välja verktyget och
+   klicka på kartan. Rumskort och lampor placeras inne i ett rum och hör till
+   det rummet. Den ljusa tårtbiten framför ett rumskort är vad radarn ser
+   (6 meter, 60° åt vardera hållet). Välj kortet med **Välj och flytta** och
+   vrid det med ringen runt kortet eller med knapparna, och ange höjden och om
+   det sitter spegelvänt. En lampa som dras in i ett annat rum styrs sedan av
+   det rummet; du kan också byta rum i listan.
 
 Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
 Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
@@ -110,8 +122,7 @@ Allt sparas direkt, och livevyn visar ändringen utan omstart. Har du
 redigeraren öppen i två fönster och ändrar i båda, visar det ena fönstret
 det andras ändring i stället för att skriva över den. Under
 **Hemmet** står hur många rum, zoner, rumskort, routrar och lampor hemmet
-har. Väggarnas material, rumskort, routrar, lampor och zoner ritas i kommande
-versioner; tills dess får nya rum gipsväggar.
+har. Zoner ritas i en kommande version.
 
 ### Hemmet: spara, flytta och läsa in
 
@@ -149,9 +160,9 @@ Så läser du filen:
   `gips`, `betong`, `trä`, `glas` eller `dörröppning`. Två rum som delar en
   vägg måste ange samma sort. Byter väggen sort på vägen läggs ett extra
   hörn där.
-- `settings` per rum: under `dark_below_lux` räknas rummet som mörkt, och
-  lamporna släcks när rummet har varit tomt i `off_after_empty_seconds`
-  sekunder.
+- `settings` per rum: under `dark_below_lux` räknas rummet som mörkt, över
+  `bright_above_lux` som ljust av dagsljus, och lamporna släcks när rummet har
+  varit tomt i `off_after_empty_seconds` sekunder.
 - `zones` är delar av ett rum: `vanlig`, `stillhet` (soffa, säng),
   `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr).
 - `nodes` är rumskorten: var de sitter (`position`), monteringshöjd i

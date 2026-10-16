@@ -28,12 +28,14 @@ import {
   toXY,
 } from "./editing";
 import { createKonvaEditorView, type EditorViewFactory } from "./editorView";
+import { button, element } from "./dom";
 import { coreApi, CoreError, type HomeApi } from "./homeApi";
 import type { FloorModel, HomeDocument } from "./homefile";
 import { itemProperties, type PanelActions, roomSettingsForm } from "./itemPanel";
 import {
   cycleWall,
   findItem,
+  ITEM_LABELS,
   type ItemKind,
   moveItem,
   normalizeRotation,
@@ -41,7 +43,14 @@ import {
   updateItem,
 } from "./placing";
 import type { Point } from "./protocol";
-import { Drawing, INSTRUCTIONS, isPlacingTool, type Outcome, type ToolName } from "./tools";
+import {
+  Drawing,
+  INSTRUCTIONS,
+  isPlacingTool,
+  mapHandlesClicks,
+  type Outcome,
+  type ToolName,
+} from "./tools";
 
 /** En bild som är klar att skickas till kärnan, och hur många bildpunkter bred den är. */
 export interface PreparedImage {
@@ -104,26 +113,10 @@ const TOOL_LABELS: Record<ToolName, string> = {
   rectangle: "Rum, rektangel",
   scale: "Skala bilden",
   walls: "Väggar och dörrar",
-  node: "Rumskort (ESP32)",
-  router: "Router",
-  lamp: "Lampa",
+  node: `${ITEM_LABELS.node} (ESP32)`,
+  router: ITEM_LABELS.router,
+  lamp: ITEM_LABELS.lamp,
 };
-
-function element<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = Object.assign(document.createElement(tag), props);
-  node.append(...children);
-  return node;
-}
-
-function button(label: string, onClick: () => void, className = ""): HTMLButtonElement {
-  const node = element("button", { type: "button", className }, label);
-  node.addEventListener("click", onClick);
-  return node;
-}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -223,7 +216,7 @@ export function mountEditor(
     "aside",
     { className: "properties" },
     element("section", {}, element("h2", {}, "Instruktion"), instruction, draftActions),
-    element("section", {}, element("h2", {}, "Valt"), selection),
+    element("section", {}, element("h2", {}, "Valt på kartan"), selection),
     element("section", {}, element("h2", {}, "Hemmet"), summary),
   );
 
@@ -598,6 +591,8 @@ export function mountEditor(
       return;
     }
     selectedItemId = placed.id;
+    // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
+    // gör att den nya saken förblir vald.
     const given = { id: placed.id, name: placed.name };
     commit((document) => placeItem(document, kind, floor.id, point, given)?.document ?? document);
   };
@@ -686,7 +681,7 @@ export function mountEditor(
       // Med Välj och väggverktyget sköter kartan klicket själv. Att rita om nu
       // skulle byta ut det som är under pekaren mitt i klicket, och då kommer
       // klicket aldrig fram.
-      if (drawing.tool === "select" || drawing.tool === "walls") {
+      if (mapHandlesClicks(drawing.tool)) {
         return;
       }
       if (drawing.tool === "scale" && currentFloor()?.plan_image == null) {

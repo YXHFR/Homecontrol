@@ -4,11 +4,19 @@
  * (ljusgränser och fördröjning). Panelen ändrar hemmet genom `commit`,
  * precis som resten av kartredigeraren.
  */
-import { element } from "./dom";
-import type { HomeDocument, LampModel, NodeModel, RoomModel, RoomSettings } from "./homefile";
+import { button, element } from "./dom";
+import type {
+  HomeDocument,
+  LampModel,
+  NodeModel,
+  RoomModel,
+  RoomSettings,
+  SignalSourceModel,
+} from "./homefile";
 import {
   deleteItem,
   type FoundItem,
+  ITEM_LABELS,
   MAX_HEIGHT,
   moveItemToRoom,
   normalizeRotation,
@@ -29,18 +37,16 @@ export interface PanelActions {
   deselect(): void;
 }
 
-const KIND_LABELS = { node: "Rumskort", router: "Router", lamp: "Lampa" } as const;
+const NAME_MISSING = {
+  node: "Rumskortet måste ha ett namn.",
+  router: "Routern måste ha ett namn.",
+  lamp: "Lampan måste ha ett namn.",
+} as const;
 const DELETE_LABELS = {
   node: "Ta bort rumskortet",
   router: "Ta bort routern",
   lamp: "Ta bort lampan",
 } as const;
-
-function button(label: string, onClick: () => void, className = ""): HTMLButtonElement {
-  const node = element("button", { type: "button", className }, label);
-  node.addEventListener("click", onClick);
-  return node;
-}
 
 /** Ett textfält eller sifferfält som sparar när det ändras (eller Enter trycks). */
 function field(
@@ -70,12 +76,12 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
     actions.commit((document) => updateItem(document, id, changes));
 
   const parts: HTMLElement[] = [
-    element("p", { className: "muted" }, KIND_LABELS[kind]),
+    element("p", { className: "muted" }, ITEM_LABELS[kind]),
     field("Namn", { type: "text", value: item.name, maxLength: 100, name: "name" }, (input) => {
       const next = input.value.trim();
       if (next === "") {
         input.value = item.name;
-        actions.showMessage("Det måste ha ett namn.");
+        actions.showMessage(NAME_MISSING[kind]);
       } else if (next !== item.name) {
         update({ name: next });
       }
@@ -83,7 +89,7 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
   ];
 
   if (kind === "node" || kind === "router") {
-    const height = (item as NodeModel).height;
+    const height = (item as NodeModel | SignalSourceModel).height;
     parts.push(
       field(
         "Höjd över golvet (m)",
@@ -147,7 +153,7 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
       element(
         "p",
         { className: "muted" },
-        "Kryssa i om prickarna hamnar på fel sida, till exempel om kortet sitter upp och ned.",
+        "Kryssa i om personerna i livevyn hamnar på fel sida om rumskortet, till exempel om kortet sitter upp och ned.",
       ),
     );
   }
@@ -200,7 +206,7 @@ export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLEl
     }),
     minutes: element("input", {
       type: "number",
-      min: "0.1",
+      min: "0.5",
       step: "0.5",
       value: format(current.off_after_empty_seconds / 60),
       name: "off_after_empty_minutes",
@@ -234,5 +240,6 @@ export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLEl
     element("label", {}, "Tänd när det är mörkare än (lux) ", inputs.dark),
     element("label", {}, "Släck när dagsljuset är över (lux) ", inputs.bright),
     element("label", {}, "Släck när rummet varit tomt i (minuter) ", inputs.minutes),
+    element("p", { className: "muted" }, "Dagsljusgränsen används när dagsljusregeln kommer."),
   );
 }

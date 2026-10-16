@@ -74,7 +74,7 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    app.include_router(create_live_router(controller, simulation, allowed_hosts, _all_lamps))
+    app.include_router(create_live_router(controller, simulation, allowed_hosts, _virtual_lamps))
     app.include_router(
         create_editor_router(
             controller,
@@ -94,7 +94,7 @@ def create_app(
     return app
 
 
-def _all_lamps(home: Home) -> frozenset[str]:
+def _virtual_lamps(home: Home) -> frozenset[str]:
     """Alla lampor är virtuella tills en riktig lamputgång styr dem.
 
     Frågan ställs om varje nytt hem, så att en lampa som läggs till i
