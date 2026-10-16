@@ -532,7 +532,7 @@ class ZigbeeOutput:
             except (ConnectionError, OSError) as error:
                 logger.warning(
                     "Ingen kontakt med MQTT-brokern (%s). Försöker igen. Kör "
-                    "'docker compose ps' och kontrollera MQTT_USER och MQTT_PASSWORD i .env.",
+                    "'docker compose ps' och kontrollera MQTT_CORE_PASSWORD i .env.",
                     error,
                 )
             except Exception:

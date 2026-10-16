@@ -1,0 +1,12 @@
+# Vad varje MQTT-användare får läsa och skriva. Allt annat är förbjudet.
+# Användarna och lösenorden skapas av entrypoint.sh från .env.
+
+# Zigbee2MQTT: sina egna ämnen.
+user zigbee2mqtt
+topic readwrite zigbee2mqtt/#
+
+# Kärnan: styr lamporna och läser deras läge genom Zigbee2MQTT. Den får
+# också läsa brokerns drifttid, som hälsokontrollen i compose.yaml använder.
+user homecontrol
+topic readwrite zigbee2mqtt/#
+topic read $SYS/broker/uptime

@@ -1,15 +1,19 @@
 #!/bin/sh
-# Skapar Mosquittos lösenordsfil från MQTT_USER och MQTT_PASSWORD och
-# startar sedan brokern. Lösenordet hamnar bara hashat på disk.
+# Skapar Mosquittos lösenordsfil och behörighetsfil och startar sedan
+# brokern. Kärnan och Zigbee2MQTT har var sin användare (se acl).
+# Lösenorden hamnar bara hashade på disk.
 set -eu
 
-: "${MQTT_USER:?MQTT_USER saknas, se .env.example}"
-: "${MQTT_PASSWORD:?MQTT_PASSWORD saknas, se .env.example}"
+: "${MQTT_CORE_PASSWORD:?MQTT_CORE_PASSWORD saknas, se .env.example}"
+: "${MQTT_ZIGBEE2MQTT_PASSWORD:?MQTT_ZIGBEE2MQTT_PASSWORD saknas, se .env.example}"
 
 passwd_file=/mosquitto/data/passwd
+acl_file=/mosquitto/data/acl
 umask 077
-printf '%s:%s\n' "$MQTT_USER" "$MQTT_PASSWORD" > "$passwd_file"
+printf 'homecontrol:%s\nzigbee2mqtt:%s\n' \
+    "$MQTT_CORE_PASSWORD" "$MQTT_ZIGBEE2MQTT_PASSWORD" > "$passwd_file"
 mosquitto_passwd -U "$passwd_file"
-chown mosquitto:mosquitto "$passwd_file"
+cp /homecontrol/acl "$acl_file"
+chown mosquitto:mosquitto "$passwd_file" "$acl_file"
 
 exec /docker-entrypoint.sh "$@"

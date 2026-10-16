@@ -5,9 +5,16 @@
     homecontrol importera FIL        ersätter hemmet med det i FIL
                                      (- läser det som skickas in med <)
     homecontrol importera --exempelhem
+    homecontrol förbered-databasen   skapar och uppdaterar tabellerna och
+                                     kärnans databasroll, och avslutas
 
 Export och import kräver databasen (HOMECONTROL_DATABASE). Efter en import
 startas kärnan om för att läsa in det nya hemmet.
+
+`förbered-databasen` körs av Docker Compose före kärnan och ansluter som
+databasens ägare. Kärnans roll får lösenordet i HOMECONTROL_CORE_DATABASE_PASSWORD.
+Kärnan själv (med HOMECONTROL_PREPARE_DATABASE=false) kontrollerar då bara
+att tabellerna är aktuella.
 """
 
 import argparse
@@ -17,6 +24,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
+import psycopg
 import uvicorn
 
 from homecontrol import history, store
@@ -41,6 +49,10 @@ def main(argv: list[str] | None = None) -> None:
     source = import_.add_mutually_exclusive_group(required=True)
     source.add_argument("fil", nargs="?", help="filen att läsa (- läser det som skickas in med <)")
     source.add_argument("--exempelhem", action="store_true", help="läs in exempelhemmet")
+    commands.add_parser(
+        "förbered-databasen",
+        help="skapa och uppdatera tabellerna och kärnans databasroll (som databasens ägare)",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -53,10 +65,18 @@ def main(argv: list[str] | None = None) -> None:
         return
     if settings.database is None:
         sys.exit("HOMECONTROL_DATABASE är inte satt, så det finns inget sparat hem.")
-    if args.command == "exportera":
-        export_home(settings.database, args.fil)
+    if args.command == "förbered-databasen":
+        prepare_database(
+            settings.database, settings, os.environ.get("HOMECONTROL_CORE_DATABASE_PASSWORD", "")
+        )
+    elif args.command == "exportera":
+        export_home(settings.database, args.fil, prepare=settings.prepare_database)
     else:
-        import_home(settings.database, None if args.exempelhem else args.fil)
+        import_home(
+            settings.database,
+            None if args.exempelhem else args.fil,
+            prepare=settings.prepare_database,
+        )
 
 
 def serve(settings: Settings) -> None:
@@ -87,9 +107,20 @@ def serve(settings: Settings) -> None:
     )
 
 
-def export_home(database: str, path: str) -> None:
+def prepare_database(database: str, settings: Settings, core_password: str) -> None:
+    """Skapar och uppdaterar tabellerna, ställer in historiken och ger kärnans roll åtkomst."""
+    if not core_password:
+        sys.exit("HOMECONTROL_CORE_DATABASE_PASSWORD är inte satt, se .env.example.")
     with store.connect(database) as conn:
         store.migrate(conn)
+        _configure_history(conn, settings)
+        store.grant_core_role(conn, core_password)
+    logger.info("Databasen är klar för kärnan (rollen %s)", store.CORE_ROLE)
+
+
+def export_home(database: str, path: str, *, prepare: bool = True) -> None:
+    with store.connect(database) as conn:
+        _migrate_or_check(conn, prepare)
         home = store.load_home(conn)
     if home is None:
         sys.exit("Det finns inget sparat hem än. Starta kärnan en gång eller importera ett.")
@@ -104,7 +135,7 @@ def export_home(database: str, path: str) -> None:
     logger.info("Skrev hemmet till %s (%s)", path, _summary(home))
 
 
-def import_home(database: str, path: str | None) -> None:
+def import_home(database: str, path: str | None, *, prepare: bool = True) -> None:
     """Läser och kontrollerar hela filen innan något i databasen ändras."""
     try:
         if path is None:
@@ -114,7 +145,7 @@ def import_home(database: str, path: str | None) -> None:
     except (HomeFileError, OSError) as error:
         sys.exit(f"Kunde inte läsa hemmet: {error}")
     with store.connect(database) as conn:
-        store.migrate(conn)
+        _migrate_or_check(conn, prepare)
         store.save_home(conn, home)
     logger.info(
         "Importerade hemmet (%s). Starta om kärnan för att använda det: "
@@ -128,7 +159,7 @@ def load_or_seed_home(settings: Settings) -> Home:
         logger.warning("Ingen databas är inställd: visar exempelhemmet och sparar inget")
         return example_home()
     with store.connect(settings.database) as conn:
-        store.migrate(conn)
+        _migrate_or_check(conn, settings.prepare_database)
         try:
             home = store.load_home(conn)
         except HomeFileError as error:
@@ -152,9 +183,15 @@ def prepare_history(settings: Settings) -> history.History | None:
     """Ställer in hur länge historiken sparas. Utan databas sparas ingen historik."""
     if settings.database is None:
         return None
-    with store.connect(settings.database) as conn:
-        store.migrate(conn)
-        history.configure(conn, settings.history_full_resolution, settings.history_keep)
+    if settings.prepare_database:
+        with store.connect(settings.database) as conn:
+            store.migrate(conn)
+            _configure_history(conn, settings)
+    return history.History(settings.database)
+
+
+def _configure_history(conn: psycopg.Connection, settings: Settings) -> None:
+    history.configure(conn, settings.history_full_resolution, settings.history_keep)
     logger.info(
         "Historiken sparas med full upplösning i %g timmar, sedan nedsamplad %s",
         settings.history_full_resolution / timedelta(hours=1),
@@ -162,7 +199,17 @@ def prepare_history(settings: Settings) -> history.History | None:
         if settings.history_keep is None
         else f"i {settings.history_keep / timedelta(days=1):g} dagar",
     )
-    return history.History(settings.database)
+
+
+def _migrate_or_check(conn: psycopg.Connection, prepare: bool) -> None:
+    """Uppdaterar tabellerna, eller kontrollerar bara att de är aktuella om kärnan inte får."""
+    if prepare:
+        store.migrate(conn)
+        return
+    try:
+        store.check_schema(conn)
+    except store.SchemaOutdatedError as error:
+        sys.exit(str(error))
 
 
 def _summary(home: Home) -> str:
