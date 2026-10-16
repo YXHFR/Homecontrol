@@ -4,6 +4,7 @@ import pytest
 
 from homecontrol.clock import SystemClock
 from homecontrol.connectors import (
+    LampCommand,
     LightLevelObserved,
     MotionObserved,
     Observation,
@@ -12,7 +13,13 @@ from homecontrol.connectors import (
     SourceLost,
 )
 from homecontrol.home import Point, Target
-from homecontrol.simulation import MAX_PERSONS, SimulatedSource, Simulation, TooManyPersons
+from homecontrol.simulation import (
+    MAX_PERSONS,
+    SimulatedLampOutput,
+    SimulatedSource,
+    Simulation,
+    TooManyPersons,
+)
 from homes import FLOOR, one_room_home, two_floor_home
 
 HOME = one_room_home()
@@ -235,21 +242,38 @@ def test_real_cards_are_not_simulated() -> None:
 
 def test_time_cannot_go_faster_while_real_cards_are_used() -> None:
     clock = SystemClock()
-    real = False
+    with_real_card = HOME.model_copy()
     simulation = Simulation(
         SimulatedSource(HOME),
         lambda _: None,
         clock,
         floor_ids=[FLOOR],
-        real_hardware=lambda _: real,
+        real_hardware=lambda home: home is with_real_card,
     )
     simulation.set_speed(60)
     assert clock.speed == 60
 
-    real = True
-    simulation.use_home(HOME)
+    # Det första riktiga kortet placeras: simuleringen stängs av, och tiden går i vanlig takt.
+    simulation.use_home(with_real_card)
     assert clock.speed == 1
+    assert not simulation.enabled
     assert simulation.view().speed_locked
 
+    # Även när någon slår på simuleringen igen går tiden i vanlig takt.
+    simulation.set_enabled(True)
     simulation.set_speed(10)
     assert clock.speed == 1
+    simulation.use_home(with_real_card)
+    assert simulation.enabled
+
+
+def test_virtual_lamps_never_report_or_control_real_lamps() -> None:
+    seen: list[Observation] = []
+    lamps = SimulatedLampOutput(real_lamps=lambda _: frozenset({"taklampa"}))
+
+    lamps.report_new_lamps(HOME, seen.append)
+    lamps.send(LampCommand("taklampa", on=True, reason="test"))
+
+    assert seen == []
+    assert lamps.states == {}
+    assert not lamps.history

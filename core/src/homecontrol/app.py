@@ -15,20 +15,22 @@ from fastapi.staticfiles import StaticFiles
 from homecontrol import __version__
 from homecontrol.cards import create_cards_router
 from homecontrol.clock import SystemClock
+from homecontrol.connectors import defer_in_loop
 from homecontrol.controller import Controller
 from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
 from homecontrol.esphome import (
     AioesphomeNetwork,
     EsphomeSource,
     Network,
-    defer_in_loop,
     placed_cards,
 )
 from homecontrol.history import History
 from homecontrol.home import Home
 from homecontrol.homefile import example_home
+from homecontrol.lampdevices import create_lamp_devices_router
 from homecontrol.live import create_live_router, run_timer
 from homecontrol.simulation import SimulatedLampOutput, SimulatedSource, Simulation
+from homecontrol.zigbee import Connect, ZigbeeOutput, zigbee_lamps
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ def create_app(
     history: History | None = None,
     esphome_secret: str | None = None,
     card_network: Network | None = None,
+    mqtt: Connect | None = None,
 ) -> FastAPI:
     """`home` är hemmet från databasen. Utan det används exempelhemmet.
 
@@ -53,12 +56,16 @@ def create_app(
 
     Med `esphome_secret` ansluts rumskorten som är placerade på kartan (se
     esphome.py), via `card_network` eller annars det riktiga nätverket.
+
+    Med `mqtt` styrs de Zigbee-lampor som är placerade på kartan genom
+    Zigbee2MQTT (se zigbee.py). Övriga lampor är virtuella.
     """
     clock = clock if clock is not None else SystemClock()
     home = home if home is not None else example_home()
-    # Lamporna är än så länge virtuella. Riktiga lamputgångar läggs till här.
-    lamps = SimulatedLampOutput()
-    controller = Controller(home, clock, [lamps])
+    zigbee = None if mqtt is None else ZigbeeOutput(home, defer=defer_in_loop)
+    real_lamps = zigbee_lamps if zigbee is not None else _nothing_real
+    lamps = SimulatedLampOutput(real_lamps)
+    controller = Controller(home, clock, [lamps] if zigbee is None else [lamps, zigbee])
     lamps.report_new_lamps(home, controller.observe)
     cards = (
         None
@@ -71,19 +78,23 @@ def create_app(
         )
     )
     # Utan kopplingen finns inga riktiga kort, och alla noder simuleras.
-    real_nodes = placed_cards if cards is not None else _no_real_nodes
-    # Simuleringsläget börjar påslaget bara när inga riktiga kort kan anslutas,
-    # så att det finns något att se. Tidsfarten gäller hela kärnan och spärras
-    # därför till 1× så länge hemmet har riktiga kort (se Simulation).
-    # Riktiga lampor ska spärra den på samma sätt när de kopplas in.
+    real_nodes = placed_cards if cards is not None else _nothing_real
+    # Simuleringsläget börjar påslaget bara när hemmet inte har några riktiga
+    # kort eller lampor, så att det finns något att se. Tidsfarten gäller hela
+    # kärnan och spärras därför till 1× så länge hemmet har riktiga kort eller
+    # lampor (se Simulation).
     source = SimulatedSource(home, real_nodes=real_nodes)
+
+    def real_hardware(changed: Home) -> bool:
+        return bool(real_nodes(changed) or real_lamps(changed))
+
     simulation = Simulation(
         source,
         controller.observe,
         clock,
         floor_ids=(floor.id for floor in home.floors),
-        enabled=cards is None,
-        real_hardware=lambda changed: bool(real_nodes(changed)),
+        enabled=not real_hardware(home),
+        real_hardware=real_hardware,
     )
     if history is not None:
         # Låtsaspersonerna ska inte hamna i historiken bland de riktiga spåren.
@@ -96,6 +107,8 @@ def create_app(
         lamps.report_new_lamps(changed, controller.observe)
         if cards is not None:
             cards.use_home(changed)
+        if zigbee is not None:
+            zigbee.use_home(changed)
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -104,6 +117,8 @@ def create_app(
         tasks = [asyncio.create_task(run_timer(controller, clock))]
         if cards is not None:
             tasks.append(asyncio.create_task(cards.run(controller.observe)))
+        if zigbee is not None and mqtt is not None:
+            tasks.append(asyncio.create_task(zigbee.run(controller.observe, mqtt)))
         try:
             yield
         finally:
@@ -125,15 +140,22 @@ def create_app(
     app.state.controller = controller
     app.state.simulation = simulation
     app.state.cards = cards
+    app.state.zigbee = zigbee
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
+    def virtual_lamps(home: Home) -> frozenset[str]:
+        # Frågan ställs om varje nytt hem, så att en lampa som läggs till i
+        # kartredigeraren visas rätt direkt.
+        return frozenset(lamp.id for lamp in home.lamps) - real_lamps(home)
+
     app.include_router(
-        create_live_router(controller, simulation, allowed_hosts, _virtual_lamps, cards)
+        create_live_router(controller, simulation, allowed_hosts, virtual_lamps, cards)
     )
     app.include_router(create_cards_router(cards, allowed_hosts))
+    app.include_router(create_lamp_devices_router(zigbee, allowed_hosts))
     app.include_router(
         create_editor_router(
             controller,
@@ -153,14 +175,5 @@ def create_app(
     return app
 
 
-def _no_real_nodes(_: Home) -> frozenset[str]:
+def _nothing_real(_: Home) -> frozenset[str]:
     return frozenset()
-
-
-def _virtual_lamps(home: Home) -> frozenset[str]:
-    """Alla lampor är virtuella tills en riktig lamputgång styr dem.
-
-    Frågan ställs om varje nytt hem, så att en lampa som läggs till i
-    kartredigeraren blir virtuell direkt.
-    """
-    return frozenset(lamp.id for lamp in home.lamps)

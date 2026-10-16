@@ -243,3 +243,43 @@ def test_events_are_kept_with_their_clock_time_and_only_the_latest_ones() -> Non
     assert len(events) == MAX_EVENTS
     assert {event.at for event in events} == {1_700_000_000}
     assert events[-1].text.startswith("Taklampa tändes för hand")
+
+
+def test_a_lamp_changed_from_outside_counts_as_manual_control() -> None:
+    controller, clock, lamps = make()
+    controller.observe(LampStateReported("taklampa", on=False))
+    clock.advance_to(10)
+
+    controller.observe(LampStateReported("taklampa", on=True, brightness=40, external=True))
+
+    snapshot = controller.snapshot()
+    assert snapshot.rooms[0].manual
+    assert snapshot.lamps[0].on is True
+    assert snapshot.lamps[0].brightness == 40
+    assert snapshot.events[-1].text == (
+        "Taklampa ställdes på 40 % med fjärrkontroll eller app. Automatiken i Vardagsrum "
+        "pausar tills rummet har varit tomt i 3 minuter."
+    )
+    assert not lamps.history  # lampan är redan ändrad; kärnan skickar inget eget kommando
+
+
+def test_a_report_that_is_not_from_outside_does_not_pause_the_automation() -> None:
+    controller, _, _ = make()
+
+    controller.observe(LampStateReported("taklampa", on=True))
+
+    assert not controller.snapshot().rooms[0].manual
+
+
+def test_a_lamp_that_does_not_respond_is_shown_as_not_responding() -> None:
+    controller, _, _ = make()
+    controller.observe(LampStateReported("taklampa", on=True))
+
+    controller.observe(LampStateReported("taklampa", on=None))
+
+    [lamp] = controller.snapshot().lamps
+    assert lamp.on is None
+    assert not lamp.responding
+
+    controller.observe(LampStateReported("taklampa", on=False))
+    assert controller.snapshot().lamps[0].responding

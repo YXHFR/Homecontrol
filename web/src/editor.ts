@@ -44,7 +44,7 @@ import {
   placeItem,
   updateItem,
 } from "./placing";
-import type { Card, Point, ZoneKind } from "./protocol";
+import type { Card, FoundLamp, Point, ZoneKind } from "./protocol";
 import {
   Drawing,
   INSTRUCTIONS,
@@ -71,8 +71,8 @@ export interface EditorDependencies {
 
 /** Större bilder förminskas; mer än så här syns ändå inte på en skärm. */
 const MAX_IMAGE_SIDE = 4000;
-/** Så ofta redigeraren frågar kärnan om nya rumskort. */
-const CARD_REFRESH_MS = 10_000;
+/** Så ofta redigeraren frågar kärnan om nya rumskort och lampor. */
+const FOUND_REFRESH_MS = 10_000;
 /** Så nära (i skärmpunkter) ett klick måste vara ett hörn för att träffa det. */
 const SNAP_PIXELS = 12;
 
@@ -177,6 +177,9 @@ export function mountEditor(
   /** Nya kort som kärnan har hittat, och kortet som placeras med nästa klick. */
   let newCards: Card[] = [];
   let cardToPlace: Card | null = null;
+  /** Riktiga lampor som kärnan har hittat men som inte är placerade, och den som placeras nu. */
+  let newLamps: FoundLamp[] = [];
+  let lampToPlace: FoundLamp | null = null;
   /** Ändringarna skickas en i taget. */
   let queue: Promise<void> = Promise.resolve();
   let savedCount = 0;
@@ -200,6 +203,8 @@ export function mountEditor(
   /** Riktiga rumskort som kärnan har hittat men som inte är placerade än. */
   const newCardsList = element("div", { className: "new-cards", hidden: true });
   newCardsList.setAttribute("aria-label", "Nya rumskort");
+  const newLampsList = element("div", { className: "new-lamps", hidden: true });
+  newLampsList.setAttribute("aria-label", "Nya lampor");
   const toolbox = element(
     "aside",
     { className: "toolbox" },
@@ -219,6 +224,7 @@ export function mountEditor(
     newCardsList,
     toolButton("router"),
     toolButton("lamp"),
+    newLampsList,
     element("h2", {}, "Kartan"),
     element(
       "div",
@@ -290,6 +296,7 @@ export function mountEditor(
     removeImageButton.disabled = !hasImage;
     uploadButton.disabled = imageChanging;
     renderNewCards();
+    renderNewLamps();
   };
 
   const renderNewCards = () => {
@@ -314,6 +321,39 @@ export function mountEditor(
     );
   };
 
+  const renderNewLamps = () => {
+    const waiting = newLamps.filter((lamp) => shown === null || findItem(shown, lamp.id) === null);
+    newLampsList.hidden = waiting.length === 0;
+    newLampsList.replaceChildren(
+      element("p", { className: "muted" }, "Nya lampor som kärnan har hittat:"),
+      ...waiting.map((lamp) => {
+        const node = button(
+          `Placera ${lamp.name}`,
+          () => {
+            chooseTool("lamp");
+            lampToPlace = lamp;
+            render();
+          },
+          "tool",
+        );
+        node.dataset.lamp = lamp.id;
+        node.setAttribute("aria-pressed", String(lampToPlace?.id === lamp.id));
+        return node;
+      }),
+    );
+  };
+
+  /** Läser om vilka lampor kärnan har hittat. Ett fel här stoppar inte redigeraren. */
+  const refreshLamps = () => {
+    deps.api.lamps().then(
+      (lamps) => {
+        newLamps = lamps.filter((lamp) => !lamp.placed);
+        renderTools();
+      },
+      () => undefined,
+    );
+  };
+
   /** Läser om vilka kort kärnan har hittat. Ett fel här stoppar inte redigeraren. */
   const refreshCards = () => {
     deps.api.cards().then(
@@ -326,6 +366,12 @@ export function mountEditor(
   };
 
   const instructionText = (): string => {
+    if (lampToPlace !== null) {
+      return (
+        `Klicka där ${lampToPlace.name} sitter, inne i ett rum. Kärnan börjar styra lampan ` +
+        "när den är placerad."
+      );
+    }
     if (cardToPlace !== null) {
       return (
         `Klicka där ${cardToPlace.name} sitter, inne i ett rum. Kärnan börjar använda kortet ` +
@@ -621,6 +667,7 @@ export function mountEditor(
     drawing.setTool(tool);
     scalePoints = null;
     cardToPlace = null;
+    lampToPlace = null;
     if (tool !== "select") {
       selection = null;
     }
@@ -693,29 +740,42 @@ export function mountEditor(
     render();
   }
 
+  /** Det riktiga kortet eller den riktiga lampan som placeras med nästa klick, om någon. */
+  const foundToPlace = (kind: ItemKind): Card | FoundLamp | undefined => {
+    if (kind === "node") {
+      return cardToPlace ?? undefined;
+    }
+    return kind === "lamp" ? (lampToPlace ?? undefined) : undefined;
+  };
+
   /**
    * Placerar ett rumskort, en router eller en lampa och väljer den. Ett nytt
-   * riktigt kort får kortets namn som id; då börjar kärnan använda det.
+   * riktigt kort får kortets namn som id, och en ny riktig lampa lampans id
+   * och profil; då börjar kärnan använda dem.
    */
   const place = (kind: ItemKind, point: Point) => {
     const floor = currentFloor();
-    const card = kind === "node" ? (cardToPlace ?? undefined) : undefined;
+    const found = foundToPlace(kind);
     const placed =
-      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point, card);
+      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point, found);
     if (placed === null || floor === null) {
       showMessage("Klicka inne i ett rum. Rumskort och lampor hör till rummet de sitter i.");
       render();
       return;
     }
     selection = { kind: "item", id: placed.id };
-    if (card !== undefined) {
+    if (found !== undefined) {
       cardToPlace = null;
-      newCards = newCards.filter((other) => other.id !== card.id);
+      lampToPlace = null;
+      newCards = newCards.filter((other) => other.id !== found.id);
+      newLamps = newLamps.filter((other) => other.id !== found.id);
       drawing.setTool("select");
     }
     // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
     // gör att den nya saken förblir vald.
-    const given = { id: placed.id, name: placed.name };
+    // Bara en riktig lampa har en profil; ett rumskort har ingen.
+    const profile = found !== undefined && "profile" in found ? found.profile : undefined;
+    const given = { id: placed.id, name: placed.name, profile };
     commit((document) => placeItem(document, kind, floor.id, point, given)?.document ?? document);
   };
 
@@ -867,8 +927,12 @@ export function mountEditor(
   });
 
   chooseTool("select");
-  // Nya kort dyker upp medan redigeraren är öppen, till exempel när ett kort just har installerats.
-  window.setInterval(refreshCards, CARD_REFRESH_MS);
+  // Nya kort och lampor dyker upp medan redigeraren är öppen, till exempel
+  // när ett kort just har installerats eller en lampa parats ihop.
+  window.setInterval(() => {
+    refreshCards();
+    refreshLamps();
+  }, FOUND_REFRESH_MS);
   deps.api.load().then(
     (latest) => {
       saved = latest.document;
@@ -880,6 +944,7 @@ export function mountEditor(
       setBusy(false);
       render();
       refreshCards();
+      refreshLamps();
       root.dataset.ready = "true";
     },
     (error: unknown) => {

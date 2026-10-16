@@ -10,7 +10,8 @@ Protokollet är JSON. Kärnan skickar:
   (``held`` är ett spår som radarn har tappat men som hålls kvar), läget i
   varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), om rummet
   är i manuellt läge och varför lamporna är som de är, lamporna (``on`` är
-  null när läget är okänt), de senaste händelserna för "Varför hände det?"
+  null när läget är okänt, och ``responding`` är false när lampan inte
+  svarar), de senaste händelserna för "Varför hände det?"
   (``at`` är Unix-tid i sekunder) och simuleringen. Fältet ``simulation``
   visar simuleringsläget, eller är null om det inte finns. Fältet ``cards``
   visar de riktiga rumskorten (se `cards.cards_message`), eller är null om
@@ -41,7 +42,9 @@ Livevyn skickar kommandon till simuleringen:
 
 Personerna och dagsljuset går in i kärnan genom låtsaskällan, precis som en
 riktig källa. Utan simulering, eller när simuleringsläget är avslaget,
-ignoreras kommandona, men läget strömmas ändå.
+ignoreras kommandona, men läget strömmas ändå. Så länge hemmet har riktiga
+rumskort eller lampor är tidsfarten låst till 1× (``speed_locked`` i
+``simulation``), och snabbare tidsfart ignoreras.
 """
 
 import asyncio
@@ -240,6 +243,7 @@ def state_message(
                 "id": lamp.lamp_id,
                 "on": lamp.on,
                 "brightness": lamp.brightness,
+                "responding": lamp.responding,
                 "explanation": lamp.explanation,
             }
             for lamp in snapshot.lamps

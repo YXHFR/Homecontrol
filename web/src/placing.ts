@@ -15,6 +15,7 @@ import type {
   RoomModel,
   RoomSettings,
   SignalSourceModel,
+  XY,
 } from "./homefile";
 import type { Point, WallKind } from "./protocol";
 
@@ -276,7 +277,7 @@ export function placeItem(
   kind: ItemKind,
   floorId: string,
   point: Point,
-  given?: { id: string; name: string },
+  given?: { id: string; name: string; profile?: string },
 ): { document: HomeDocument; id: string; name: string } | null {
   const floor = document.home.floors.find((f) => f.id === floorId);
   if (floor === undefined) {
@@ -318,12 +319,17 @@ export function placeItem(
             },
           ],
         }
-      : { ...r, lamps: [...(r.lamps ?? []), { id, name, position }] };
+      : { ...r, lamps: [...(r.lamps ?? []), lampModel(id, name, position, usable?.profile)] };
   return {
     id,
     name,
     document: updateRooms(document, (r) => (r.id === room.id ? add(r) : r)),
   };
+}
+
+/** En ny lampa. En riktig lampa som kärnan har hittat har också en profil. */
+function lampModel(id: string, name: string, position: XY, profile?: string): LampModel {
+  return profile === undefined ? { id, name, position } : { id, name, position, profile };
 }
 
 /** Ändrar fälten i en sak (namn, höjd, vridning, spegling …). */

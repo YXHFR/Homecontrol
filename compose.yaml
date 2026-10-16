@@ -28,6 +28,13 @@ services:
       HOMECONTROL_HISTORY_KEEP_DAYS: ${HISTORY_KEEP_DAYS:-}
       # Rumskortens nycklar räknas fram ur den här. Tom: inga kort ansluts.
       HOMECONTROL_ESPHOME_SECRET: ${ESPHOME_SECRET:-}
+      # Zigbee-lamporna styrs genom Zigbee2MQTT på MQTT-brokern. Kärnan delar
+      # datorns nätverk (se network_mode ovan) och når brokern där Mosquitto
+      # publicerar sin port: på BIND_ADDRESS, eller 127.0.0.1 om den inte är satt.
+      HOMECONTROL_MQTT_HOST: ${BIND_ADDRESS:-127.0.0.1}
+      HOMECONTROL_MQTT_PORT: ${MQTT_PORT:-1883}
+      HOMECONTROL_MQTT_USER: ${MQTT_USER:?MQTT_USER saknas – kopiera .env.example till .env och fyll i}
+      HOMECONTROL_MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD saknas – kopiera .env.example till .env och fyll i}
     volumes:
       - db-socket:/var/run/postgresql
     depends_on:
@@ -89,6 +96,8 @@ services:
       ZIGBEE2MQTT_CONFIG_MQTT_USER: ${MQTT_USER:?MQTT_USER saknas – kopiera .env.example till .env och fyll i}
       ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD saknas – kopiera .env.example till .env och fyll i}
       ZIGBEE2MQTT_CONFIG_SERIAL_PORT: ${ZIGBEE_SERIAL_PORT:-/dev/zigbee}
+      # Zigbee2MQTT berättar när en lampa slutar svara, så att kärnan kan visa det.
+      ZIGBEE2MQTT_CONFIG_AVAILABILITY_ENABLED: "true"
       # Webbsidan kräver inloggning med den här nyckeln.
       ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED: "true"
       ZIGBEE2MQTT_CONFIG_FRONTEND_AUTH_TOKEN: ${ZIGBEE2MQTT_AUTH_TOKEN:?ZIGBEE2MQTT_AUTH_TOKEN saknas – kopiera .env.example till .env och fyll i}

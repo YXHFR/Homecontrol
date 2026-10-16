@@ -5,7 +5,7 @@ och skickas in i containern av Docker Compose.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import overload
@@ -14,6 +14,17 @@ HISTORY_FULL_RESOLUTION = timedelta(days=1)
 """Hur länge varje punkt i historiken sparas innan bara en punkt per sekund och spår finns kvar."""
 MIN_HISTORY_FULL_RESOLUTION = timedelta(hours=1)
 """Kortare tid än så hinner nedsamplingen inte med (se migrations/0003_historik.sql)."""
+
+
+@dataclass(frozen=True)
+class MqttSettings:
+    """MQTT-brokern där Zigbee2MQTT finns, och kärnans inloggning där."""
+
+    host: str
+    port: int = 1883
+    username: str | None = None
+    password: str | None = field(default=None, repr=False)
+    """Visas aldrig när inställningarna skrivs ut, till exempel i en logg."""
 
 
 @dataclass(frozen=True)
@@ -29,10 +40,17 @@ class Settings:
     Lösenordet står inte här utan läses av databasbiblioteket från PGPASSWORD.
     Utan databas används exempelhemmet, och inget sparas.
     """
-    esphome_secret: str | None = None
+    esphome_secret: str | None = field(default=None, repr=False)
     """Hemligheten som rumskortens nycklar räknas fram ur (se esphome.py).
 
-    Utan den ansluts inga rumskort, och simuleringsläget är påslaget från start.
+    Utan den ansluts inga rumskort.
+    """
+    mqtt: MqttSettings | None = None
+    """MQTT-brokern där Zigbee2MQTT finns (se zigbee.py).
+
+    Lösenordet läses från HOMECONTROL_MQTT_PASSWORD. Utan broker styrs inga
+    riktiga lampor. Utan rumskort och riktiga lampor är simuleringsläget
+    påslaget från start.
     """
     history_full_resolution: timedelta = HISTORY_FULL_RESOLUTION
     """Hur länge historiken sparas med full upplösning innan den bara finns nedsamplad."""
@@ -75,14 +93,15 @@ class Settings:
                 default=None,
             ),
             esphome_secret=os.environ.get("HOMECONTROL_ESPHOME_SECRET", "").strip() or None,
+            mqtt=_mqtt_from_env(),
         )
 
 
-def _parse_port(text: str) -> int:
+def _parse_port(text: str, name: str = "HOMECONTROL_PORT") -> int:
     try:
         return int(text)
     except ValueError:
-        raise ValueError(f"HOMECONTROL_PORT ska vara ett portnummer (inte {text!r})") from None
+        raise ValueError(f"{name} ska vara ett portnummer (inte {text!r})") from None
 
 
 @overload
@@ -112,3 +131,15 @@ def _parse_duration(
     if duration < minimum:
         raise ValueError(f"{name} i .env ska vara minst {minimum / unit:g} (inte {count:g})")
     return duration
+
+
+def _mqtt_from_env() -> MqttSettings | None:
+    host = os.environ.get("HOMECONTROL_MQTT_HOST", "").strip()
+    if not host:
+        return None
+    return MqttSettings(
+        host=host,
+        port=_parse_port(os.environ.get("HOMECONTROL_MQTT_PORT", "1883"), "HOMECONTROL_MQTT_PORT"),
+        username=os.environ.get("HOMECONTROL_MQTT_USER", "").strip() or None,
+        password=os.environ.get("HOMECONTROL_MQTT_PASSWORD") or None,
+    )

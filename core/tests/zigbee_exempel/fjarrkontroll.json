@@ -1,0 +1,31 @@
+{
+  "beskrivning": "Någon släcker taklampan med fjärrkontrollen: fjärrkontrollens knapptryck och lampans nya läge.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000f1",
+      "payload": {
+        "action": "off",
+        "battery": 87,
+        "linkquality": 76
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000f1",
+      "payload": {
+        "action": "",
+        "battery": 87,
+        "linkquality": 76
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000a1",
+      "payload": {
+        "brightness": 254,
+        "color_mode": "color_temp",
+        "color_temp": 370,
+        "linkquality": 148,
+        "state": "OFF"
+      }
+    }
+  ]
+}

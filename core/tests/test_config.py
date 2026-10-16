@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from homecontrol.config import Settings
+from homecontrol.config import MqttSettings, Settings
 
 
 def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -16,6 +16,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_HISTORY_FULL_HOURS",
         "HOMECONTROL_HISTORY_KEEP_DAYS",
         "HOMECONTROL_ESPHOME_SECRET",
+        "HOMECONTROL_MQTT_HOST",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -115,3 +116,19 @@ def test_empty_esphome_secret_means_no_cards(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("HOMECONTROL_ESPHOME_SECRET", "")
 
     assert Settings.from_env().esphome_secret is None
+
+
+def test_reads_the_mqtt_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_MQTT_HOST", " mosquitto ")
+    monkeypatch.setenv("HOMECONTROL_MQTT_PORT", "1884")
+    monkeypatch.setenv("HOMECONTROL_MQTT_USER", "homecontrol")
+    monkeypatch.setenv("HOMECONTROL_MQTT_PASSWORD", "hemligt")
+
+    assert Settings.from_env().mqtt == MqttSettings("mosquitto", 1884, "homecontrol", "hemligt")
+
+
+def test_without_mqtt_host_no_real_lamps_are_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_MQTT_HOST", "")
+    monkeypatch.setenv("HOMECONTROL_MQTT_PASSWORD", "hemligt")
+
+    assert Settings.from_env().mqtt is None

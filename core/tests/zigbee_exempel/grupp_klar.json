@@ -1,0 +1,64 @@
+{
+  "beskrivning": "Svaren när lamporna har lagts till i vardagsrummets grupp, och grupplistan efteråt.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/bridge/response/group/members/add",
+      "payload": {
+        "data": {
+          "device": "0x000b57fffe0000a1",
+          "endpoint": "default",
+          "group": "homecontrol-vardagsrum"
+        },
+        "status": "ok"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/bridge/response/group/members/add",
+      "payload": {
+        "data": {
+          "device": "0x000b57fffe0000a2",
+          "endpoint": "default",
+          "group": "homecontrol-vardagsrum"
+        },
+        "status": "ok"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/bridge/groups",
+      "payload": [
+        {
+          "id": 1,
+          "friendly_name": "alla-lampor",
+          "description": null,
+          "members": [
+            {
+              "ieee_address": "0x000b57fffe0000a1",
+              "endpoint": 1
+            },
+            {
+              "ieee_address": "0x0017880100000c01",
+              "endpoint": 11
+            }
+          ],
+          "scenes": []
+        },
+        {
+          "id": 2,
+          "friendly_name": "homecontrol-vardagsrum",
+          "description": null,
+          "members": [
+            {
+              "ieee_address": "0x000b57fffe0000a1",
+              "endpoint": 1
+            },
+            {
+              "ieee_address": "0x000b57fffe0000a2",
+              "endpoint": 1
+            }
+          ],
+          "scenes": []
+        }
+      ]
+    }
+  ]
+}

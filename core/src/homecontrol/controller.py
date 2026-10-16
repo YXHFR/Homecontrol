@@ -6,6 +6,8 @@ anropar `tick` när klockan har nått `wake_at`. Det gör att samma kod kan
 köras i realtid av servern och i snabbspolad tid av scenariotester.
 
 Manuell styrning (ett klick på en lampa i livevyn) kommer in via `set_lamp`.
+En lampa som ändras utanför kärnan, med fjärrkontroll eller app, räknas också
+som manuell styrning (`LampStateReported.external`).
 Varje beslut som ändrar något sparas som en händelse med klockslag, för
 listan "Varför hände det?" i livevyn. Händelserna finns bara i minnet.
 """
@@ -69,6 +71,8 @@ class LampView:
     """None när lampans läge är okänt."""
     brightness: int
     explanation: str
+    responding: bool = True
+    """False när lamputgången säger att lampan inte svarar."""
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,8 @@ class Controller:
         self._fusion = Fusion(home, clock.now())
         # Kärnan vet inte hur lamporna är förrän de rapporterar eller den själv styr dem.
         self._lamps: dict[str, rules.LampState] = {}
+        # Lamporna som lamputgången senast sa inte svarar.
+        self._not_responding: set[str] = set()
         self._memory: dict[str, rules.Memory] = {}
         self._explanations: dict[str, str] = {}
         self._events: deque[Event] = deque(maxlen=MAX_EVENTS)
@@ -165,7 +171,14 @@ class Controller:
                 if on is True and not 1 <= brightness <= rules.FULL_BRIGHTNESS:
                     logger.warning("Ogiltig ljusstyrka %r ignoreras", brightness)
                     return
-                self._lamps[lamp_id] = rules.LampState(on, brightness)
+                state = rules.LampState(on, brightness)
+                if on is None:
+                    self._not_responding.add(lamp_id)
+                else:
+                    self._not_responding.discard(lamp_id)
+                if observation.external and on is not None:
+                    self._changed_outside(lamp_id, state)
+                self._lamps[lamp_id] = state
         self._evaluate()
         self._notify()
 
@@ -187,6 +200,15 @@ class Controller:
         self._log_event(room.id, command.reason)
         self._evaluate()
         self._notify()
+
+    def _changed_outside(self, lamp_id: str, state: rules.LampState) -> None:
+        """En lampa ändrades med fjärrkontroll eller app: det räknas som manuell styrning."""
+        room = self._home.room_of(lamp_id)
+        lamp = next(lamp for lamp in room.lamps if lamp.id == lamp_id)
+        # Säger när någon i hemmet rör en fjärrkontroll, så det loggas bara när man felsöker.
+        logger.debug("%s ändrades utanför kärnan", lamp_id)
+        self._memory[room.id] = rules.start_manual(self._memory.get(room.id, {}), self._clock.now())
+        self._log_event(room.id, rules.external_change_text(room, lamp, state))
 
     def resume_automation(self, room_id: str) -> None:
         """Låter automatiken ta över i ett rum direkt, utan att vänta tills rummet varit tomt."""
@@ -227,6 +249,7 @@ class Controller:
             room_id: memory for room_id, memory in self._memory.items() if room_id in self._room_ids
         }
         self._lamps = {lamp_id: state for lamp_id, state in self._lamps.items() if lamp_id in kept}
+        self._not_responding &= kept
         self._fusion.replace_home(home, self._clock.now())
         self._evaluate()
         self._notify()
@@ -274,8 +297,14 @@ class Controller:
 
     def _lamp_view(self, room: Room, lamp_id: str) -> LampView:
         state = self._lamps.get(lamp_id, rules.UNKNOWN_LAMP)
+        responding = lamp_id not in self._not_responding
+        # Kärnan minns det den senast bad lampan om, men en lampa som inte
+        # svarar kan vara hur som helst.
+        on = state.on if responding else None
         # Lamporna i ett rum styrs som en grupp och har rummets förklaring.
-        return LampView(lamp_id, state.on, state.brightness, self._explanations[room.id])
+        return LampView(
+            lamp_id, on, state.brightness, self._explanations[room.id], responding=responding
+        )
 
     def _room_lux(self, room_id: str) -> float | None:
         by_source = self._lux.get(room_id)

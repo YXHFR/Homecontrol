@@ -1,0 +1,303 @@
+{
+  "beskrivning": "Det Zigbee2MQTT skickar när kärnan prenumererar: de sparade (retained) meddelandena om bryggan, enheterna, grupperna och tillgängligheten. Två TRÅDFRI-lampor, en Hue-lampa, en fjärrkontroll och en enhet som inte har gått med klart i nätet. En grupp som användaren själv har gjort finns redan.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/bridge/state",
+      "payload": {
+        "state": "online"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/bridge/devices",
+      "payload": [
+        {
+          "ieee_address": "0x00124b0000000001",
+          "type": "Coordinator",
+          "network_address": 0,
+          "supported": true,
+          "disabled": false,
+          "friendly_name": "Coordinator",
+          "interview_completed": true,
+          "interviewing": false,
+          "definition": null
+        },
+        {
+          "ieee_address": "0x000b57fffe0000a1",
+          "type": "Router",
+          "network_address": 0,
+          "supported": true,
+          "disabled": false,
+          "friendly_name": "0x000b57fffe0000a1",
+          "description": null,
+          "interview_completed": true,
+          "interviewing": false,
+          "manufacturer": "IKEA of Sweden",
+          "model_id": "LED2003G10-modell",
+          "power_source": "Mains (single phase)",
+          "definition": {
+            "model": "LED2003G10",
+            "vendor": "IKEA",
+            "description": "TRADFRI bulb E26/E27, white spectrum, globe, opal, 1055/1160 lm",
+            "exposes": [
+              {
+                "type": "light",
+                "features": [
+                  {
+                    "type": "binary",
+                    "name": "state",
+                    "property": "state",
+                    "access": 7,
+                    "value_on": "ON",
+                    "value_off": "OFF",
+                    "value_toggle": "TOGGLE"
+                  },
+                  {
+                    "type": "numeric",
+                    "name": "brightness",
+                    "property": "brightness",
+                    "access": 7,
+                    "value_min": 0,
+                    "value_max": 254
+                  },
+                  {
+                    "type": "numeric",
+                    "name": "color_temp",
+                    "property": "color_temp",
+                    "access": 7,
+                    "unit": "mired",
+                    "value_min": 250,
+                    "value_max": 454
+                  }
+                ]
+              },
+              {
+                "type": "numeric",
+                "name": "linkquality",
+                "property": "linkquality",
+                "access": 1,
+                "unit": "lqi",
+                "value_min": 0,
+                "value_max": 255
+              }
+            ],
+            "options": [],
+            "supports_ota": true
+          }
+        },
+        {
+          "ieee_address": "0x000b57fffe0000a2",
+          "type": "Router",
+          "network_address": 0,
+          "supported": true,
+          "disabled": false,
+          "friendly_name": "fonsterlampa",
+          "description": null,
+          "interview_completed": true,
+          "interviewing": false,
+          "manufacturer": "IKEA of Sweden",
+          "model_id": "LED1836G9-modell",
+          "power_source": "Mains (single phase)",
+          "definition": {
+            "model": "LED1836G9",
+            "vendor": "IKEA",
+            "description": "TRADFRI bulb E26/E27, warm white, 806 lm",
+            "exposes": [
+              {
+                "type": "light",
+                "features": [
+                  {
+                    "type": "binary",
+                    "name": "state",
+                    "property": "state",
+                    "access": 7,
+                    "value_on": "ON",
+                    "value_off": "OFF",
+                    "value_toggle": "TOGGLE"
+                  },
+                  {
+                    "type": "numeric",
+                    "name": "brightness",
+                    "property": "brightness",
+                    "access": 7,
+                    "value_min": 0,
+                    "value_max": 254
+                  }
+                ]
+              },
+              {
+                "type": "numeric",
+                "name": "linkquality",
+                "property": "linkquality",
+                "access": 1,
+                "unit": "lqi",
+                "value_min": 0,
+                "value_max": 255
+              }
+            ],
+            "options": [],
+            "supports_ota": true
+          }
+        },
+        {
+          "ieee_address": "0x0017880100000c01",
+          "type": "Router",
+          "network_address": 0,
+          "supported": true,
+          "disabled": false,
+          "friendly_name": "0x0017880100000c01",
+          "description": null,
+          "interview_completed": true,
+          "interviewing": false,
+          "manufacturer": "Signify Netherlands B.V.",
+          "model_id": "9290022169-modell",
+          "power_source": "Mains (single phase)",
+          "definition": {
+            "model": "9290022169",
+            "vendor": "Philips",
+            "description": "Hue White A60 bulb E27/B22",
+            "exposes": [
+              {
+                "type": "light",
+                "features": [
+                  {
+                    "type": "binary",
+                    "name": "state",
+                    "property": "state",
+                    "access": 7,
+                    "value_on": "ON",
+                    "value_off": "OFF",
+                    "value_toggle": "TOGGLE"
+                  },
+                  {
+                    "type": "numeric",
+                    "name": "brightness",
+                    "property": "brightness",
+                    "access": 7,
+                    "value_min": 0,
+                    "value_max": 254
+                  }
+                ]
+              },
+              {
+                "type": "numeric",
+                "name": "linkquality",
+                "property": "linkquality",
+                "access": 1,
+                "unit": "lqi",
+                "value_min": 0,
+                "value_max": 255
+              }
+            ],
+            "options": [],
+            "supports_ota": true
+          }
+        },
+        {
+          "ieee_address": "0x000b57fffe0000f1",
+          "type": "EndDevice",
+          "network_address": 0,
+          "supported": true,
+          "disabled": false,
+          "friendly_name": "0x000b57fffe0000f1",
+          "interview_completed": true,
+          "interviewing": false,
+          "power_source": "Battery",
+          "definition": {
+            "model": "E1743",
+            "vendor": "IKEA",
+            "description": "TRADFRI on/off switch",
+            "exposes": [
+              {
+                "type": "enum",
+                "name": "action",
+                "property": "action",
+                "access": 1,
+                "values": [
+                  "on",
+                  "off",
+                  "brightness_move_up",
+                  "brightness_move_down",
+                  "brightness_stop"
+                ]
+              },
+              {
+                "type": "numeric",
+                "name": "battery",
+                "property": "battery",
+                "access": 5,
+                "unit": "%"
+              },
+              {
+                "type": "numeric",
+                "name": "linkquality",
+                "property": "linkquality",
+                "access": 1,
+                "unit": "lqi",
+                "value_min": 0,
+                "value_max": 255
+              }
+            ],
+            "options": [],
+            "supports_ota": true
+          }
+        },
+        {
+          "ieee_address": "0x000b57fffe0000a9",
+          "type": "Router",
+          "network_address": 0,
+          "supported": false,
+          "disabled": false,
+          "friendly_name": "0x000b57fffe0000a9",
+          "interview_completed": false,
+          "interviewing": true,
+          "definition": null
+        }
+      ]
+    },
+    {
+      "topic": "zigbee2mqtt/bridge/groups",
+      "payload": [
+        {
+          "id": 1,
+          "friendly_name": "alla-lampor",
+          "description": null,
+          "members": [
+            {
+              "ieee_address": "0x000b57fffe0000a1",
+              "endpoint": 1
+            },
+            {
+              "ieee_address": "0x0017880100000c01",
+              "endpoint": 11
+            }
+          ],
+          "scenes": []
+        }
+      ]
+    },
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000a1/availability",
+      "payload": {
+        "state": "online"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/fonsterlampa/availability",
+      "payload": {
+        "state": "online"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/0x0017880100000c01/availability",
+      "payload": {
+        "state": "online"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000f1/availability",
+      "payload": {
+        "state": "online"
+      }
+    }
+  ]
+}

@@ -25,6 +25,7 @@ from homecontrol.config import Settings
 from homecontrol.esphome import MIN_SECRET_LENGTH
 from homecontrol.home import Home
 from homecontrol.homefile import HomeFileError, dumps, example_home, loads
+from homecontrol.zigbee import mqtt_connect
 
 logger = logging.getLogger("homecontrol")
 
@@ -77,6 +78,7 @@ def serve(settings: Settings) -> None:
             ),
             history=prepare_history(settings),
             esphome_secret=secret,
+            mqtt=None if settings.mqtt is None else mqtt_connect(settings.mqtt),
         ),
         host=settings.host,
         port=settings.port,

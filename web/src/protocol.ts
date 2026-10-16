@@ -146,6 +146,8 @@ export interface LampState {
   on: boolean | null;
   /** Ljusstyrkan i procent när lampan lyser, lägre under en dimring. */
   brightness: number;
+  /** False när lampan inte svarar, till exempel när strömbrytaren är av. */
+  responding: boolean;
   /** Samma förklaring som för lampans rum; lamporna i ett rum styrs som en grupp. */
   explanation: string;
 }
@@ -176,6 +178,18 @@ export interface StateMessage {
 }
 
 export type ServerMessage = HomeMessage | StateMessage;
+
+/**
+ * En riktig lampa som kärnan har hittat (se core/src/homecontrol/lampdevices.py).
+ * Den används först när den är placerad på kartan med samma id.
+ */
+export interface FoundLamp {
+  id: string;
+  name: string;
+  /** Lampprofilen som passar lampan, till exempel "ikea-tradfri". */
+  profile: string;
+  placed: boolean;
+}
 
 export type ClientMessage =
   | { type: "set_lamp"; lamp_id: string; on: boolean }

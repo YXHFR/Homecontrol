@@ -78,7 +78,7 @@ function state(
       },
     ],
     zones: [],
-    lamps: [{ id: "taklampa", on, brightness: 100, explanation: "" }],
+    lamps: [{ id: "taklampa", on, brightness: 100, explanation: "", responding: true }],
     events: [],
     simulation,
     cards: null,
@@ -464,6 +464,16 @@ describe("mountApp", () => {
     });
     expect(root.querySelector(".cards button")).toBeNull();
     expect(text(root, ".cards li")).toMatch(/Uppdaterar till 0\.5\.0 … 42 %/);
+  });
+
+  it("visar att en lampa inte svarar", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    const silent = state(10, false);
+    silent.lamps = [{ id: "taklampa", on: null, brightness: 100, explanation: "", responding: false }];
+    handlers.onMessage(silent);
+
+    expect(root.textContent).toContain("Taklampa: svarar inte");
   });
 });
 

@@ -249,9 +249,14 @@ class SimulatedLampOutput:
 
     Den virtuella lampan lyser inte upp någon ljussensor; dagsljuset i
     simuleringen är det enda ljuset som mäts.
+
+    `real_lamps` ger lamporna i ett hem som en riktig lamputgång styr. De är
+    inte virtuella, så den här utgången varken rapporterar eller styr dem.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, real_lamps: Callable[[Home], Set[str]] = lambda _: frozenset()) -> None:
+        self._real_lamps = real_lamps
+        self._real: Set[str] = frozenset()
         self.states: dict[str, bool] = {}
         self.brightness: dict[str, int] = {}
         # De senaste kommandona, för scenariotesterna. Begränsat så att
@@ -259,6 +264,8 @@ class SimulatedLampOutput:
         self.history: deque[LampCommand] = deque(maxlen=MAX_HISTORY)
 
     def send(self, command: LampCommand) -> None:
+        if command.lamp_id in self._real:
+            return
         self.states[command.lamp_id] = command.on
         self.brightness[command.lamp_id] = command.brightness
         self.history.append(command)
@@ -271,10 +278,11 @@ class SimulatedLampOutput:
         utgången startar och när hemmet har ändrats.
         """
         # En lampa som har tagits bort glöms, så att den rapporteras igen om den läggs tillbaka.
-        lamp_ids = {lamp.id for lamp in home.lamps}
+        self._real = self._real_lamps(home)
+        lamp_ids = {lamp.id for lamp in home.lamps if lamp.id not in self._real}
         self.states = {lamp_id: on for lamp_id, on in self.states.items() if lamp_id in lamp_ids}
         for lamp in home.lamps:
-            if lamp.id not in self.states:
+            if lamp.id in lamp_ids and lamp.id not in self.states:
                 self.states[lamp.id] = False
                 sink(LampStateReported(lamp.id, on=False))
 
@@ -356,11 +364,20 @@ class Simulation:
     def use_home(self, home: Home) -> None:
         """Byter till ett ändrat hem, så att nya rum, noder och våningar också simuleras.
 
-        Har ett riktigt rumskort just placerats går tiden tillbaka till vanlig takt.
+        Har det första riktiga rumskortet eller den första riktiga lampan just
+        placerats stängs simuleringsläget av, så att låtsaspersonerna inte styr
+        riktiga lampor och de riktiga spåren hamnar i historiken. Slår någon på
+        det igen går tiden ändå i vanlig takt.
         """
+        was_real = self._speed_locked()
         self._floor_ids = frozenset(floor.id for floor in home.floors)
         self._source.use_home(home)
-        if self._speed_locked() and self._clock.speed != 1:
+        if not self._speed_locked():
+            return
+        if not was_real and self._enabled:
+            logger.info("Riktiga sensorer eller lampor är placerade; simuleringsläget stängs av")
+            self.set_enabled(False)
+        elif self._clock.speed != 1:
             self._clock.set_speed(1)
             self._notify()
 
