@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Närvarostyrd belysning – kärnan"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "aioesphomeapi>=46.12.1",
     "aiomqtt>=2.4",
@@ -34,6 +34,7 @@ homecontrol = "homecontrol.__main__:main"
 # Skripten i ../scripts använder bara standardbiblioteket men typkontrolleras
 # och testas med kärnans verktyg, så att repot bara har en Python-miljö.
 [tool.mypy]
+python_version = "3.14"
 strict = true
 files = ["src", "tests", "../scripts"]
 explicit_package_bases = true

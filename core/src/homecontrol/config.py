@@ -66,7 +66,7 @@ class Settings:
             )
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         """Läser inställningarna. Ett felaktigt värde ger ValueError som säger vilket."""
         return cls(
             host=os.environ.get("HOMECONTROL_HOST", "127.0.0.1"),
@@ -124,7 +124,7 @@ def _parse_duration(
     try:
         count = float(text)
         duration = unit * count
-    except (ValueError, OverflowError):
+    except ValueError, OverflowError:
         raise ValueError(
             f"{name} i .env ska vara ett tal, till exempel 48 (inte {text!r})"
         ) from None
