@@ -250,7 +250,7 @@ describe("rummens inställningar", () => {
     expect(settingsProblem({ ...ok, dim_before_off_seconds: -1 })).toMatch(/Varningsdimringen/);
     expect(settingsProblem({ ...ok, dim_percent: 0 })).toMatch(/1 till 100/);
     expect(settingsProblem({ ...ok, dim_percent: 12.5 })).toMatch(/heltal/);
-    expect(settingsProblem({ ...ok, daylight_off_after_seconds: 0 })).toMatch(/dagsljuset/);
+    expect(settingsProblem({ ...ok, daylight_off_after_seconds: 0 })).toMatch(/dagsljus i sträck/);
   });
 
   it("ett rum från en äldre kärna får standardvärdena för det som saknas", () => {

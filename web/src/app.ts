@@ -2,7 +2,7 @@ import { LiveConnection, liveUrl, type ConnectionHandlers, type ConnectionStatus
 import { element } from "./dom";
 import { parkingSpot } from "./geometry";
 import type { ClientMessage, Floor, HomeMessage, StateMessage } from "./protocol";
-import { eventItems, nextLampState, roomsNowItems, type RoomActions } from "./roomPanels";
+import { eventItems, shouldTurnOn, roomsNowItems, type RoomActions } from "./roomPanels";
 import { createSimulationPanel } from "./simulationPanel";
 import { createKonvaView, type ViewFactory } from "./view";
 
@@ -90,15 +90,27 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     },
     onToggleLamp: (lampId) => {
       const lampState = lastState?.lamps.find((lamp) => lamp.id === lampId);
-      roomActions.setLamp(lampId, nextLampState(lampState));
+      roomActions.setLamp(lampId, shouldTurnOn(lampState));
     },
   });
 
-  /** Läget i varje rum på våningen som visas, och vad som har hänt där. */
+  /**
+   * Läget i varje rum på våningen som visas, och vad som har hänt där.
+   *
+   * Läget kommer upp till tio gånger i sekunden när någon rör sig. Panelerna
+   * byggs bara om när något de visar har ändrats, så att ett klick på en knapp
+   * inte tappas för att knappen byttes ut mitt i klicket.
+   */
+  let shownPanels = "";
   const showRooms = () => {
     if (shownFloor === null) {
       return;
     }
+    const panels = JSON.stringify([shownFloor, lastState?.rooms, lastState?.lamps, lastState?.events]);
+    if (panels === shownPanels) {
+      return;
+    }
+    shownPanels = panels;
     roomsNow.replaceChildren(...roomsNowItems(shownFloor, lastState, roomActions));
     events.replaceChildren(...eventItems(shownFloor, lastState?.events ?? []));
   };

@@ -177,6 +177,18 @@ describe("mountApp", () => {
     ]);
   });
 
+  it("bygger inte om panelen när inget den visar har ändrats, så att ett klick inte tappas", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, true));
+    const toggle = find<HTMLButtonElement>(root, ".lamp-toggle");
+
+    // Ett nytt läge med ett flyttat spår men samma rum och lampor.
+    handlers.onMessage({ ...state(10, true), tracks: [{ floor_id: "plan", x: 3, y: 2, held: false }] });
+
+    expect(find<HTMLButtonElement>(root, ".lamp-toggle")).toBe(toggle);
+  });
+
   it("tänder en lampa vars läge är okänt", () => {
     const { root, sent, handlers } = setup();
     handlers.onMessage(home);
@@ -212,15 +224,15 @@ describe("mountApp", () => {
     handlers.onMessage({
       ...state(10, true),
       events: [
-        { at, room_id: "vardagsrum", text: "Tändes: någon är i Vardagsrum och det var mörkt (9 lux, under 30)." },
-        { at: at + 60, room_id: "sovrum", text: "Tändes för hand: Sovrumslampa." },
-        { at: at + 120, room_id: "vardagsrum", text: "Dimrades till 50 %: Vardagsrum är tomt." },
+        { number: 1, at, room_id: "vardagsrum", text: "Tändes: någon är i Vardagsrum och det var mörkt (9 lux, under 30)." },
+        { number: 2, at: at + 60, room_id: "sovrum", text: "Sovrumslampa tändes för hand." },
+        { number: 3, at: at + 120, room_id: "vardagsrum", text: "Dimrades till 50 %: Vardagsrum är tomt." },
       ],
     });
 
     expect([...root.querySelectorAll(".events li")].map((li) => li.textContent)).toEqual([
-      "19:04 Vardagsrum: Dimrades till 50 %: Vardagsrum är tomt.",
-      "19:02 Vardagsrum: Tändes: någon är i Vardagsrum och det var mörkt (9 lux, under 30).",
+      "19:04 Dimrades till 50 %: Vardagsrum är tomt.",
+      "19:02 Tändes: någon är i Vardagsrum och det var mörkt (9 lux, under 30).",
     ]);
   });
 

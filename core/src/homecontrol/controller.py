@@ -30,7 +30,7 @@ from homecontrol.connectors import (
     SourceLost,
 )
 from homecontrol.fusion import Fusion, Occupancy, Track
-from homecontrol.home import Home
+from homecontrol.home import Home, Room
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,8 @@ class LampView:
 class Event:
     """Något som hände med lamporna, med förklaring: till exempel att de tändes eller dimrades."""
 
+    number: int
+    """Löpnummer från 1, så att den som sparar händelserna ser vilka som är nya."""
     at: float
     """Klockslaget som Unix-tid i sekunder."""
     room_id: str
@@ -116,6 +118,7 @@ class Controller:
         self._memory: dict[str, rules.Memory] = {}
         self._explanations: dict[str, str] = {}
         self._events: deque[Event] = deque(maxlen=MAX_EVENTS)
+        self._event_count = 0
         self._wake_at: float | None = None
         self._listeners: list[Listener] = []
         self._room_ids = {room.id for room in home.rooms}
@@ -159,7 +162,7 @@ class Controller:
                 if not any(lamp.id == lamp_id for lamp in self._home.lamps):
                     logger.warning("Läge för okänd lampa %r ignoreras", lamp_id)
                     return
-                if not 1 <= brightness <= rules.FULL_BRIGHTNESS:
+                if on is True and not 1 <= brightness <= rules.FULL_BRIGHTNESS:
                     logger.warning("Ogiltig ljusstyrka %r ignoreras", brightness)
                     return
                 self._lamps[lamp_id] = rules.LampState(on, brightness)
@@ -181,7 +184,7 @@ class Controller:
         command = rules.manual_command(room, lamp, on)
         self._memory[room.id] = rules.start_manual(self._memory.get(room.id, {}), self._clock.now())
         self._switch(command)
-        self._remember(room.id, command.reason)
+        self._log_event(room.id, command.reason)
         self._evaluate()
         self._notify()
 
@@ -195,7 +198,7 @@ class Controller:
         if not rules.is_manual(memory):
             return
         self._memory[room_id] = rules.stop_manual(memory)
-        self._remember(room_id, f"Automatiken i {room.name} återställdes för hand.")
+        self._log_event(room_id, f"Automatiken i {room.name} slogs på igen för hand.")
         self._evaluate()
         self._notify()
 
@@ -246,35 +249,33 @@ class Controller:
         zones = self._fusion.zones()
         return Snapshot(
             tracks=self._fusion.tracks(),
-            rooms=tuple(
-                RoomView(
-                    room.id,
-                    rooms[room.id].status,
-                    lux=self._room_lux(room.id),
-                    adjusted_lux=rules.adjusted_lux(room, self._room_lux(room.id), self._lamps),
-                    manual=rules.is_manual(self._memory.get(room.id, {})),
-                    explanation=self._explanations[room.id],
-                )
-                for room in self._home.rooms
-            ),
+            rooms=tuple(self._room_view(room, rooms[room.id].status) for room in self._home.rooms),
             zones=tuple(
                 ZoneView(zone.id, zones[zone.id].status)
                 for room in self._home.rooms
                 for zone in room.zones
             ),
             lamps=tuple(
-                LampView(
-                    lamp.id,
-                    on=state.on,
-                    brightness=state.brightness,
-                    explanation=self._explanations[room.id],
-                )
-                for room in self._home.rooms
-                for lamp in room.lamps
-                for state in (self._lamps.get(lamp.id, rules.UNKNOWN_LAMP),)
+                self._lamp_view(room, lamp.id) for room in self._home.rooms for lamp in room.lamps
             ),
             events=tuple(self._events),
         )
+
+    def _room_view(self, room: Room, status: Occupancy) -> RoomView:
+        lux = self._room_lux(room.id)
+        return RoomView(
+            room.id,
+            status,
+            lux=lux,
+            adjusted_lux=rules.adjusted_lux(room, lux, self._lamps),
+            manual=rules.is_manual(self._memory.get(room.id, {})),
+            explanation=self._explanations[room.id],
+        )
+
+    def _lamp_view(self, room: Room, lamp_id: str) -> LampView:
+        state = self._lamps.get(lamp_id, rules.UNKNOWN_LAMP)
+        # Lamporna i ett rum styrs som en grupp och har rummets förklaring.
+        return LampView(lamp_id, state.on, state.brightness, self._explanations[room.id])
 
     def _room_lux(self, room_id: str) -> float | None:
         by_source = self._lux.get(room_id)
@@ -293,7 +294,7 @@ class Controller:
         for command in result.commands:
             self._switch(command)
         for event in result.events:
-            self._remember(event.room_id, event.text)
+            self._log_event(event.room_id, event.text)
         self._memory = dict(result.memory)
         self._explanations = dict(result.explanations)
         self._wake_at = result.wake_at
@@ -302,14 +303,18 @@ class Controller:
         # Förklaringen säger var någon är, så den loggas bara när man felsöker.
         if not command.on:
             logger.info("Släcker %s", command.lamp_id)
+        elif command.brightness == rules.FULL_BRIGHTNESS:
+            logger.info("Tänder %s", command.lamp_id)
         else:
-            logger.info("Tänder %s (%d %%)", command.lamp_id, command.brightness)
+            # En dimring säger när ett rum blev tomt, så den loggas bara när man felsöker.
+            logger.debug("Dimrar %s till %d %%", command.lamp_id, command.brightness)
         logger.debug("%s: %s", command.lamp_id, command.reason)
         self._lamps[command.lamp_id] = rules.LampState(command.on, command.brightness)
         self._send(command)
 
-    def _remember(self, room_id: str, text: str) -> None:
-        self._events.append(Event(self._wall_clock(), room_id, text))
+    def _log_event(self, room_id: str, text: str) -> None:
+        self._event_count += 1
+        self._events.append(Event(self._event_count, self._wall_clock(), room_id, text))
 
     def _send(self, command: LampCommand) -> None:
         for output in self._outputs:

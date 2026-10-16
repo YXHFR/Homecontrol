@@ -110,11 +110,14 @@ export interface LampState {
   on: boolean | null;
   /** Ljusstyrkan i procent när lampan lyser, lägre under en dimring. */
   brightness: number;
+  /** Samma förklaring som för lampans rum; lamporna i ett rum styrs som en grupp. */
   explanation: string;
 }
 
 /** Något som hände med lamporna, för listan "Varför hände det?". */
 export interface LampEvent {
+  /** Löpnummer från 1; ett högre nummer är en senare händelse. */
+  number: number;
   /** Klockslaget som Unix-tid i sekunder. */
   at: number;
   room_id: string;

@@ -26,7 +26,7 @@ export function lampStateText(state: LampState | undefined): string {
 }
 
 /** Vad ett klick på lampan gör: släcker en lampa som lyser, annars tänder den. */
-export function nextLampState(state: LampState | undefined): boolean {
+export function shouldTurnOn(state: LampState | undefined): boolean {
   return state?.on !== true;
 }
 
@@ -39,6 +39,7 @@ export function luxText(lux: number | null, adjusted: number | null): string {
   if (lux === null) {
     return "ljusnivån okänd";
   }
+  // Skillnader som försvinner när värdet visas med en decimal syns inte.
   if (adjusted === null || Math.abs(adjusted - lux) < 0.05) {
     return `${formatLux(lux)} lux`;
   }
@@ -82,7 +83,7 @@ export function roomsNowItems(
       .map((lamp) => {
         const lampState = lamps.get(lamp.id);
         const toggle = button(`${lamp.name}: ${lampStateText(lampState)}`, () =>
-          actions.setLamp(lamp.id, nextLampState(lampState)),
+          actions.setLamp(lamp.id, shouldTurnOn(lampState)),
         );
         toggle.classList.add("lamp-toggle");
         toggle.setAttribute("aria-pressed", String(lampState?.on === true));
@@ -104,7 +105,10 @@ export function roomsNowItems(
   });
 }
 
-/** Händelserna i rummen på våningen, senaste först, för panelen "Varför hände det?". */
+/**
+ * Händelserna i rummen på våningen, senaste först, för panelen "Varför hände det?".
+ * Texten nämner själv rummet, så bara klockslaget står före.
+ */
 export function eventItems(floor: Floor, events: readonly LampEvent[]): HTMLLIElement[] {
   const names = new Map(floor.rooms.map((room) => [room.id, room.name]));
   return events
@@ -115,7 +119,7 @@ export function eventItems(floor: Floor, events: readonly LampEvent[]): HTMLLIEl
         "li",
         {},
         element("time", { dateTime: new Date(event.at * 1000).toISOString() }, clockTime(event.at)),
-        ` ${names.get(event.room_id) ?? ""}: ${event.text}`,
+        ` ${event.text}`,
       ),
     );
 }

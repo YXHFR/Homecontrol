@@ -87,6 +87,11 @@ class LampStateReported:
     lampan har ändrats. `on` är None när lampan inte svarar och läget är
     okänt. Kärnan antar aldrig att en lampa är släckt; tills lampan har
     rapporterat eller kärnan själv har styrt den är läget okänt.
+
+    Än så länge ersätter beskedet bara det kärnan vet om lampan. Att en
+    ändring med fjärrkontroll eller app ska räknas som manuell styrning
+    (`Controller.set_lamp`) hör till den riktiga lampkopplingen, som först
+    måste skilja lampans svar på kärnans egna kommandon från sådana ändringar.
     """
 
     lamp_id: str

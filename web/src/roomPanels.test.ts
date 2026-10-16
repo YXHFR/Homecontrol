@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lampStateText, luxText, nextLampState } from "./roomPanels";
+import { lampStateText, luxText, shouldTurnOn } from "./roomPanels";
 
 describe("panelerna under kartan", () => {
   it("beskriver lampans läge", () => {
@@ -11,9 +11,9 @@ describe("panelerna under kartan", () => {
   });
 
   it("ett klick släcker en lampa som lyser, även dimrad, och tänder annars", () => {
-    expect(nextLampState({ id: "a", on: true, brightness: 50, explanation: "" })).toBe(false);
-    expect(nextLampState({ id: "a", on: false, brightness: 100, explanation: "" })).toBe(true);
-    expect(nextLampState(undefined)).toBe(true);
+    expect(shouldTurnOn({ id: "a", on: true, brightness: 50, explanation: "" })).toBe(false);
+    expect(shouldTurnOn({ id: "a", on: false, brightness: 100, explanation: "" })).toBe(true);
+    expect(shouldTurnOn(undefined)).toBe(true);
   });
 
   it("visar den justerade ljusnivån bara när den skiljer sig", () => {

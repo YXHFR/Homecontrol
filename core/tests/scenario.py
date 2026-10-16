@@ -35,6 +35,8 @@ from homecontrol.simulation import SimulatedLampOutput, SimulatedSource, Simulat
 from homes import one_room_home
 
 _PERSON = "personen"
+MAX_WAKES = 10_000
+"""Fler väckningar än så under en enda väntan betyder att regeln aldrig blir klar."""
 RADAR_INTERVAL = 0.1
 """Radarn skickar det den ser tio gånger i sekunden."""
 
@@ -161,7 +163,14 @@ class Scenario:
         if duration < 0:
             raise ValueError("Ett scenario kan inte vänta en negativ tid")
         until = self.clock.now() + duration
+        wakes = 0
         while (wake_at := self.controller.wake_at) is not None and wake_at <= until:
+            wakes += 1
+            if wakes > MAX_WAKES:
+                raise RuntimeError(
+                    f"Kärnan bad om att väckas mer än {MAX_WAKES} gånger under en väntan. "
+                    "Scenariot skulle fastna, så det avbryts."
+                )
             self.clock.advance_to(max(wake_at, self.clock.now()))
             self.controller.tick()
             if self.controller.wake_at == wake_at:

@@ -213,11 +213,13 @@ def test_lamps_are_unknown_until_they_report_and_the_report_is_used() -> None:
 
     controller.observe(LampStateReported("taklampa", on=True, brightness=40))
     controller.observe(LampStateReported("finns-inte", on=True))
-    controller.observe(LampStateReported("taklampa", on=False, brightness=0))  # ogiltig
+    controller.observe(LampStateReported("taklampa", on=True, brightness=0))  # ogiltig
 
     [lamp] = controller.snapshot().lamps
     assert (lamp.on, lamp.brightness) == (True, 40)
-    assert lamps.history == []
+    controller.observe(LampStateReported("taklampa", on=False, brightness=0))  # släckt: går bra
+    assert controller.snapshot().lamps[0].on is False
+    assert not lamps.history
 
 
 def test_lamp_reported_lit_in_an_empty_room_is_switched_off_after_the_delay() -> None:
@@ -240,4 +242,4 @@ def test_events_are_kept_with_their_clock_time_and_only_the_latest_ones() -> Non
     events = controller.snapshot().events
     assert len(events) == MAX_EVENTS
     assert {event.at for event in events} == {1_700_000_000}
-    assert events[-1].text.startswith("Tändes för hand")
+    assert events[-1].text.startswith("Taklampa tändes för hand")

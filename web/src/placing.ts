@@ -211,7 +211,7 @@ export function settingsProblem(settings: RoomSettings): string | null {
     return "Ljusstyrkan under dimringen ska vara ett heltal från 1 till 100 %.";
   }
   if (daylight <= 0 || daylight > MAX_DELAY_SECONDS) {
-    return "Tiden för dagsljuset ska vara mer än 0 och högst ett dygn.";
+    return "Tiden med dagsljus i sträck innan lamporna släcks ska vara mer än 0 och högst ett dygn.";
   }
   return null;
 }

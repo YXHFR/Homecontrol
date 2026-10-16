@@ -56,10 +56,10 @@ test("ett klick på en lampa styr den för hand, och rummet visar manuellt läge
   await expect(kitchen.getByRole("button", { name: "Taklampa: tänd" })).toBeVisible();
   await expect(kitchen).toHaveAttribute("data-manual", "true");
   await expect(kitchen.locator(".badge")).toHaveText("Manuellt läge");
-  await expect(page.locator(".events li").first()).toContainText("Kök: Tändes för hand: Taklampa.");
+  await expect(page.locator(".events li").first()).toContainText("Taklampa tändes för hand. Automatiken i Kök pausar");
 
   // Automatiken tar över igen direkt, utan att vänta tills köket varit tomt.
   await kitchen.getByRole("button", { name: "Automatik igen" }).click();
   await expect(kitchen).toHaveAttribute("data-manual", "false");
-  await expect(page.locator(".events li").first()).toContainText("återställdes för hand");
+  await expect(page.locator(".events li").first()).toContainText("Automatiken i Kök slogs på igen för hand");
 });

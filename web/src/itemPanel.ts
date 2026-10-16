@@ -187,8 +187,8 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
 }
 
 /**
- * Ett tal i formuläret för rummets inställningar. `scale` är hur många av
- * inställningens enheter ett steg i fältet är, till exempel 60 sekunder per minut.
+ * Ett tal i formuläret för rummets inställningar. `scale` är hur många sekunder
+ * en enhet i fältet är (60 när fältet visas i minuter).
  */
 interface NumberSetting {
   key: Exclude<keyof RoomSettings, "windowless">;
@@ -212,7 +212,7 @@ const NUMBER_SETTINGS: NumberSetting[] = [
   {
     key: "daylight_off_after_seconds",
     name: "daylight_off_after_minutes",
-    label: "… i sträck i (minuter)",
+    label: "Släck efter dagsljus i sträck i (minuter)",
     min: "0.5",
     step: "0.5",
     scale: 60,
@@ -228,7 +228,7 @@ const NUMBER_SETTINGS: NumberSetting[] = [
   {
     key: "dim_before_off_seconds",
     name: "dim_before_off_seconds",
-    label: "Dimra som varning innan dess i (sekunder, 0 = aldrig)",
+    label: "Dimra som varning före släckning i (sekunder, 0 = aldrig)",
     min: "0",
     step: "5",
   },
@@ -262,6 +262,7 @@ export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLEl
     const next: RoomSettings = { ...current, windowless: windowless.checked };
     for (const { setting, input } of numbers) {
       const scale = setting.scale ?? 1;
+      // Minuter blir hela sekunder, som kärnan sparar dem.
       next[setting.key] = scale === 1 ? input.valueAsNumber : Math.round(input.valueAsNumber * scale);
     }
     const problem = settingsProblem(next);

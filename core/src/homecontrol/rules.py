@@ -4,9 +4,11 @@ Funktionen läser ingen klocka och gör inga anrop, så samma indata ger alltid
 samma utdata. Den säger också när den vill bli tillfrågad igen (`wake_at`),
 till exempel när ett tomt rum ska släckas.
 
-Reglerna gäller ett rum i taget, och alla lampor i rummet styrs som en grupp.
-Standardreglerna, med värdena från rummets inställningar, frågas i den här
-ordningen:
+Reglerna gäller ett rum i taget, och alla lampor i rummet styrs som en grupp:
+ett beslut gäller i dag alltid alla lampor i rummet. En framtida regel för
+zonlampor behöver därför kunna begränsa ett beslut till några av lamporna.
+Standardreglerna frågas i den här ordningen. Värdena inom parentes är
+standardvärden; varje rum har egna i sina inställningar.
 
 1. **Okänt läge.** När en sensor i rummet har slutat svara lämnas lamporna som
    de är, så att ingen blir lämnad i mörker på grund av ett fel.
@@ -31,12 +33,12 @@ Varje regel är ett objekt med metoden `decide` (se `Rule`). Alla regler
 tillfrågas varje gång, så att de kan minnas tidpunkter och be om att bli
 väckta, men det är den första regeln som fattar ett beslut som avgör vad som
 händer med lamporna. En ny sorts regel, till exempel för tid på dygnet, läggs
-in på rätt plats i listan som skickas till `evaluate`; de befintliga reglerna
-behöver inte ändras.
+in på rätt plats i `DEFAULT_RULES` (eller i listan som skickas till
+`evaluate`); de befintliga reglerna behöver inte ändras.
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from homecontrol.connectors import LampCommand
@@ -50,6 +52,12 @@ MANUAL = "manuell"
 """I rummets minne: när någon senast styrde en lampa i rummet för hand."""
 BRIGHT_SINCE = "ljust_sedan"
 """I rummets minne: sedan när dagsljuset har varit över ljusgränsen i sträck."""
+WARNING_DIMMED = "varningsdimrat_sedan"
+"""I rummets minne: sedan när lamporna är dimrade som varning för att rummet är tomt.
+
+Lamporna kan lysa svagare av andra skäl (en annan regel, en fjärrkontroll), så
+det är bara den här tidpunkten som säger att närvaro ska ge fullt ljus igen.
+"""
 
 Memory = Mapping[str, float]
 """Det reglerna minns om ett rum mellan två beslut: namngivna tidpunkter."""
@@ -99,13 +107,6 @@ class Situation:
         return any(lamp.on is True for lamp in self.lamps.values())
 
     @property
-    def dimmed(self) -> bool:
-        """Om någon av rummets lampor lyser med lägre ljusstyrka än full."""
-        return any(
-            lamp.on is True and lamp.brightness < FULL_BRIGHTNESS for lamp in self.lamps.values()
-        )
-
-    @property
     def adjusted_lux(self) -> float | None:
         return adjusted_lux(self.room, self.measured_lux, self.lamps)
 
@@ -138,10 +139,14 @@ class Switch:
     brightness: int = FULL_BRIGHTNESS
     lit_only: bool = False
     """Gäller bara lampor som redan lyser, så att en dimring inte tänder en släckt lampa."""
+    dim_only: bool = False
+    """Gäller bara lampor som lyser starkare, så att en dimring aldrig gör en lampa ljusare."""
 
 
 @dataclass(frozen=True)
 class Decision:
+    """Ett beslut om rummets lampor. Det första beslutet i regelordningen gäller."""
+
     explanation: str
     """Varför, i klartext med värdena som beslutet bygger på."""
     switch: Switch | None = None
@@ -215,14 +220,29 @@ class ManualControl:
             f"Manuellt läge: automatiken i {name} pausar tills rummet har varit tomt "
             f"i {duration(delay)}."
         )
-        if situation.presence.status is not Occupancy.VACANT:
+        status = situation.presence.status
+        if status is Occupancy.OCCUPIED and WARNING_DIMMED in situation.memory and situation.lit:
+            return Verdict(_back_to_full(name), remember={WARNING_DIMMED: None})
+        if status is not Occupancy.VACANT:
             return Verdict(paused)
         resumes_at = max(situation.presence.since, manual_since) + delay
-        if situation.now < resumes_at:
-            return Verdict(paused, wake_at=resumes_at)
+        if situation.now >= resumes_at:
+            return Verdict(
+                remember={MANUAL: None},
+                note=f"Automatiken tar över igen: {name} har varit tomt i {duration(delay)}.",
+            )
+        # När automatiken tar över i det tomma rummet släcks lamporna, så de
+        # dimras som varning innan dess, precis som annars.
+        settings = situation.settings
+        dim_at = resumes_at - min(settings.dim_before_off_seconds, delay)
+        if situation.now < dim_at or not situation.lit or dim_at == resumes_at:
+            return Verdict(paused, wake_at=dim_at if situation.now < dim_at else resumes_at)
         return Verdict(
-            remember={MANUAL: None},
-            note=f"Automatiken tar över igen: {name} har varit tomt i {duration(delay)}.",
+            _warning_dim(
+                name, settings, f"automatiken tar över om {duration(resumes_at - dim_at)}"
+            ),
+            remember={WARNING_DIMMED: situation.memory.get(WARNING_DIMMED, situation.now)},
+            wake_at=resumes_at,
         )
 
 
@@ -247,8 +267,8 @@ class DaylightOff:
         return Verdict(
             Decision(
                 f"Släcktes: dagsljuset i {situation.room.name} har varit över "
-                f"{_lux(settings.bright_above_lux)} lux i {duration(hold)} "
-                f"({_lux(lux)} lux nu, lampornas eget ljus avräknat).",
+                f"{_format_lux(settings.bright_above_lux)} lux i {duration(hold)} "
+                f"({_format_lux(lux)} lux nu, lampornas eget ljus avräknat).",
                 Switch(on=False),
             ),
             remember={BRIGHT_SINCE: None},
@@ -256,20 +276,19 @@ class DaylightOff:
 
 
 class OccupiedRoom:
-    """Tänd när någon är i rummet och det är mörkt, och ta upp dimrade lampor igen."""
+    """Tänd när någon är i rummet och det är mörkt, och ta upp varningsdimrade lampor igen."""
 
     def decide(self, situation: Situation) -> Verdict:
         if situation.presence.status is not Occupancy.OCCUPIED:
             return NO_OPINION
+        verdict = self._decide(situation)
+        return replace(verdict, remember={WARNING_DIMMED: None, **verdict.remember})
+
+    def _decide(self, situation: Situation) -> Verdict:
         name = situation.room.name
         settings = situation.settings
-        if situation.dimmed:
-            return Verdict(
-                Decision(
-                    f"Upp igen: någon är tillbaka i {name} under varningsdimringen.",
-                    Switch(on=True, lit_only=True),
-                )
-            )
+        if WARNING_DIMMED in situation.memory and situation.lit:
+            return Verdict(_back_to_full(name), remember={WARNING_DIMMED: None})
         if situation.lit:
             return Verdict(Decision(f"Någon är i {name}, och lamporna lyser."))
         if settings.windowless:
@@ -287,14 +306,14 @@ class OccupiedRoom:
             return Verdict(
                 Decision(
                     f"Tändes: någon är i {name} och det var mörkt "
-                    f"({_lux(lux)} lux, under {_lux(dark)}).",
+                    f"({_format_lux(lux)} lux, under {_format_lux(dark)}).",
                     Switch(on=True),
                 )
             )
         return Verdict(
             Decision(
-                f"Någon är i {name}, men det är ljust nog ({_lux(lux)} lux, "
-                f"mörkt är under {_lux(dark)})."
+                f"Någon är i {name}, men det är ljust nog ({_format_lux(lux)} lux, "
+                f"mörkt är under {_format_lux(dark)})."
             )
         )
 
@@ -308,7 +327,7 @@ class VacantRoom:
         name = situation.room.name
         settings = situation.settings
         if not situation.lit:
-            return Verdict(Decision(f"{name} är tomt."))
+            return Verdict(Decision(f"{name} är tomt."), remember={WARNING_DIMMED: None})
         off_after = settings.off_after_empty_seconds
         off_at = situation.presence.since + off_after
         if situation.now >= off_at:
@@ -336,15 +355,30 @@ class VacantRoom:
                 ),
                 wake_at=dim_at,
             )
-        percent = settings.dim_percent
         return Verdict(
-            Decision(
-                f"Dimrades till {percent} %: {name} är tomt, och lamporna släcks när det varit "
-                f"tomt i {duration(off_after)}. Rör dig i rummet för att behålla ljuset.",
-                Switch(on=True, brightness=percent, lit_only=True),
+            _warning_dim(
+                name, settings, f"lamporna släcks när det varit tomt i {duration(off_after)}"
             ),
+            remember={WARNING_DIMMED: situation.memory.get(WARNING_DIMMED, situation.now)},
             wake_at=off_at,
         )
+
+
+def _warning_dim(name: str, settings: RoomSettings, when: str) -> Decision:
+    """Dimra rummets lampor som varning för att de snart släcks. Dimringen gör ingen ljusare."""
+    percent = settings.dim_percent
+    return Decision(
+        f"Dimrades till {percent} %: {name} är tomt, och {when}. "
+        "Rör dig i rummet för att behålla ljuset.",
+        Switch(on=True, brightness=percent, lit_only=True, dim_only=True),
+    )
+
+
+def _back_to_full(name: str) -> Decision:
+    return Decision(
+        f"Full styrka igen: någon rörde sig i {name} under varningsdimringen.",
+        Switch(on=True, lit_only=True),
+    )
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
@@ -424,6 +458,8 @@ def _commands(situation: Situation, switch: Switch, reason: str) -> list[LampCom
     for lamp_id, state in situation.lamps.items():
         if switch.lit_only and state.on is not True:
             continue
+        if switch.dim_only and state.brightness <= switch.brightness:
+            continue
         if switch.on:
             needed = state.on is not True or state.brightness != switch.brightness
         else:
@@ -438,11 +474,11 @@ def _commands(situation: Situation, switch: Switch, reason: str) -> list[LampCom
 
 def manual_command(room: Room, lamp: Lamp, on: bool) -> LampCommand:
     """Kommandot när någon tänder eller släcker en lampa för hand, med förklaring."""
-    action = "Tändes" if on else "Släcktes"
+    action = "tändes" if on else "släcktes"
     return LampCommand(
         lamp.id,
         on,
-        f"{action} för hand: {lamp.name}. Automatiken i {room.name} pausar tills rummet har "
+        f"{lamp.name} {action} för hand. Automatiken i {room.name} pausar tills rummet har "
         f"varit tomt i {duration(room.settings.off_after_empty_seconds)}.",
     )
 
@@ -475,6 +511,6 @@ def duration(seconds: float) -> str:
     return " och ".join(parts)
 
 
-def _lux(value: float) -> str:
+def _format_lux(value: float) -> str:
     """En ljusnivå med högst en decimal."""
     return f"{round(value, 1):g}"

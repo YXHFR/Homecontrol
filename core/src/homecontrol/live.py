@@ -216,7 +216,7 @@ def state_message(snapshot: Snapshot, simulation: SimulationView | None) -> dict
             for lamp in snapshot.lamps
         ],
         "events": [
-            {"at": event.at, "room_id": event.room_id, "text": event.text}
+            {"number": event.number, "at": event.at, "room_id": event.room_id, "text": event.text}
             for event in snapshot.events
         ],
         "simulation": None if simulation is None else simulation_message(simulation),
@@ -315,6 +315,7 @@ def _handle(controller: Controller, simulation: Simulation | None, text: str) ->
         case ResumeAutomation(room_id=room_id):
             controller.resume_automation(room_id)
             return
+    # Lamporna styrs även utan simulering; resten gäller bara simuleringen.
     if simulation is None:
         return
     match message:

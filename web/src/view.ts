@@ -174,14 +174,8 @@ function drawRoomNames(layer: Konva.Layer, t: Transform, floor: Floor, state: St
   }
 }
 
-/** Lamporna. Ett klick (eller tryck) på en lampa tänder eller släcker den för hand. */
-function drawLamps(
-  layer: Konva.Layer,
-  t: Transform,
-  floor: Floor,
-  state: StateMessage | null,
-  onToggle: (lampId: string) => void,
-) {
+/** Lamporna. Varje lampa bär sitt id (`lampId`) så att ett klick på den går att känna igen. */
+function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
   for (const lamp of floor.lamps) {
     const lampState = state?.lamps.find((l) => l.id === lamp.id);
     const on = lampState?.on === true;
@@ -207,8 +201,8 @@ function drawLamps(
       stroke: COLORS.wall,
       strokeWidth: lamp.virtual ? 1.5 : 1,
       dash: lamp.virtual ? [4, 3] : undefined,
+      lampId: lamp.id,
     });
-    bulb.on("click tap", () => onToggle(lamp.id));
     bulb.on("mouseenter", () => (layer.getStage().container().style.cursor = "pointer"));
     bulb.on("mouseleave", () => (layer.getStage().container().style.cursor = ""));
     layer.add(
@@ -338,10 +332,29 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
     drawZones(roomLayer, transform, shownFloor, state);
     drawWalls(roomLayer, transform, shownFloor);
     drawRoomNames(roomLayer, transform, shownFloor, state);
-    drawLamps(roomLayer, transform, shownFloor, state, callbacks.onToggleLamp);
+    drawLamps(roomLayer, transform, shownFloor, state);
     drawTracks(roomLayer, transform, shownFloor, state);
     placePersons(transform, shownFloor);
   };
+
+  // Ett klick på en lampa tänder eller släcker den för hand. Kartan ritas om
+  // när läget ändras, upp till tio gånger i sekunden, så klicket känns igen på
+  // lampans id och inte på att samma form trycktes ned och släpptes.
+  let pressedLamp: string | null = null;
+  const lampIdOf = (target: Konva.Node): string | null => {
+    const id: unknown = target.getAttr("lampId");
+    return typeof id === "string" ? id : null;
+  };
+  stage.on("pointerdown", (event) => {
+    pressedLamp = lampIdOf(event.target);
+  });
+  stage.on("pointerup", (event) => {
+    const lampId = lampIdOf(event.target);
+    if (lampId !== null && lampId === pressedLamp) {
+      callbacks.onToggleLamp(lampId);
+    }
+    pressedLamp = null;
+  });
 
   const onResize = () => render();
   window.addEventListener("resize", onResize);

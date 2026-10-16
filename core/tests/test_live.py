@@ -221,12 +221,12 @@ def test_clicking_a_lamp_switches_it_by_hand_and_pauses_the_automation() -> None
         assert state["lamps"][0]["brightness"] == 100
         [event] = state["events"]
         assert event["room_id"] == "vardagsrum"
-        assert event["text"].startswith("Tändes för hand: Taklampa.")
+        assert event["text"].startswith("Taklampa tändes för hand.")
         assert event["at"] == pytest.approx(time.time(), abs=60)
 
         ws.send_json({"type": "resume_automation", "room_id": "vardagsrum"})
         state = receive_until(ws, lambda s: not s["rooms"][0]["manual"])
-        assert "återställdes för hand" in state["events"][-1]["text"]
+        assert "slogs på igen för hand" in state["events"][-1]["text"]
 
 
 def test_lamps_can_be_controlled_without_simulation() -> None:
@@ -262,7 +262,7 @@ def test_other_origins_cannot_switch_lamps() -> None:
         ):
             ws.send_json({"type": "set_lamp", "lamp_id": "taklampa", "on": True})
             ws.receive_json()
-    assert lamps.history == []
+    assert not lamps.history
     assert controller.snapshot().rooms[0].manual is False
 
 

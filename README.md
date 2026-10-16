@@ -11,8 +11,8 @@ och släcks efter det.
 > rummen med musen eller fingret. Varje rumskort blir en virtuell radar som
 > ser personerna framför sig, och kärnan gör om det radarerna ser till
 > prickar på kartan och upptagna rum. Då tänds de virtuella lamporna när det
-> är mörkt, dimras som en varning och släcks när rummet har varit tomt en
-> stund, och släcks när dagsljuset räcker. Ett klick på en lampa tänder eller
+> är mörkt, och dimras som en varning och släcks när rummet har varit tomt
+> en stund eller när dagsljuset räcker. Ett klick på en lampa tänder eller
 > släcker den för hand, och under **Varför hände det?** står varför lamporna
 > gjorde som de gjorde. Dagsljuset ställs med
 > ett reglage, och tiden kan gå 10 eller 60 gånger fortare så att du slipper
@@ -210,8 +210,8 @@ Rummet står som **manuellt** på kartan och under **Just nu**, och med
 **Automatik igen** tar automatiken över direkt.
 
 **Varför hände det?** listar de senaste besluten med klockslag och värden,
-till exempel "19:02 Vardagsrum: Tändes: någon är i Vardagsrum och det var
-mörkt (9 lux, under 30)." Listan finns bara i kärnans minne och töms när den
+till exempel "19:02 Tändes: någon är i Vardagsrum och det var mörkt (9 lux,
+under 30)." Listan finns bara i kärnans minne och töms när den
 startar om.
 
 ### Hemmet: spara, flytta och läsa in
@@ -294,17 +294,22 @@ lamporna och ändra planlösningen och bilden av planritningen.
 - Utanför hemmet når du livevyn med [Tailscale](https://tailscale.com/):
   installera det på datorn som kör Homecontrol och på din telefon, och surfa
   till datorns Tailscale-adress (100.x.y.z) och port 8000. Använder du
-  datorns Tailscale-namn (MagicDNS), skriv in namnet i `ALLOWED_HOSTS`.
+  datorns Tailscale-namn (MagicDNS), skriv in namnet som `ALLOWED_HOSTS` i
+  `.env`.
 - Öppna aldrig port 8000 (eller någon annan av portarna) mot internet i
   routern.
 - Släpper du in gäster på hemnätverket kan de nå Homecontrol. Ett gästnätverk
   i routern, skilt från hemnätverket, hindrar det.
+- Portarna som Docker öppnar går förbi datorns egen brandvägg (till exempel
+  ufw), så en regel där begränsar inte vem som når Homecontrol. Använd
+  `BIND_ADDRESS` eller routern.
 
-Kärnan svarar bara på anrop till de adresser och namn den känner till
-(`localhost`, IP-adresser och `ALLOWED_HOSTS`), och bara från sina egna
-sidor. Det gäller även lampstyrningen. Det hindrar att en främmande webbsida
-som någon i hemmet besöker styr lamporna eller läser kartan genom
-webbläsaren.
+Kärnan svarar bara när den nås på de adresser och namn den känner till
+(`localhost`, IP-adresser och `ALLOWED_HOSTS`), och inte till andra
+webbsidor. Det gäller även lampstyrningen. Det hindrar att en främmande
+webbsida som någon i hemmet besöker styr lamporna eller läser kartan genom
+webbläsaren. Program och skript i nätverket släpps däremot in, eftersom det
+inte finns några konton.
 
 ### Stoppa och uppdatera
 
@@ -379,7 +384,8 @@ tar emot dem. Lamputgångarna berättar hur lamporna är med
 `LampStateReported` genom samma ingång som källorna. Varje regel i
 regelmotorn är en egen klass med metoden `decide`; en ny sorts regel läggs
 till i listan `rules.DEFAULT_RULES` utan att de andra ändras (se
-`core/src/homecontrol/rules.py`). Manuell styrning från livevyn går till
+`core/src/homecontrol/rules.py`). Ett beslut gäller i dag alltid alla lampor i
+ett rum. Manuell styrning från livevyn går till
 `Controller.set_lamp`. Simuleringen
 (`simulation.py`) är både en källa och en utgång. Simuleringsläget i livevyn
 styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna

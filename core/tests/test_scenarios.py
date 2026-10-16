@@ -10,6 +10,7 @@ efter att personen gick.
 
 import pytest
 
+from homecontrol.connectors import LampStateReported
 from homecontrol.home import RoomSettings, ZoneKind
 from homes import home_with_settings, home_with_zones, side_by_side_home, two_floor_home, zone
 from scenario import Scenario
@@ -69,7 +70,7 @@ def test_returning_during_the_warning_dimming_brings_the_light_back() -> None:
         .expect_dimmed(50)
         .person_enters()
         .expect_full_brightness()
-        .expect_event("Upp igen")
+        .expect_event("Full styrka igen")
         .wait(minutes=10)
         .expect_full_brightness()
         .expect_lamp_switches(True)
@@ -564,7 +565,7 @@ def test_manual_switch_off_pauses_the_automation_until_the_room_has_been_empty()
         .switch_lamp(False)
         .expect_lamp_off()
         .expect_manual()
-        .expect_event("Släcktes för hand")
+        .expect_event("Taklampa släcktes för hand")
         .wait(hours=1)
         .expect_lamp_off()
         .person_leaves()
@@ -621,7 +622,7 @@ def test_manual_mode_can_be_ended_at_once() -> None:
         .resume_automation()
         .expect_manual(False)
         .expect_lamp_on()
-        .expect_event("Automatiken i Vardagsrum återställdes för hand")
+        .expect_event("Automatiken i Vardagsrum slogs på igen för hand")
     )
 
 
@@ -642,3 +643,27 @@ def test_unknown_lamp_state_gets_no_commands_until_the_room_should_be_lit() -> N
         .wait(minutes=3)
         .expect_lamp_off()
     )
+
+
+def test_manual_mode_ending_in_an_empty_room_warns_by_dimming_first() -> None:
+    """Den som tänt för hand och sitter så still att radarn inte ser hen får en varning."""
+    (
+        Scenario()
+        .light_level(500)
+        .switch_lamp(True)
+        .wait(minutes=2, seconds=29)
+        .expect_full_brightness()
+        .wait(seconds=1)
+        .expect_dimmed(50)
+        .expect_manual()
+        .person_enters()
+        .expect_full_brightness()
+        .expect_manual()
+    )
+
+
+def test_lamp_dimmed_with_a_remote_is_not_turned_up_by_presence() -> None:
+    scenario = Scenario().light_level(10).person_enters().expect_lamp_on()
+    scenario.controller.observe(LampStateReported("taklampa", on=True, brightness=30))
+    scenario.wait(minutes=5)
+    assert len(scenario.lamps.history) == 1  # inga nya kommandon efter rapporten

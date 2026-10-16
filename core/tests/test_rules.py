@@ -12,6 +12,7 @@ from homecontrol.rules import (
     BRIGHT_SINCE,
     DEFAULT_RULES,
     MANUAL,
+    WARNING_DIMMED,
     Decision,
     LampState,
     Memory,
@@ -96,12 +97,30 @@ def test_switches_off_when_delay_has_passed() -> None:
     assert result.wake_at is None
 
 
-def test_presence_brings_dimmed_lamps_back_up() -> None:
-    result = evaluate(HOME, occupied(lux=500), lamp(LampState(on=True, brightness=50)), now=0)
+def test_presence_brings_warning_dimmed_lamps_back_up() -> None:
+    dimmed = lamp(LampState(on=True, brightness=50))
+    result = evaluate(HOME, occupied(lux=500, memory={WARNING_DIMMED: 0}), dimmed, now=1)
 
     [command] = result.commands
     assert (command.on, command.brightness) == (True, 100)
-    assert "Upp igen" in command.reason
+    assert "Full styrka igen" in command.reason
+    assert WARNING_DIMMED not in result.memory[ROOM]
+
+
+def test_a_lamp_dimmed_for_another_reason_is_left_as_it_is() -> None:
+    """Till exempel med en fjärrkontroll, eller 99 % efter avrundning hos lampan."""
+    for brightness in (20, 99):
+        result = evaluate(HOME, occupied(lux=5), lamp(LampState(True, brightness)), now=0)
+        assert result.commands == ()
+
+
+def test_warning_dimming_never_makes_a_lamp_brighter() -> None:
+    weak = lamp(LampState(on=True, brightness=20))
+
+    result = evaluate(HOME, vacant(since=0), weak, now=OFF_AFTER_EMPTY_SECONDS - 10)
+
+    assert result.commands == ()
+    assert WARNING_DIMMED in result.memory[ROOM]
 
 
 def test_without_warning_dimming_the_lamp_is_simply_switched_off() -> None:
@@ -228,12 +247,17 @@ def test_manual_mode_leaves_the_lamps_while_someone_is_there() -> None:
 
 
 def test_manual_mode_ends_when_the_room_has_been_empty_for_the_delay() -> None:
-    # Ingen varningsdimring heller: automatiken pausar.
-    for now in (200, 100 + OFF_AFTER_EMPTY_SECONDS - 1):
-        waiting = evaluate(HOME, vacant(since=100, memory={MANUAL: 50}), lamp(ON), now=now)
-        assert waiting.commands == ()
-        assert waiting.wake_at is not None
-        assert waiting.wake_at <= 100 + OFF_AFTER_EMPTY_SECONDS
+    resumes_at = 100 + OFF_AFTER_EMPTY_SECONDS
+    waiting = evaluate(HOME, vacant(since=100, memory={MANUAL: 50}), lamp(ON), now=200)
+    assert waiting.commands == ()
+    assert waiting.wake_at == resumes_at - 30
+
+    # 30 sekunder innan automatiken tar över och släcker kommer varningsdimringen.
+    warning = evaluate(HOME, vacant(since=100, memory={MANUAL: 50}), lamp(ON), now=resumes_at - 30)
+    [command] = warning.commands
+    assert (command.on, command.brightness) == (True, 50)
+    assert "automatiken tar över om 30 sekunder" in command.reason
+    assert warning.wake_at == resumes_at
 
     resumed = evaluate(
         HOME, vacant(since=100, memory={MANUAL: 50}), lamp(ON), now=100 + OFF_AFTER_EMPTY_SECONDS
@@ -248,7 +272,7 @@ def test_manual_mode_counts_from_the_manual_switch_in_an_already_empty_room() ->
     result = evaluate(HOME, vacant(since=0, memory={MANUAL: 500}), lamp(ON), now=600)
 
     assert result.commands == ()
-    assert result.wake_at == 500 + OFF_AFTER_EMPTY_SECONDS
+    assert result.wake_at == 500 + OFF_AFTER_EMPTY_SECONDS - 30  # varningsdimringen
 
 
 # --- Nya regeltyper ---
