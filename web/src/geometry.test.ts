@@ -40,6 +40,12 @@ describe("parkingSpot", () => {
     expect(spot.x).toBeGreaterThan(width);
     expect(spot.x).toBeLessThan(width + MARGIN_METERS);
   });
+
+  it("ställer nya personer under varandra och börjar om uppifrån", () => {
+    const spots = [0, 1, 4].map((index) => parkingSpot([room], index));
+
+    expect(spots.map((spot) => spot.y)).toEqual([0.5, 1.5, 0.5]);
+  });
 });
 
 describe("wallSegments", () => {
@@ -83,12 +89,16 @@ describe("parseServerMessage", () => {
   });
 
   it("känner igen läget och avvisar annat", () => {
-    expect(parseServerMessage('{"type":"state","targets":[],"rooms":[],"lamps":[]}')).toEqual({
-      type: "state",
-      targets: [],
-      rooms: [],
-      lamps: [],
+    const state = { type: "state", targets: [], rooms: [], lamps: [], simulation: null };
+    const simulation = { enabled: true, speed: 10, daylight: 5, persons: [] };
+    expect(parseServerMessage(JSON.stringify(state))).toEqual(state);
+    expect(parseServerMessage(JSON.stringify({ ...state, simulation }))).toEqual({
+      ...state,
+      simulation,
     });
+    expect(parseServerMessage(JSON.stringify({ ...state, simulation: { ...simulation, speed: 2 } })))
+      .toBeNull();
+    expect(parseServerMessage('{"type":"state","targets":[],"rooms":[],"lamps":[]}')).toBeNull();
     expect(parseServerMessage('{"type":"state"}')).toBeNull();
     expect(parseServerMessage("null")).toBeNull();
     expect(parseServerMessage("{")).toBeNull();

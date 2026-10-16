@@ -14,6 +14,9 @@ scenariot säger till. Tre minuters väntan tar därför ingen tid alls.
         .expect_lamp_off()
     )
 
+Personerna har namn när det finns flera, till exempel
+`.person_enters(who="Anna")`. Utan namn gäller stegen en och samma person.
+
 Varje steg returnerar scenariot, så stegen kan kedjas. Ett misslyckat
 `expect_...` säger vad som hände och lampans egen förklaring.
 
@@ -26,8 +29,10 @@ from typing import Self
 from homecontrol.clock import ManualClock
 from homecontrol.controller import Controller, LampView
 from homecontrol.home import Home, Point
-from homecontrol.simulation import SimulatedLampOutput, SimulatedSource
+from homecontrol.simulation import SimulatedLampOutput, SimulatedSource, Simulation
 from homes import one_room_home
+
+_PERSON = "personen"
 
 
 class Scenario:
@@ -36,8 +41,17 @@ class Scenario:
         self.clock = ManualClock()
         self.lamps = SimulatedLampOutput()
         self.controller = Controller(self.home, self.clock, [self.lamps])
-        self.source = SimulatedSource()
-        self.source.start(self.controller.observe)
+        # Samma simuleringsläge som i livevyn, men med en klocka som scenariot styr.
+        self.source = SimulatedSource(room_ids=(room.id for room in self.home.rooms))
+        self.simulation = Simulation(
+            self.source,
+            self.controller.observe,
+            self.clock,
+            floor_ids=(floor.id for floor in self.home.floors),
+            daylight=None,
+        )
+        # Personernas namn i scenariot och deras id i låtsaskällan.
+        self._persons: dict[str, str] = {}
 
     # --- Händelser ---
 
@@ -45,15 +59,27 @@ class Scenario:
         self.source.set_light_level(self._room_id(room), lux)
         return self
 
-    def person_enters(self, room: str | None = None) -> Self:
-        """Låtsaspersonen går till mitten av rummet."""
-        room_id = self._room_id(room)
-        self.source.move_person(self.home.floor_of(room_id).id, self.home.room(room_id).center)
+    def daylight(self, lux: float) -> Self:
+        """Samma ljusnivå i alla rum, som dagsljusreglaget i livevyn."""
+        self.simulation.set_daylight(lux)
         return self
 
-    def person_moves_to(self, *, x: float, y: float, floor: str | None = None) -> Self:
+    def simulation_off(self) -> Self:
+        """Simuleringsläget slås av i livevyn. Låtsaspersonerna försvinner."""
+        self.simulation.set_enabled(False)
+        return self
+
+    def person_enters(self, room: str | None = None, *, who: str = _PERSON) -> Self:
+        """Personen går till mitten av rummet."""
+        room_id = self._room_id(room)
+        self._place(who, self.home.floor_of(room_id).id, self.home.room(room_id).center)
+        return self
+
+    def person_moves_to(
+        self, *, x: float, y: float, floor: str | None = None, who: str = _PERSON
+    ) -> Self:
         floor_id = floor if floor is not None else _only(f.id for f in self.home.floors)
-        self.source.move_person(floor_id, Point(x, y))
+        self._place(who, floor_id, Point(x, y))
         return self
 
     def source_lost(self) -> Self:
@@ -61,9 +87,9 @@ class Scenario:
         self.source.stop()
         return self
 
-    def person_leaves(self) -> Self:
-        """Låtsaspersonen lämnar hemmet och syns inte längre."""
-        self.source.remove_person()
+    def person_leaves(self, *, who: str = _PERSON) -> Self:
+        """Personen lämnar hemmet och syns inte längre."""
+        self.simulation.remove_person(self._persons.pop(who))
         return self
 
     def wait(self, *, minutes: float = 0, seconds: float = 0) -> Self:
@@ -120,6 +146,17 @@ class Scenario:
         return self
 
     # --- Hjälpfunktioner ---
+
+    def _place(self, who: str, floor_id: str, position: Point) -> None:
+        """Flyttar personen, eller lägger till den om den inte redan finns."""
+        person_id = self._persons.get(who)
+        if person_id is None or person_id not in self.source.persons:
+            added = self.simulation.add_person(floor_id, position)
+            if added is None:
+                raise RuntimeError(f"Simuleringen tog inte emot {who} på våningen {floor_id}")
+            self._persons[who] = added
+        else:
+            self.simulation.move_person(person_id, floor_id, position)
 
     def _lamp_view(self, lamp: str | None) -> LampView:
         lamp_id = lamp if lamp is not None else _only(lamp.id for lamp in self.home.lamps)

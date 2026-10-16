@@ -61,20 +61,22 @@ describe("LiveConnection", () => {
     sockets[0].open();
 
     sockets[0].receive("inte json");
-    sockets[0].receive('{"type":"state","targets":[],"rooms":[],"lamps":[]}');
+    sockets[0].receive('{"type":"state","targets":[],"rooms":[],"lamps":[],"simulation":null}');
 
-    expect(messages).toEqual([{ type: "state", targets: [], rooms: [], lamps: [] }]);
+    expect(messages).toEqual([
+      { type: "state", targets: [], rooms: [], lamps: [], simulation: null },
+    ]);
   });
 
   it("skickar bara när anslutningen är öppen", () => {
     const { connection, sockets } = setup();
     connection.start();
 
-    connection.send({ type: "remove_person" });
+    connection.send({ type: "set_daylight", lux: 1 });
     sockets[0].open();
-    connection.send({ type: "remove_person" });
+    connection.send({ type: "set_daylight", lux: 2 });
 
-    expect(sockets[0].sent).toEqual(['{"type":"remove_person"}']);
+    expect(sockets[0].sent).toEqual(['{"type":"set_daylight","lux":2}']);
   });
 
   it("ansluter igen med växande väntetid när kontakten bryts", () => {

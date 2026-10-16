@@ -7,9 +7,11 @@ och släcks efter det.
 > Projektet är i ett tidigt skede. Grunden startar (kärnan, databasen, MQTT och
 > Zigbee2MQTT) och det finns en första livevy som ritar hemmet från
 > databasen, en våning i taget. Första gången visas ett påhittat exempelhem.
-> Dra en låtsasperson in i ett rum så tänds de virtuella lamporna när det är
-> mörkt, och de släcks när rummet har varit tomt en stund. Riktiga sensorer
-> och lampor kopplas in i senare steg.
+> Livevyn har ett simuleringsläge: lägg till låtsaspersoner och dra in dem i
+> rummen med musen eller fingret, så tänds de virtuella lamporna när det är
+> mörkt och släcks när rummet har varit tomt en stund. Dagsljuset ställs med
+> ett reglage, och tiden kan gå 10 eller 60 gånger fortare så att du slipper
+> vänta. Riktiga sensorer och lampor kopplas in i senare steg.
 
 ## Snabbstart
 
@@ -183,7 +185,9 @@ Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
 närvarobedömningen avgör vilka rum som är upptagna, regelmotorn
 (`rules.evaluate`, en ren funktion) ger lampkommandon med förklaringar och
 lamputgångar (`connectors.LampOutput`) tar emot dem. Simuleringen
-(`simulation.py`) är både en källa och en utgång.
+(`simulation.py`) är både en källa och en utgång. Simuleringsläget i livevyn
+styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
+når kärnan genom samma ingång som en riktig källa.
 
 Hemmodellen finns i `home.py` och kontrolleras där. `homefile.py` gör om den
 till och från ett JSON-dokument, och `store.py` sparar samma dokument i

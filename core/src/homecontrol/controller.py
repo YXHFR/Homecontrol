@@ -56,7 +56,9 @@ class Controller:
         self._clock = clock
         self._outputs = tuple(outputs)
         self._targets: dict[str, tuple[Target, ...]] = {}
-        self._lux: dict[str, float] = {}
+        # Ljusnivån per rum och källa. Det senast mätta värdet gäller, och en
+        # källa som tappas tar sina värden med sig.
+        self._lux: dict[str, dict[str, float]] = {}
         self._presence = presence.initial_presence(home, clock.now())
         # Lamporna antas vara släckta vid start.
         self._lamps_on = {lamp.id: False for lamp in home.lamps}
@@ -83,15 +85,19 @@ class Controller:
                 self._assess_presence()
             case SourceLost(source_id=source_id):
                 self._targets.pop(source_id, None)
+                for by_source in self._lux.values():
+                    by_source.pop(source_id, None)
                 self._assess_presence()
-            case LightLevelObserved(room_id=room_id, lux=lux):
+            case LightLevelObserved(source_id=source_id, room_id=room_id, lux=lux):
                 if room_id not in self._room_ids:
                     logger.warning("Ljusnivå för okänt rum %r ignoreras", room_id)
                     return
                 if not math.isfinite(lux) or lux < 0:
                     logger.warning("Ogiltig ljusnivå %r ignoreras", lux)
                     return
-                self._lux[room_id] = lux
+                by_source = self._lux.setdefault(room_id, {})
+                by_source.pop(source_id, None)  # sist i ordningen är senast mätt
+                by_source[source_id] = lux
         self._evaluate()
         self._notify()
 
@@ -110,7 +116,7 @@ class Controller:
         return Snapshot(
             targets=self._all_targets(),
             rooms=tuple(
-                RoomView(room.id, self._presence[room.id].occupied, self._lux.get(room.id))
+                RoomView(room.id, self._presence[room.id].occupied, self._room_lux(room.id))
                 for room in self._home.rooms
             ),
             lamps=tuple(
@@ -124,12 +130,17 @@ class Controller:
             self._home, self._targets, self._presence, self._clock.now()
         )
 
+    def _room_lux(self, room_id: str) -> float | None:
+        by_source = self._lux.get(room_id)
+        # Källan som mätte senast ligger sist, eftersom den läggs in på nytt varje gång.
+        return next(reversed(by_source.values()), None) if by_source else None
+
     def _all_targets(self) -> tuple[Target, ...]:
         return tuple(target for targets in self._targets.values() for target in targets)
 
     def _evaluate(self) -> None:
         room_states = {
-            room.id: rules.RoomState(self._presence[room.id], self._lux.get(room.id))
+            room.id: rules.RoomState(self._presence[room.id], self._room_lux(room.id))
             for room in self._home.rooms
         }
         result = rules.evaluate(self._home, room_states, self._lamps_on, self._clock.now())

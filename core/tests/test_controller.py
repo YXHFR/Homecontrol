@@ -37,6 +37,28 @@ def test_lost_source_forgets_its_targets() -> None:
     assert not controller.snapshot().rooms[0].occupied
 
 
+def test_lost_source_forgets_only_its_own_light_levels() -> None:
+    controller, _, _ = make()
+    controller.observe(LightLevelObserved("a", "vardagsrum", 10))
+    controller.observe(SourceLost("b"))
+    assert controller.snapshot().rooms[0].lux == 10
+
+    controller.observe(SourceLost("a"))
+
+    assert controller.snapshot().rooms[0].lux is None
+
+
+def test_latest_light_level_wins_and_the_other_source_remains() -> None:
+    controller, _, _ = make()
+    controller.observe(LightLevelObserved("sensor", "vardagsrum", 40))
+    controller.observe(LightLevelObserved("sim", "vardagsrum", 10))
+    assert controller.snapshot().rooms[0].lux == 10
+
+    controller.observe(SourceLost("sim"))
+
+    assert controller.snapshot().rooms[0].lux == 40
+
+
 class BrokenOutput:
     def send(self, command: LampCommand) -> None:
         raise ConnectionError("borta")
