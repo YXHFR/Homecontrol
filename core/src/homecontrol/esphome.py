@@ -425,7 +425,7 @@ Listener = Callable[[], None]
 
 @dataclass(eq=False)
 class _Card:
-    source: "EsphomeSource"
+    source: EsphomeSource
     name: str
     reader: CardReader
     link: CardLink | None = None

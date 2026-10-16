@@ -812,7 +812,7 @@ class FakeBroker:
         """Så många anslutningsförsök till som misslyckas."""
 
     @contextlib.asynccontextmanager
-    async def connect(self) -> AsyncIterator["FakeBroker"]:
+    async def connect(self) -> AsyncIterator[FakeBroker]:
         if self.refuse:
             self.refuse -= 1
             raise ConnectionError("vägrar")
