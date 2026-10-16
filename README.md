@@ -93,7 +93,7 @@ docker compose up -d     # starta om kärnan med hemligheten
 ```
 
 Byt aldrig hemligheten; då får varje kort en ny nyckel och måste raderas och
-installeras om. Med hemligheten satt börjar simuleringsläget avslaget.
+installeras om. När det första kortet är placerat stängs simuleringsläget av.
 
 1. Starta Homecontrol innan eller strax efter att kortet har fått Wi-Fi.
    Kärnan hittar korten i hemnätet av sig själv (med mDNS). Ett nytt kort
@@ -132,7 +132,8 @@ till datorns adress i hemnätet, så att den bara nås därifrån.
 
 Homecontrol använder bara lampor som är placerade på kartan; andra
 Zigbee-enheter rörs inte. När två eller fler Zigbee-lampor sitter i samma rum
-skapar Homecontrol en grupp i Zigbee2MQTT som heter `homecontrol-<rummet>`, så
+skapar Homecontrol en grupp i Zigbee2MQTT som heter `homecontrol-` följt av
+rummets id (till exempel `homecontrol-vardagsrum`), så
 att rummets lampor tänds och släcks samtidigt med en mjuk övergång. Ändra
 inte i de grupperna själv; Homecontrol håller dem i takt med kartan.
 
@@ -140,10 +141,10 @@ Tänder, släcker eller dimrar du en lampa med en fjärrkontroll eller i en app
 räknas det som manuell styrning, precis som ett klick i livevyn. En lampa som
 inte svarar (till exempel när strömbrytaren är av) visas med ⚠ på kartan.
 
-När Homecontrol kan styra riktiga lampor börjar simuleringsläget avslaget.
-Så länge riktiga lampor är placerade kan tiden inte gå fortare än vanligt, så
-att de aldrig släcks för tidigt. De virtuella lamporna i simuleringen styr
-aldrig riktiga lampor.
+När den första riktiga lampan är placerad stängs simuleringsläget av. Så länge
+riktiga lampor är placerade kan tiden inte gå fortare än vanligt, så att de
+aldrig släcks för tidigt. De virtuella lamporna i simuleringen styr aldrig
+riktiga lampor.
 
 ### Om något inte fungerar
 
@@ -154,6 +155,11 @@ docker compose logs    # visar vad tjänsterna skriver, leta efter fel
 
 Ett vanligt fel är att `.env` saknas eller att ett värde är tomt. Då säger
 `docker compose up` vilken inställning som saknas.
+
+Syns inte en ny lampa under **Placera** i kartredigeraren? Kontrollera i
+Zigbee2MQTT att den är ihopparad och klar (inte "interviewing"). Står en lampa
+med ⚠ på kartan svarar den inte: kontrollera strömbrytaren, eller att
+Zigbee2MQTT når lampan (den är för långt bort eller saknar ström).
 
 ### Rita hemmet i kartredigeraren
 
@@ -384,7 +390,8 @@ Så läser du filen:
   (`meters_per_pixel`). Bilden själv finns bara i databasen.
 - `lamps` har en plats, kan höra till en zon (`zone_id`) och har en
   `profile` som säger hur lampan styrs (`generisk` eller `ikea-tradfri`).
-  En Zigbee-lampa har id:t `zigbee-` följt av lampans IEEE-adress; andra
+  En Zigbee-lampa har id:t `zigbee-` följt av lampans IEEE-adress (lampans
+  unika adress i Zigbee-nätet; kartredigeraren fyller i den själv). Andra
   lampor är virtuella.
   `lux_contribution` är hur många lux lampan ger vid rummets ljussensor på
   full styrka (0 om inget anges, se **Ljusreglerna**).
@@ -517,8 +524,8 @@ Zigbee2MQTT (`zigbee.py`) skiljer lampornas svar på kärnans kommandon från
 sådana ändringar, läser lampornas läge innan den styr dem och skickar
 kommandona genom lampans profil (till exempel IKEA TRÅDFRI:s egenheter).
 Kopplingstesterna kör den mot exempelmeddelanden i `core/tests/zigbee_exempel/`.
-Simuleringen (`simulation.py`) är både en källa och en utgång. Simuleringsläget i livevyn
-styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
+Simuleringen (`simulation.py`) är både en källa och en utgång. Simuleringsläget
+i livevyn styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
 når kärnan genom samma ingång som en riktig källa, som radarmål i varje
 rumskorts egna koordinater. Tidsfarten gäller hela kärnan och är därför
 spärrad till 1× så länge hemmet har riktiga rumskort eller lampor.

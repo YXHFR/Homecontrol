@@ -205,7 +205,8 @@ class Controller:
         """En lampa ändrades med fjärrkontroll eller app: det räknas som manuell styrning."""
         room = self._home.room_of(lamp_id)
         lamp = next(lamp for lamp in room.lamps if lamp.id == lamp_id)
-        logger.info("%s ändrades utanför kärnan", lamp_id)
+        # Säger när någon i hemmet rör en fjärrkontroll, så det loggas bara när man felsöker.
+        logger.debug("%s ändrades utanför kärnan", lamp_id)
         self._memory[room.id] = rules.start_manual(self._memory.get(room.id, {}), self._clock.now())
         self._log_event(room.id, rules.external_change_text(room, lamp, state))
 

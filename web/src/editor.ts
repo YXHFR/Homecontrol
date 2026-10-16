@@ -740,6 +740,14 @@ export function mountEditor(
     render();
   }
 
+  /** Det riktiga kortet eller den riktiga lampan som placeras med nästa klick, om någon. */
+  const foundToPlace = (kind: ItemKind): Card | FoundLamp | undefined => {
+    if (kind === "node") {
+      return cardToPlace ?? undefined;
+    }
+    return kind === "lamp" ? (lampToPlace ?? undefined) : undefined;
+  };
+
   /**
    * Placerar ett rumskort, en router eller en lampa och väljer den. Ett nytt
    * riktigt kort får kortets namn som id, och en ny riktig lampa lampans id
@@ -747,8 +755,7 @@ export function mountEditor(
    */
   const place = (kind: ItemKind, point: Point) => {
     const floor = currentFloor();
-    const found: Card | FoundLamp | undefined =
-      (kind === "node" ? cardToPlace : kind === "lamp" ? lampToPlace : null) ?? undefined;
+    const found = foundToPlace(kind);
     const placed =
       shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point, found);
     if (placed === null || floor === null) {
@@ -766,6 +773,7 @@ export function mountEditor(
     }
     // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
     // gör att den nya saken förblir vald.
+    // Bara en riktig lampa har en profil; ett rumskort har ingen.
     const profile = found !== undefined && "profile" in found ? found.profile : undefined;
     const given = { id: placed.id, name: placed.name, profile };
     commit((document) => placeItem(document, kind, floor.id, point, given)?.document ?? document);

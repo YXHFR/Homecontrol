@@ -364,12 +364,20 @@ class Simulation:
     def use_home(self, home: Home) -> None:
         """Byter till ett ändrat hem, så att nya rum, noder och våningar också simuleras.
 
-        Har ett riktigt rumskort eller en riktig lampa just placerats går tiden
-        tillbaka till vanlig takt.
+        Har det första riktiga rumskortet eller den första riktiga lampan just
+        placerats stängs simuleringsläget av, så att låtsaspersonerna inte styr
+        riktiga lampor och de riktiga spåren hamnar i historiken. Slår någon på
+        det igen går tiden ändå i vanlig takt.
         """
+        was_real = self._speed_locked()
         self._floor_ids = frozenset(floor.id for floor in home.floors)
         self._source.use_home(home)
-        if self._speed_locked() and self._clock.speed != 1:
+        if not self._speed_locked():
+            return
+        if not was_real and self._enabled:
+            logger.info("Riktiga sensorer eller lampor är placerade; simuleringsläget stängs av")
+            self.set_enabled(False)
+        elif self._clock.speed != 1:
             self._clock.set_speed(1)
             self._notify()
 

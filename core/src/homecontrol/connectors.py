@@ -14,6 +14,7 @@ har en egen tråd (till exempel ett MQTT-bibliotek) lämnar över med
 `loop.call_soon_threadsafe`.
 """
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -119,6 +120,15 @@ Observation = (
     RadarTargetsObserved | MotionObserved | LightLevelObserved | SourceLost | LampStateReported
 )
 ObservationSink = Callable[[Observation], None]
+
+Defer = Callable[[Callable[[], None]], object]
+"""Kör en funktion strax efter det som pågår, till exempel när kärnan har
+lämnat alla observationer eller kommandon från ett och samma beslut."""
+
+
+def defer_in_loop(callback: Callable[[], None]) -> None:
+    """Kör `callback` när händelseloopen har gjort klart det den håller på med."""
+    asyncio.get_running_loop().call_soon(callback)
 
 
 class Source(Protocol):

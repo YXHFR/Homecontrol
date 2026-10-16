@@ -28,8 +28,9 @@ services:
       HOMECONTROL_HISTORY_KEEP_DAYS: ${HISTORY_KEEP_DAYS:-}
       # Rumskortens nycklar räknas fram ur den här. Tom: inga kort ansluts.
       HOMECONTROL_ESPHOME_SECRET: ${ESPHOME_SECRET:-}
-      # Zigbee-lamporna styrs genom Zigbee2MQTT på MQTT-brokern, som kärnan
-      # når på datorns egen adress (se network_mode ovan).
+      # Zigbee-lamporna styrs genom Zigbee2MQTT på MQTT-brokern. Kärnan delar
+      # datorns nätverk (se network_mode ovan) och når brokern där Mosquitto
+      # publicerar sin port: på BIND_ADDRESS, eller 127.0.0.1 om den inte är satt.
       HOMECONTROL_MQTT_HOST: ${BIND_ADDRESS:-127.0.0.1}
       HOMECONTROL_MQTT_PORT: ${MQTT_PORT:-1883}
       HOMECONTROL_MQTT_USER: ${MQTT_USER:?MQTT_USER saknas – kopiera .env.example till .env och fyll i}

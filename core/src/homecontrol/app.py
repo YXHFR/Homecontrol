@@ -15,13 +15,13 @@ from fastapi.staticfiles import StaticFiles
 from homecontrol import __version__
 from homecontrol.cards import create_cards_router
 from homecontrol.clock import SystemClock
+from homecontrol.connectors import defer_in_loop
 from homecontrol.controller import Controller
 from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
 from homecontrol.esphome import (
     AioesphomeNetwork,
     EsphomeSource,
     Network,
-    defer_in_loop,
     placed_cards,
 )
 from homecontrol.history import History
@@ -62,7 +62,7 @@ def create_app(
     """
     clock = clock if clock is not None else SystemClock()
     home = home if home is not None else example_home()
-    zigbee = None if mqtt is None else ZigbeeOutput(home)
+    zigbee = None if mqtt is None else ZigbeeOutput(home, defer=defer_in_loop)
     real_lamps = zigbee_lamps if zigbee is not None else _nothing_real
     lamps = SimulatedLampOutput(real_lamps)
     controller = Controller(home, clock, [lamps] if zigbee is None else [lamps, zigbee])
@@ -79,18 +79,22 @@ def create_app(
     )
     # Utan kopplingen finns inga riktiga kort, och alla noder simuleras.
     real_nodes = placed_cards if cards is not None else _nothing_real
-    # Simuleringsläget börjar påslaget bara när inga riktiga kort eller lampor
-    # kan anslutas, så att det finns något att se. Tidsfarten gäller hela
+    # Simuleringsläget börjar påslaget bara när hemmet inte har några riktiga
+    # kort eller lampor, så att det finns något att se. Tidsfarten gäller hela
     # kärnan och spärras därför till 1× så länge hemmet har riktiga kort eller
     # lampor (se Simulation).
     source = SimulatedSource(home, real_nodes=real_nodes)
+
+    def real_hardware(changed: Home) -> bool:
+        return bool(real_nodes(changed) or real_lamps(changed))
+
     simulation = Simulation(
         source,
         controller.observe,
         clock,
         floor_ids=(floor.id for floor in home.floors),
-        enabled=cards is None and zigbee is None,
-        real_hardware=lambda changed: bool(real_nodes(changed) or real_lamps(changed)),
+        enabled=not real_hardware(home),
+        real_hardware=real_hardware,
     )
     if history is not None:
         # Låtsaspersonerna ska inte hamna i historiken bland de riktiga spåren.

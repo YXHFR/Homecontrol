@@ -66,6 +66,7 @@ from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZerocon
 
 from homecontrol.cards import CardView, FirmwareUpdate
 from homecontrol.connectors import (
+    Defer,
     LightLevelObserved,
     MotionObserved,
     Observation,
@@ -495,7 +496,7 @@ class EsphomeSource:
         home: Home,
         network: Network,
         *,
-        defer: Callable[[Callable[[], None]], object] | None = None,
+        defer: Defer | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if len(secret) < MIN_SECRET_LENGTH:
@@ -721,10 +722,6 @@ class EsphomeSource:
     def _notify(self) -> None:
         for listener in list(self._listeners):
             listener()
-
-
-def defer_in_loop(callback: Callable[[], None]) -> object:
-    return asyncio.get_running_loop().call_soon(callback)
 
 
 # --- Nätverket ---

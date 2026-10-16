@@ -49,12 +49,12 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 import aiomqtt
 
 from homecontrol.config import MqttSettings
-from homecontrol.connectors import LampCommand, LampStateReported, ObservationSink
+from homecontrol.connectors import Defer, LampCommand, LampStateReported, ObservationSink
 from homecontrol.home import Home, LampProfile
 from homecontrol.lampdevices import FoundLamp
 
@@ -77,6 +77,7 @@ READ_RETRY_SECONDS = 60.0
 BRIGHTNESS_TOLERANCE = 2
 """Så många procent som ljusstyrkan kan skilja av avrundning utan att räknas som en ändring."""
 RECONNECT_SECONDS = 5.0
+"""Så länge utgången väntar innan den försöker ansluta till brokern igen."""
 MAX_OUTBOX = 1000
 """Så många meddelanden kan vänta på att skickas. Fler tappas hellre än att kärnan väntar."""
 
@@ -86,7 +87,7 @@ ZIGBEE_BRIGHTNESS = 254
 _IEEE = re.compile(r"^0x[0-9a-f]{16}$")
 
 
-def lamp_id(ieee_address: str) -> str:
+def zigbee_lamp_id(ieee_address: str) -> str:
     """Id:t som en Zigbee-lampa får i hemmet: ``zigbee-`` och IEEE-adressen utan 0x."""
     return LAMP_ID_PREFIX + ieee_address.lower().removeprefix("0x")
 
@@ -150,9 +151,11 @@ class Profile:
         mired = round(1_000_000 / setting.color_temp)
         if not self.one_attribute_per_transition:
             return ({**level, "color_temp": mired},)
-        # Färgen byts utan övergång, så att bara ljusstyrkan glider. Den skickas
-        # efter att lampan har tänts, eftersom en släckt lampa inte tar emot färg.
-        return (level, {"color_temp": mired, "transition": 0})
+        # Färgen byts först och utan övergång, så att bara ljusstyrkan glider.
+        # Ett nytt kommando avbryter TRÅDFRI:s pågående övergång, så ljusstyrkan
+        # skickas sist. En släckt TRÅDFRI tar inte emot färg och tänds då med
+        # den färg den hade.
+        return ({"color_temp": mired, "transition": 0}, level)
 
     def zigbee_brightness(self, percent: int) -> int:
         return max(
@@ -201,7 +204,7 @@ class ZigbeeLamp:
 
     @property
     def lamp_id(self) -> str:
-        return lamp_id(self.ieee_address)
+        return zigbee_lamp_id(self.ieee_address)
 
     @property
     def name(self) -> str:
@@ -221,6 +224,12 @@ def _parse_devices(devices: object) -> dict[str, ZigbeeLamp]:
             continue
         address = str(device.get("ieee_address", "")).lower()
         definition = device.get("definition")
+        name = str(device.get("friendly_name") or address)
+        if not _usable_topic(name):
+            logger.warning(
+                "Zigbee-enheten %s har ett namn som inte går att använda i MQTT", address
+            )
+            continue
         if (
             not _IEEE.match(address)
             or not isinstance(definition, dict)
@@ -232,13 +241,23 @@ def _parse_devices(devices: object) -> dict[str, ZigbeeLamp]:
         vendor = str(definition.get("vendor", ""))
         lamps[address] = ZigbeeLamp(
             ieee_address=address,
-            friendly_name=str(device.get("friendly_name") or address),
+            friendly_name=name,
             description=" ".join(
                 part for part in (vendor, str(definition.get("description", ""))) if part
             ),
             profile=LampProfile.IKEA_TRADFRI if vendor == "IKEA" else LampProfile.GENERIC,
         )
     return lamps
+
+
+def _usable_topic(name: str) -> bool:
+    """Om namnet går att använda i ett topic: inga jokertecken, och inte bryggans egna topics."""
+    return (
+        bool(name)
+        and not any(char in name for char in "+#\0")
+        and not name.startswith("bridge/")
+        and name != "bridge"
+    )
 
 
 def _has_light(exposes: object) -> bool:
@@ -333,11 +352,6 @@ class _AiomqttConnection:
             yield message.topic.value, bytes(payload)
 
 
-def defer_in_loop(callback: Callable[[], None]) -> None:
-    """Kör `callback` när händelseloopen har gjort klart det den håller på med."""
-    asyncio.get_running_loop().call_soon(callback)
-
-
 # --- Utgången ---
 
 
@@ -345,17 +359,25 @@ def defer_in_loop(callback: Callable[[], None]) -> None:
 class _LampStatus:
     """Vad utgången vet om en placerad lampa."""
 
-    read: bool = False
+    state_known: bool = False
     """Lampan har svarat med sitt läge sedan utgången anslöt eller lampan kom tillbaka."""
     asked_at: float | None = None
     """När lampan senast fick frågan om sitt läge."""
     gone: bool = False
     """Lampan har rapporterats som borta, och har inte svarat sedan dess."""
+    # Det lampan senast sa om sitt läge.
     on: bool | None = None
     brightness: int = 100
-    """Det lampan senast sa."""
-    answer_until: float = -math.inf
-    """Till dess räknas lampans besked som svar på kärnans senaste kommando."""
+    expected: Setting | None = None
+    """Det kärnan senast bad lampan om, medan svaret väntas."""
+    sent_at: float = -math.inf
+    """När kärnan senast skickade ett kommando till lampan."""
+    answered: bool = False
+    """Lampan har sagt att den är som kärnan bad om."""
+
+    def answer_until(self) -> float:
+        """Till dess räknas besked som stämmer med kommandot som lampans svar på det."""
+        return self.sent_at + TRANSITION_SECONDS + ECHO_SECONDS
 
 
 @dataclass(frozen=True)
@@ -369,6 +391,16 @@ class _Pending:
     setting: Setting
 
 
+class _GroupChange(NamedTuple):
+    """En ändring av en rumsgrupp som kärnan ber Zigbee2MQTT om."""
+
+    action: str
+    """``add`` skapar gruppen, ``members/add`` och ``members/remove`` ändrar medlemmarna."""
+    group: str
+    device: str = ""
+    """IEEE-adressen för lampan som läggs till eller tas bort."""
+
+
 Publish = Callable[[str, dict[str, Any]], None]
 
 
@@ -376,7 +408,8 @@ class ZigbeeOutput:
     """Lamputgången Zigbee2MQTT. Se modulens beskrivning.
 
     `defer` kör en funktion när kärnan har lämnat alla kommandon från ett
-    beslut, så att ett rums lampor kan skickas som ett gruppkommando.
+    beslut, så att ett rums lampor kan skickas som ett gruppkommando. Utan
+    `defer` skickas varje kommando direkt.
     `now` är riktig tid i sekunder. Den påverkas inte av simuleringens tidsfart.
     """
 
@@ -384,7 +417,7 @@ class ZigbeeOutput:
         self,
         home: Home,
         *,
-        defer: Callable[[Callable[[], None]], None] = defer_in_loop,
+        defer: Defer | None = None,
         now: Callable[[], float] = time.monotonic,
         base_topic: str = BASE_TOPIC,
     ) -> None:
@@ -403,8 +436,10 @@ class ZigbeeOutput:
         self._unavailable: set[str] = set()
         """IEEE-adresserna som Zigbee2MQTT säger är borta."""
         self._groups: dict[str, frozenset[str]] | None = None
-        self._group_requests: set[tuple[str, str, str]] = set()
+        self._group_requests: set[_GroupChange] = set()
         """Ändringar av grupperna som har skickats men inte syns i ``bridge/groups`` än."""
+        self._group_retry_at: float | None = None
+        """När gruppändringarna försöks igen efter att Zigbee2MQTT sa nej."""
         self._lamps: dict[str, _LampStatus] = {}
         """De placerade lamporna, efter id i hemmet."""
         self._pending: dict[str, _Pending] = {}
@@ -424,7 +459,7 @@ class ZigbeeOutput:
         device = None if self._devices is None or address is None else self._devices.get(address)
         if status is None or device is None:
             return
-        if not status.read:
+        if not status.state_known:
             # Kärnan får lampans läge snart och räknar då om vad som behövs.
             logger.debug("%s har inte svarat med sitt läge än; väntar", command.lamp_id)
             return
@@ -438,7 +473,9 @@ class ZigbeeOutput:
             self._home.room_of(command.lamp_id).id,
             Setting.of(command),
         )
-        if not self._flush_scheduled:
+        if self._defer is None:
+            self._flush()
+        elif not self._flush_scheduled:
             self._flush_scheduled = True
             self._defer(self._flush)
 
@@ -468,7 +505,11 @@ class ZigbeeOutput:
                     logger.info("Ansluten till MQTT-brokern")
                     await self._serve(connection)
             except (ConnectionError, OSError) as error:
-                logger.warning("Ingen kontakt med MQTT-brokern (%s). Försöker igen.", error)
+                logger.warning(
+                    "Ingen kontakt med MQTT-brokern (%s). Försöker igen. Kör "
+                    "'docker compose ps' och kontrollera MQTT_USER och MQTT_PASSWORD i .env.",
+                    error,
+                )
             except Exception:
                 # Utgången får inte dö tyst; då styrs inga lampor förrän kärnan startas om.
                 logger.exception("Fel i lamputgången Zigbee2MQTT. Ansluter igen.")
@@ -511,7 +552,11 @@ class ZigbeeOutput:
     ) -> None:
         while True:
             topic, payload = await outbox.get()
-            await connection.publish(topic, payload)
+            try:
+                await connection.publish(topic, payload)
+            except ValueError:
+                # Till exempel ett ogiltigt topic. Det får inte stoppa resten.
+                logger.warning("Kunde inte skicka till %s; hoppas över", topic)
 
     async def _tick_every_second(self) -> None:
         while True:
@@ -532,22 +577,41 @@ class ZigbeeOutput:
             self._gone(lamp_id)
 
     def tick(self) -> None:
-        """Anropas varje sekund: lampor som inte har svarat räknas som borta och frågas igen."""
+        """Anropas varje sekund: följer upp frågor och kommandon som lamporna inte har svarat på.
+
+        En lampa som inte svarar på frågan om sitt läge räknas som borta och
+        frågas igen om en stund. En lampa som inte har sagt att den blev som
+        kärnan bad om frågas om sitt läge, så att kärnan kan räkna om och
+        skicka kommandot igen om det inte gick fram.
+        """
         now = self._now()
         for lamp_id, status in self._lamps.items():
             if (
-                not status.read
+                not status.state_known
                 and status.asked_at is not None
                 and now - status.asked_at >= READ_TIMEOUT_SECONDS
             ):
-                # Lampan frågas igen om en stund, inte direkt.
                 self._gone(lamp_id, ask_again_now=False)
+            elif status.expected is not None and now > status.answer_until():
+                if not status.answered and status.state_known:
+                    logger.info("%s svarade inte på kommandot; frågar om läget", lamp_id)
+                    status.state_known = False
+                    status.asked_at = None
+                status.expected = None
+        if self._group_retry_at is not None and now >= self._group_retry_at:
+            self._group_retry_at = None
+            self._group_requests.clear()
+            self._sync_groups()
         self._ask_lamps()
 
     # --- Meddelanden från Zigbee2MQTT ---
 
     def handle(self, topic: str, payload: bytes) -> None:
-        """Tolkar ett meddelande från brokern. Trasiga meddelanden loggas och hoppas över."""
+        """Tolkar ett meddelande från brokern. Trasiga meddelanden loggas och hoppas över.
+
+        Inget meddelande får stoppa utgången, eftersom ett sparat (retained)
+        meddelande annars skulle stoppa den igen varje gång den ansluter.
+        """
         if not topic.startswith(f"{self._base}/"):
             return
         name = topic.removeprefix(f"{self._base}/")
@@ -555,7 +619,7 @@ class ZigbeeOutput:
             return  # kärnans egna meddelanden kommer tillbaka
         try:
             data = json.loads(payload) if payload else None
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (ValueError, RecursionError):
             if payload in (b"online", b"offline"):
                 data = payload.decode()
             else:
@@ -563,9 +627,11 @@ class ZigbeeOutput:
                 return
         try:
             self._dispatch(name, data)
-        except (ValueError, TypeError, KeyError) as error:
+        except Exception as error:
             logger.warning(
-                "Oväntat meddelande från Zigbee2MQTT på %s hoppas över: %s", topic, error
+                "Oväntat meddelande från Zigbee2MQTT på %s hoppas över (%s)",
+                topic,
+                type(error).__name__,
             )
 
     def _dispatch(self, name: str, data: object) -> None:
@@ -578,9 +644,13 @@ class ZigbeeOutput:
                 self._groups = _parse_groups(data)
                 self._group_requests.clear()
                 self._sync_groups()
-            case _ if name.startswith("bridge/response/"):
+            case "bridge/event":
+                self._bridge_event(data)
+            case _ if name.startswith("bridge/response/group/"):
                 if isinstance(data, dict) and data.get("status") == "error":
                     logger.warning("Zigbee2MQTT sa nej till %s: %s", name, data.get("error"))
+                    # Försök igen om en stund; kanske svarade inte lampan.
+                    self._group_retry_at = self._now() + READ_RETRY_SECONDS
             case _ if name.startswith("bridge/"):
                 pass
             case _ if name.endswith("/availability"):
@@ -619,35 +689,60 @@ class ZigbeeOutput:
         self._sync_groups()
         self._ask_lamps()
 
+    def _bridge_event(self, data: object) -> None:
+        """En lampa som har fått ström igen säger till (``device_announce``); då läses den om.
+
+        Den kan ha tänts av sig själv när strömmen kom tillbaka, även om
+        Zigbee2MQTT aldrig hann märka att den var borta.
+        """
+        if not isinstance(data, dict) or data.get("type") != "device_announce":
+            return
+        details = data.get("data")
+        address = details.get("ieee_address") if isinstance(details, dict) else None
+        status = self._lamps.get(zigbee_lamp_id(address)) if isinstance(address, str) else None
+        if status is not None:
+            status.state_known = False
+            status.asked_at = None
+            self._ask_lamps()
+
     def _availability(self, address: str, online: bool) -> None:
         if online:
             self._unavailable.discard(address)
             self._ask_lamps()
             return
         self._unavailable.add(address)
-        status_id = lamp_id(address)
-        if status_id in self._lamps:
-            self._gone(status_id)
+        lamp_id = zigbee_lamp_id(address)
+        if lamp_id in self._lamps:
+            self._gone(lamp_id)
 
     def _device_state(self, address: str, data: Mapping[str, object]) -> None:
-        status_id = lamp_id(address)
-        status = self._lamps.get(status_id)
+        lamp_id = zigbee_lamp_id(address)
+        status = self._lamps.get(lamp_id)
         state = data.get("state")
         if status is None or state not in ("ON", "OFF"):
             return  # en oplacerad lampa, eller ett besked om något annat än ljuset
         on = state == "ON"
         brightness = data.get("brightness")
         level = (
-            percent(int(brightness))
-            if isinstance(brightness, int | float) and not isinstance(brightness, bool)
+            percent(round(brightness))
+            if isinstance(brightness, int | float)
+            and not isinstance(brightness, bool)
+            and 0 <= brightness <= ZIGBEE_BRIGHTNESS
             else status.brightness
         )
-        if not status.read:
+        now = self._now()
+        if not status.state_known:
             external = False  # lampans läge när den läses, inte en ändring
-            status.read = True
-            logger.info("Läste läget för %s", status_id)
-        elif self._now() <= status.answer_until:
-            external = False
+            status.state_known = True
+            logger.info("Läste läget för %s", lamp_id)
+        elif status.expected is not None and now <= status.answer_until():
+            external = not _answers(status.expected, on, now - status.sent_at)
+            if external:
+                status.expected = None
+            elif on == status.expected.on and (
+                not on or abs(level - status.expected.brightness) <= BRIGHTNESS_TOLERANCE
+            ):
+                status.answered = True
         else:
             external = on != status.on or (
                 on and abs(level - status.brightness) > BRIGHTNESS_TOLERANCE
@@ -655,7 +750,7 @@ class ZigbeeOutput:
         status.gone = False
         status.on = on
         status.brightness = level
-        self._report(LampStateReported(status_id, on, level, external=external))
+        self._report(LampStateReported(lamp_id, on, level, external=external))
 
     # --- Hjälp ---
 
@@ -673,12 +768,12 @@ class ZigbeeOutput:
         if self._publish is None or not self._bridge_online or self._devices is None:
             return
         now = self._now()
-        for status_id, status in self._lamps.items():
-            address = ieee_address(status_id)
+        for lamp_id, status in self._lamps.items():
+            address = ieee_address(lamp_id)
             device = self._devices.get(address) if address is not None else None
             if (
                 device is None
-                or status.read
+                or status.state_known
                 or device.ieee_address in self._unavailable
                 or (status.asked_at is not None and now - status.asked_at < READ_RETRY_SECONDS)
             ):
@@ -688,21 +783,22 @@ class ZigbeeOutput:
                 f"{self._base}/{device.friendly_name}/get", {"state": "", "brightness": ""}
             )
 
-    def _gone(self, status_id: str, *, ask_again_now: bool = True) -> None:
+    def _gone(self, lamp_id: str, *, ask_again_now: bool = True) -> None:
         """Lampan går inte att nå. Kärnan får veta att läget är okänt, en gång.
 
         Lampan frågas om sitt läge igen så fort den går att nå, eller med
         `ask_again_now` falskt först efter en stund.
         """
-        status = self._lamps[status_id]
-        status.read = False
+        status = self._lamps[lamp_id]
+        status.state_known = False
+        status.expected = None
         if ask_again_now:
             status.asked_at = None
         if status.gone:
             return
         status.gone = True
         status.on = None
-        self._report(LampStateReported(status_id, None))
+        self._report(LampStateReported(lamp_id, None))
 
     def _report(self, report: LampStateReported) -> None:
         if self._sink is None:
@@ -731,62 +827,84 @@ class ZigbeeOutput:
         if self._publish is None or self._groups is None or self._devices is None:
             return
         desired = self._desired_groups()
-        changes: list[tuple[str, str, str]] = []
-        for name, members in desired.items():
-            if name not in self._groups:
-                changes.append(("add", name, ""))
+        changes: list[_GroupChange] = []
+        for group, members in desired.items():
+            if group not in self._groups:
+                changes.append(_GroupChange("add", group))
                 continue
-            current = self._groups[name]
-            changes += [("members/add", name, address) for address in sorted(members - current)]
-            changes += [("members/remove", name, address) for address in sorted(current - members)]
-        for name, current in self._groups.items():
-            if name not in desired:
-                changes += [("members/remove", name, address) for address in sorted(current)]
+            current = self._groups[group]
+            changes += [_GroupChange("members/add", group, a) for a in sorted(members - current)]
+            changes += [_GroupChange("members/remove", group, a) for a in sorted(current - members)]
+        for group, current in self._groups.items():
+            if group not in desired:
+                changes += [_GroupChange("members/remove", group, a) for a in sorted(current)]
         for change in changes:
             if change in self._group_requests:
                 continue
             self._group_requests.add(change)
-            action, name, address = change
             payload = (
-                {"friendly_name": name} if action == "add" else {"group": name, "device": address}
+                {"friendly_name": change.group}
+                if change.action == "add"
+                else {"group": change.group, "device": change.device}
             )
-            self._publish(f"{self._base}/bridge/request/group/{action}", payload)
+            self._publish(f"{self._base}/bridge/request/group/{change.action}", payload)
+
+    def _group_matches(self, group: str, members: frozenset[str]) -> bool:
+        """Om ett gruppkommando når precis de här lamporna.
+
+        Gruppen i Zigbee2MQTT måste ha just dem som medlemmar, och de måste
+        vara alla rummets lampor på kartan. Annars skickas lamporna en och en.
+        """
+        return (
+            len(members) >= 2
+            and self._groups is not None
+            and self._groups.get(group) == members
+            and self._desired_groups().get(group) == members
+        )
 
     def _flush(self) -> None:
         """Skickar de väntande kommandona, med ett gruppkommando per rum där det går."""
         self._flush_scheduled = False
         pending, self._pending = self._pending, {}
         by_room: dict[str, dict[str, _Pending]] = {}
-        for status_id, item in pending.items():
-            by_room.setdefault(item.room_id, {})[status_id] = item
+        for lamp_id, item in pending.items():
+            by_room.setdefault(item.room_id, {})[lamp_id] = item
         for room_id, items in by_room.items():
             group = GROUP_PREFIX + room_id
             settings = {item.setting for item in items.values()}
             members = frozenset(item.ieee_address for item in items.values())
-            if (
-                len(settings) == 1
-                and len(members) >= 2
-                and self._groups is not None
-                and self._groups.get(group) == members
-                and self._desired_groups().get(group) == members
-            ):
-                self._set(
-                    group,
-                    group_profile([item.profile for item in items.values()]),
-                    settings.pop(),
-                    list(items),
-                )
+            if len(settings) == 1 and self._group_matches(group, members):
+                profile = group_profile([item.profile for item in items.values()])
+                self._set(group, profile, settings.pop(), list(items))
                 continue
-            for status_id, item in items.items():
-                self._set(item.friendly_name, PROFILES[item.profile], item.setting, [status_id])
+            for lamp_id, item in items.items():
+                self._set(item.friendly_name, PROFILES[item.profile], item.setting, [lamp_id])
 
     def _set(self, target: str, profile: Profile, setting: Setting, lamp_ids: list[str]) -> None:
-        """Skickar en inställning till en lampa eller grupp. Alla lampkommandon går ut här."""
+        """Skickar en inställning till en lampa eller grupp. Alla lampkommandon går ut här.
+
+        En gräns för hur ofta lamporna får styras läggs in här. Kärnan skickar
+        inte om ett beslut som inte har ändrats, så gränsen måste skjuta upp
+        det senaste kommandot per lampa eller grupp (och skicka det från
+        `tick`), inte tappa det; annars fastnar lampan i fel läge.
+        """
         if self._publish is None:
             return
-        answer_until = self._now() + TRANSITION_SECONDS + ECHO_SECONDS
-        for status_id in lamp_ids:
-            if status_id in self._lamps:
-                self._lamps[status_id].answer_until = answer_until
+        now = self._now()
+        for lamp_id in lamp_ids:
+            status = self._lamps.get(lamp_id)
+            if status is not None:
+                status.expected = setting
+                status.sent_at = now
+                status.answered = False
         for payload in profile.payloads(setting, TRANSITION_SECONDS):
             self._publish(f"{self._base}/{target}/set", payload)
+
+
+def _answers(expected: Setting, on: bool, elapsed: float) -> bool:
+    """Om ett besked från lampan kan vara dess svar på kommandot `expected`.
+
+    Under en släckning med övergång kan lampan hinna säga att den lyser
+    svagare innan den är släckt.
+    """
+    return on == expected.on or (not expected.on and on and elapsed <= TRANSITION_SECONDS)

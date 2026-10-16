@@ -196,15 +196,19 @@ function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
       );
     }
     const unknown = lampState === undefined || lampState.on === null;
-    // En lampa som inte svarar får en röd ring och en varning.
+    // En lampa som inte svarar får en tjock röd ring och en varning.
     const silent = lampState?.responding === false;
-    // En virtuell lampa finns bara i simuleringen och ritas streckad.
+    let strokeWidth = lamp.virtual ? 1.5 : 1;
+    if (silent) {
+      strokeWidth = 3;
+    }
     const bulb = new Konva.Circle({
       ...center,
       radius: LAMP_RADIUS,
       fill: on ? COLORS.lampOn : unknown ? COLORS.lampUnknown : COLORS.lampOff,
       stroke: silent ? COLORS.warning : COLORS.wall,
-      strokeWidth: silent ? 3 : lamp.virtual ? 1.5 : 1,
+      strokeWidth,
+      // En virtuell lampa finns bara i simuleringen och ritas streckad.
       dash: lamp.virtual ? [4, 3] : undefined,
       lampId: lamp.id,
     });

@@ -103,3 +103,14 @@ def test_found_lamps_are_not_shown_to_other_web_pages() -> None:
 def test_without_zigbee_no_lamps_are_found() -> None:
     with TestClient(create_app(allowed_hosts=TEST_HOST)) as client:
         assert client.get("/api/lamps").json() == []
+
+
+def test_with_zigbee_but_no_placed_lamps_the_simulation_starts_on() -> None:
+    application = create_app(mqtt=no_broker, allowed_hosts=TEST_HOST)
+
+    with TestClient(application) as client, client.websocket_connect("/api/live") as ws:
+        ws.receive_json()
+        state = ws.receive_json()
+
+    assert state["simulation"]["enabled"] is True
+    assert state["simulation"]["speed_locked"] is False

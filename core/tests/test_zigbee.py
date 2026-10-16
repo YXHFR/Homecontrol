@@ -35,7 +35,7 @@ from homecontrol.zigbee import (
     ZigbeeOutput,
     group_profile,
     ieee_address,
-    lamp_id,
+    zigbee_lamp_id,
     zigbee_lamps,
 )
 from homes import radar_sees
@@ -343,9 +343,10 @@ def test_tradfri_never_gets_a_brightness_below_2() -> None:
 def test_tradfri_changes_one_thing_at_a_time_with_a_transition() -> None:
     payloads = IKEA_TRADFRI.payloads(Setting(on=True, brightness=50, color_temp=2700), 1.0)
 
+    # Färgen byts först, utan övergång, så att bara ljusstyrkan glider och inget avbryts.
     assert payloads == (
-        {"state": "ON", "brightness": 127, "transition": 1.0},
         {"color_temp": 370, "transition": 0},
+        {"state": "ON", "brightness": 127, "transition": 1.0},
     )
 
 
@@ -383,11 +384,11 @@ def test_a_dimmed_tradfri_lamp_is_sent_through_its_profile() -> None:
     harness.send(LampCommand(TAKLAMPA, on=True, reason="test", brightness=50, color_temp=2700))
 
     assert harness.take() == [
+        ("zigbee2mqtt/0x000b57fffe0000a1/set", {"color_temp": 370, "transition": 0}),
         (
             "zigbee2mqtt/0x000b57fffe0000a1/set",
             {"state": "ON", "brightness": 127, "transition": 1.0},
         ),
-        ("zigbee2mqtt/0x000b57fffe0000a1/set", {"color_temp": 370, "transition": 0}),
     ]
 
 
@@ -405,6 +406,92 @@ def test_the_answers_to_a_group_command_are_not_changes_from_outside() -> None:
         LampStateReported(TAKLAMPA, on=True, brightness=100),
         LampStateReported(FONSTERLAMPA, on=True, brightness=100),
         LampStateReported(TAKLAMPA, on=True, brightness=80),
+    ]
+
+
+def test_a_remote_control_right_after_the_core_s_command_is_a_change_from_outside() -> None:
+    harness = started()
+    harness.send(on(TAKLAMPA), on(FONSTERLAMPA))
+    harness.receive("gruppen_tands")
+    harness.take_reports()
+
+    # Två sekunder senare släcker någon taklampan med fjärrkontrollen.
+    harness.now = 2
+    harness.receive("fjarrkontroll")
+
+    assert harness.take_reports() == [
+        LampStateReported(TAKLAMPA, on=False, brightness=100, external=True)
+    ]
+
+
+def test_a_lamp_that_is_dimmed_down_while_turning_off_is_answering() -> None:
+    harness = started()
+    harness.send(off(TAKLAMPA))
+
+    harness.now = 0.5
+    harness.output.handle("zigbee2mqtt/0x000b57fffe0000a1", b'{"state": "ON", "brightness": 120}')
+
+    assert not harness.take_reports()[-1].external
+
+
+def test_a_command_that_got_no_answer_makes_the_lamp_be_read_again() -> None:
+    harness = started()
+    harness.send(off(FONSTERLAMPA))
+    harness.take()
+
+    # Kommandot försvann i Zigbee-nätet: lampan säger inget.
+    harness.now = 10
+    harness.output.tick()
+
+    assert harness.take() == [("zigbee2mqtt/fonsterlampa/get", {"state": "", "brightness": ""})]
+    # Svaret är lampans läge, inte en ändring utifrån, så kärnan räknar om och försöker igen.
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+    assert harness.take_reports() == [LampStateReported(FONSTERLAMPA, on=True, brightness=100)]
+
+
+def test_an_answered_command_is_not_followed_up() -> None:
+    harness = started()
+    harness.send(on(FONSTERLAMPA))
+    harness.receive("gruppen_tands")
+    harness.take()
+
+    harness.now = 10
+    harness.output.tick()
+
+    assert harness.take() == []
+
+
+def test_a_lamp_that_got_power_back_is_read_again() -> None:
+    harness = started()
+
+    harness.output.handle(
+        "zigbee2mqtt/bridge/event",
+        b'{"type": "device_announce", "data": {"friendly_name": "fonsterlampa", '
+        b'"ieee_address": "0x000b57fffe0000a2"}}',
+    )
+
+    assert harness.take() == [("zigbee2mqtt/fonsterlampa/get", {"state": "", "brightness": ""})]
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+    assert not harness.take_reports()[-1].external
+
+
+def test_a_failed_group_change_is_tried_again_later() -> None:
+    harness = Harness()
+    harness.receive("start", "lampornas_svar", "grupp_skapad")
+    harness.take()
+
+    harness.output.handle(
+        "zigbee2mqtt/bridge/response/group/members/add",
+        b'{"data": {}, "status": "error", "error": "Lampan svarade inte"}',
+    )
+    harness.output.tick()
+    assert harness.take() == []
+
+    harness.now = READ_RETRY_SECONDS
+    harness.output.tick()
+    assert [topic for topic, _ in harness.take()] == [
+        "zigbee2mqtt/bridge/request/group/members/add",
+        "zigbee2mqtt/bridge/request/group/members/add",
     ]
 
 
@@ -582,6 +669,9 @@ def test_a_placed_lamp_that_is_not_in_the_zigbee_network_is_not_responding() -> 
 
 def test_broken_messages_are_skipped(caplog: pytest.LogCaptureFixture) -> None:
     harness = started()
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 1e999}')
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b"[" * 100_000)
+    harness.output.handle("zigbee2mqtt/bridge/event", b'{"type": "device_announce", "data": 1}')
 
     harness.output.handle("zigbee2mqtt/bridge/devices", b"{trasig")
     harness.output.handle("zigbee2mqtt/bridge/devices", b'{"inte": "en lista"}')
@@ -669,7 +759,7 @@ def test_virtual_lamps_are_not_touched() -> None:
 
 
 def test_lamp_ids_follow_the_ieee_address() -> None:
-    assert lamp_id("0x000B57FFFE0000A1") == TAKLAMPA
+    assert zigbee_lamp_id("0x000B57FFFE0000A1") == TAKLAMPA
     assert ieee_address(TAKLAMPA) == "0x000b57fffe0000a1"
     assert ieee_address("taklampa") is None
     assert ieee_address("zigbee-inte-en-adress") is None
@@ -758,3 +848,14 @@ def test_the_output_subscribes_reads_the_lamps_and_reconnects(
             await task
 
     asyncio.run(scenario())
+
+
+def test_devices_with_names_that_cannot_be_topics_are_skipped() -> None:
+    harness = started()
+    devices = json.loads(recorded("start")[1][1])
+    devices[1]["friendly_name"] = "kök/#"
+
+    harness.output.handle("zigbee2mqtt/bridge/devices", json.dumps(devices).encode())
+
+    assert TAKLAMPA not in {lamp.id for lamp in harness.output.lamps()}
+    assert all("#" not in topic for topic, _ in harness.take())
