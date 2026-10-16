@@ -650,7 +650,9 @@ docker compose up -d
 `compose.yaml` som pekar på samma versions avbild. `docker compose pull core`
 hämtar avbilden, och `docker compose up -d` startar om det som har ändrats.
 Säger `pull` att avbilden inte finns har versionen nyss släppts och byggs
-fortfarande; vänta en halvtimme och försök igen. Säkerhetskopian `hem.json`
+fortfarande; vänta en halvtimme och försök igen. Använd inte `git pull`:
+mappen står på en version och inte på en gren, så git svarar då bara att
+du inte är på någon gren. Säkerhetskopian `hem.json`
 hamnar i din hemmapp på datorn. Dela den inte; den innehåller din
 planlösning.
 
