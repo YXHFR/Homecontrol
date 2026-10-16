@@ -57,8 +57,9 @@ function state(
 ): StateMessage {
   return {
     type: "state",
-    targets: [],
-    rooms: [{ id: "vardagsrum", occupied: on, lux }],
+    tracks: on ? [{ floor_id: "plan", x: 2.5, y: 2, held: false }] : [],
+    rooms: [{ id: "vardagsrum", status: on ? "upptaget" : "tomt", lux }],
+    zones: [],
     lamps: [{ id: "taklampa", on, explanation: on ? "Tänd: någon är här." : "Släckt: tomt." }],
     simulation,
   };
@@ -117,6 +118,19 @@ describe("mountApp", () => {
 
     expect(shown).toEqual([groundFloor, state(10, true)]);
     expect(root.querySelector(".explanations")?.textContent).toBe("Taklampa: Tänd: någon är här.");
+  });
+
+  it("visar läget och ljusnivån i varje rum, även när läget är okänt", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+
+    handlers.onMessage(state(10, true));
+    expect(root.querySelector(".rooms-now")?.textContent).toBe("Vardagsrum: upptaget, 10 lux");
+
+    handlers.onMessage({ ...state(null, false), rooms: [{ id: "vardagsrum", status: "okänt", lux: null }] });
+    const item = find<HTMLLIElement>(root, ".rooms-now li");
+    expect(item.textContent).toBe("Vardagsrum: okänt – en sensor svarar inte, ljusnivån okänd");
+    expect(item.dataset.status).toBe("okänt");
   });
 
   it("visar inte våningsväljaren när hemmet bara har en våning", () => {

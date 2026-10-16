@@ -3,6 +3,7 @@ import { element } from "./dom";
 import { parkingSpot } from "./geometry";
 import type { ClientMessage, Floor, HomeMessage, StateMessage } from "./protocol";
 import { createSimulationPanel } from "./simulationPanel";
+import { OCCUPANCY_TEXT } from "./trackStyles";
 import { createKonvaView, type ViewFactory } from "./view";
 
 export interface Connection {
@@ -39,6 +40,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   const status = element("p", { className: "status" }, STATUS_TEXT.connecting);
   const stageContainer = element("div", { className: "stage" });
   const explanations = element("ul", { className: "explanations" });
+  const roomsNow = element("ul", { className: "rooms-now" });
   const floorPicker = element("nav", { className: "floors", hidden: true });
   floorPicker.setAttribute("aria-label", "Våningar");
 
@@ -59,7 +61,15 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     status,
     floorPicker,
     stageContainer,
+    element(
+      "p",
+      { className: "legend" },
+      "Prick: en person som radarn ser. Streckad ring: radarn har tappat personen, " +
+        "men den räknas som kvar en stund till.",
+    ),
     simulation.element,
+    element("h2", {}, "Just nu"),
+    roomsNow,
     element("h2", {}, "Varför lamporna är som de är"),
     explanations,
   );
@@ -87,12 +97,30 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     );
   };
 
+  /** Läget och ljusnivån i varje rum på våningen som visas. */
+  const showRooms = () => {
+    const states = new Map(lastState?.rooms.map((room) => [room.id, room]));
+    roomsNow.replaceChildren(
+      ...(shownFloor?.rooms ?? []).flatMap((room) => {
+        const roomState = states.get(room.id);
+        if (roomState === undefined) {
+          return [];
+        }
+        const lux = roomState.lux === null ? "ljusnivån okänd" : `${roomState.lux} lux`;
+        const item = element("li", {}, `${room.name}: ${OCCUPANCY_TEXT[roomState.status]}, ${lux}`);
+        item.dataset.status = roomState.status;
+        return [item];
+      }),
+    );
+  };
+
   const showFloor = (next: Floor) => {
     shownFloor = next;
     for (const button of floorPicker.querySelectorAll("button")) {
       button.setAttribute("aria-pressed", String(button.dataset.floor === next.id));
     }
     view.setFloor(next);
+    showRooms();
     showExplanations();
   };
 
@@ -115,6 +143,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     lastState = state;
     view.setState(state);
     simulation.show(state.simulation);
+    showRooms();
     showExplanations();
   };
 

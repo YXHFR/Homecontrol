@@ -642,6 +642,7 @@ describe("kartredigeraren", () => {
     };
     expect(field("dark_below_lux").value).toBe("30");
     expect(field("off_after_empty_minutes").value).toBe("3");
+    expect(field("wifi_weight").value).toBe("0.5");
 
     field("dark_below_lux").value = "15";
     field("dark_below_lux").dispatchEvent(new Event("change"));
@@ -653,6 +654,7 @@ describe("kartredigeraren", () => {
       dark_below_lux: 15,
       bright_above_lux: 100,
       off_after_empty_seconds: 300,
+      wifi_weight: 0.5,
     });
 
     // Mörkergränsen över ljusgränsen sparas inte.
