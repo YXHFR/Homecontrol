@@ -39,6 +39,7 @@ const ZONE_OPACITY = 0.18;
 const ZONE_OCCUPIED_OPACITY = 0.4;
 const ZONE_FONT_SIZE = 12;
 const LAMP_RADIUS = 14;
+const NODE_SIZE = 10;
 /** Hur bred lampans namnetikett får vara, i pixlar. Den centreras under lampan. */
 const LAMP_LABEL_WIDTH = 120;
 /** Skenet runt en tänd lampa, i meter, och hur genomskinligt det är. */
@@ -58,6 +59,7 @@ const COLORS = {
   lampOff: "#b8b8b8",
   lampUnknown: "#ececec",
   person: "#d64545",
+  node: "#5a7da8",
   warning: "#c62828",
   text: "#222222",
 };
@@ -236,6 +238,39 @@ function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
   }
 }
 
+/** Rumskorten som små fyrkanter. Ett riktigt kort med varningar blir rött med ⚠. */
+function drawNodes(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
+  for (const node of floor.nodes) {
+    const card = state?.cards?.find((c) => c.id === node.id);
+    const warning = card !== undefined && card.problems.length > 0;
+    const center = t.toScreen(node);
+    layer.add(
+      new Konva.Rect({
+        x: center.x - NODE_SIZE / 2,
+        y: center.y - NODE_SIZE / 2,
+        width: NODE_SIZE,
+        height: NODE_SIZE,
+        fill: warning ? COLORS.warning : COLORS.node,
+        stroke: COLORS.wall,
+        strokeWidth: 1,
+        // Ett rumskort som inte är ett riktigt kort finns bara i simuleringen.
+        dash: card === undefined ? [3, 2] : undefined,
+      }),
+    );
+    if (warning) {
+      layer.add(
+        new Konva.Text({
+          x: center.x + NODE_SIZE / 2 + 2,
+          y: center.y - NODE_SIZE,
+          text: "⚠",
+          fontSize: 16,
+          fill: COLORS.warning,
+        }),
+      );
+    }
+  }
+}
+
 function drawTracks(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
   for (const track of tracksOnFloor(state, floor.id)) {
     layer.add(new Konva.Circle({ ...t.toScreen(track), radius: TRACK_RADIUS, ...trackStyle(track) }));
@@ -347,6 +382,7 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
     drawZones(roomLayer, transform, shownFloor, state);
     drawWalls(roomLayer, transform, shownFloor);
     drawRoomNames(roomLayer, transform, shownFloor, state);
+    drawNodes(roomLayer, transform, shownFloor, state);
     drawLamps(roomLayer, transform, shownFloor, state);
     drawTracks(roomLayer, transform, shownFloor, state);
     placePersons(transform, shownFloor);

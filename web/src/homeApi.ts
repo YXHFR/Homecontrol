@@ -6,7 +6,7 @@
  * någon annan (till exempel ett annat fönster) hann göra först.
  */
 import type { HomeDocument } from "./homefile";
-import type { FoundLamp } from "./protocol";
+import type { Card, FoundLamp } from "./protocol";
 
 /** Kärnan sa nej eller gick inte att nå. Meddelandet går att visa för användaren. */
 export class CoreError extends Error {
@@ -35,6 +35,8 @@ export interface HomeApi {
   planImageUrl(floorId: string): string;
   /** De riktiga lamporna som kärnan har hittat, placerade eller inte. */
   lamps(): Promise<FoundLamp[]>;
+  /** De riktiga rumskorten som kärnan känner till, placerade eller inte. */
+  cards(): Promise<Card[]>;
 }
 
 const CONFLICT = 409;
@@ -107,6 +109,10 @@ export const coreApi: HomeApi = {
     return revisionOf(response);
   },
   planImageUrl: planImagePath,
+  async cards() {
+    const response = await ensureOk(fetch("/api/cards", { cache: "no-store" }));
+    return (await response.json()) as Card[];
+  },
   async lamps() {
     const response = await ensureOk(fetch("/api/lamps", { cache: "no-store" }));
     return (await response.json()) as FoundLamp[];

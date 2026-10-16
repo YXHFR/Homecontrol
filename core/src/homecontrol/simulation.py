@@ -9,6 +9,10 @@ omräkningen och sammanvägningen prövas på samma sätt som med riktiga noder.
 
 Den virtuella radarn ser genom alla väggar. Det gör en riktig radar också,
 mer eller mindre, och sammanvägningen ska klara det.
+
+Riktiga rumskort simuleras inte. Låtsaspersonerna syns bara för de virtuella
+radarerna, och dagsljuset sätts bara i rum utan riktiga kort, så att
+simuleringen aldrig blandas med det de riktiga korten mäter.
 """
 
 import logging
@@ -30,7 +34,7 @@ from homecontrol.connectors import (
     RadarTargetsObserved,
     SourceLost,
 )
-from homecontrol.home import Capability, Home, Node, Point, Target
+from homecontrol.home import Capability, Home, Node, Point, Room, Target
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +73,16 @@ class SimulatedSource:
     bort. Id:t stannar i simuleringen; kärnan får bara se det radarna ser.
     """
 
-    def __init__(self, home: Home, source_id: str = "simulering") -> None:
+    def __init__(
+        self,
+        home: Home,
+        source_id: str = "simulering",
+        real_nodes: Callable[[Home], Set[str]] = lambda _: frozenset(),
+    ) -> None:
+        """`real_nodes` ger de riktiga rumskorten i ett hem, som inte ska simuleras."""
         self._source_id = source_id
         self._home = home
+        self._real_nodes = real_nodes
         self._sink: ObservationSink | None = None
         self._persons: dict[str, Target] = {}
         self._unseen: set[str] = set()
@@ -168,7 +179,7 @@ class SimulatedSource:
     def set_daylight(self, lux: float) -> None:
         """Samma ljusnivå i alla rum, som när solen går upp eller ner."""
         self._daylight = lux
-        for room in self._home.rooms:
+        for room in self._simulated_rooms(self._home):
             self.set_light_level(room.id, lux)
 
     def use_home(self, home: Home) -> None:
@@ -178,10 +189,15 @@ class SimulatedSource:
         nodes = {node.id for room in home.rooms for node in room.nodes}
         self._motion = {node: moving for node, moving in self._motion.items() if node in nodes}
         if self._daylight is not None:
-            for room in home.rooms:
+            for room in self._simulated_rooms(home):
                 if room.id not in before:
                     self.set_light_level(room.id, self._daylight)
         self._emit_targets()
+
+    def _simulated_rooms(self, home: Home) -> list[Room]:
+        """Rummen utan riktiga rumskort, där simuleringen bestämmer dagsljuset."""
+        real = self._real_nodes(home)
+        return [room for room in home.rooms if not any(node.id in real for node in room.nodes)]
 
     def set_light_level(self, room_id: str, lux: float) -> None:
         """Ljusnivån i ett enda rum."""
@@ -199,10 +215,11 @@ class SimulatedSource:
         seen = [
             person for person_id, person in self._persons.items() if person_id not in self._unseen
         ]
+        real = self._real_nodes(self._home)
         for floor in self._home.floors:
             on_floor = [person.position for person in seen if person.floor_id == floor.id]
             for node in (node for room in floor.rooms for node in room.nodes):
-                if Capability.RADAR in node.capabilities:
+                if Capability.RADAR in node.capabilities and node.id not in real:
                     targets = _targets_seen_by(node, on_floor)
                     self._sink(RadarTargetsObserved(self._source_id, node.id, targets))
 
@@ -347,7 +364,8 @@ class Simulation:
     def use_home(self, home: Home) -> None:
         """Byter till ett ändrat hem, så att nya rum, noder och våningar också simuleras.
 
-        Har en riktig lampa just placerats går tiden tillbaka till vanlig takt.
+        Har ett riktigt rumskort eller en riktig lampa just placerats går tiden
+        tillbaka till vanlig takt.
         """
         self._floor_ids = frozenset(floor.id for floor in home.floors)
         self._source.use_home(home)

@@ -32,7 +32,8 @@ export function createSimulationPanel(
   const speedLocked = element(
     "p",
     { className: "help", hidden: true },
-    "Tiden går i vanlig takt, eftersom riktiga lampor styrs. Annars släcks de för tidigt.",
+    "Tiden går i vanlig takt så länge riktiga sensorer eller lampor används, " +
+      "så att riktiga lampor inte släcks för tidigt.",
   );
   speedPicker.setAttribute("role", "group");
   speedPicker.setAttribute("aria-label", "Tidsfart");

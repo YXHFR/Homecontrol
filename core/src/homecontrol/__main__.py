@@ -21,6 +21,7 @@ import uvicorn
 from homecontrol import store
 from homecontrol.app import create_app
 from homecontrol.config import Settings
+from homecontrol.esphome import MIN_SECRET_LENGTH
 from homecontrol.home import Home
 from homecontrol.homefile import HomeFileError, dumps, example_home, loads
 from homecontrol.zigbee import mqtt_connect
@@ -55,6 +56,14 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def serve(settings: Settings) -> None:
+    secret = settings.esphome_secret
+    if secret is not None and len(secret) < MIN_SECRET_LENGTH:
+        sys.exit(
+            f"ESPHOME_SECRET i .env är för kort (minst {MIN_SECRET_LENGTH} tecken). "
+            "Skapa en med: openssl rand -hex 32"
+        )
+    if secret is None:
+        logger.info("ESPHOME_SECRET är inte satt: inga rumskort ansluts")
     uvicorn.run(
         create_app(
             settings.web_dir,
@@ -63,6 +72,7 @@ def serve(settings: Settings) -> None:
             home_store=(
                 None if settings.database is None else store.DatabaseStore(settings.database)
             ),
+            esphome_secret=secret,
             mqtt=None if settings.mqtt is None else mqtt_connect(settings.mqtt),
         ),
         host=settings.host,

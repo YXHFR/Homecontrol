@@ -44,7 +44,7 @@ import {
   placeItem,
   updateItem,
 } from "./placing";
-import type { FoundLamp, Point, ZoneKind } from "./protocol";
+import type { Card, FoundLamp, Point, ZoneKind } from "./protocol";
 import {
   Drawing,
   INSTRUCTIONS,
@@ -71,8 +71,8 @@ export interface EditorDependencies {
 
 /** Större bilder förminskas; mer än så här syns ändå inte på en skärm. */
 const MAX_IMAGE_SIDE = 4000;
-/** Så ofta redigeraren frågar kärnan om nya lampor. */
-const LAMP_REFRESH_MS = 10_000;
+/** Så ofta redigeraren frågar kärnan om nya rumskort och lampor. */
+const FOUND_REFRESH_MS = 10_000;
 /** Så nära (i skärmpunkter) ett klick måste vara ett hörn för att träffa det. */
 const SNAP_PIXELS = 12;
 
@@ -174,6 +174,9 @@ export function mountEditor(
   let scalePoints: { a: Point; b: Point } | null = null;
   /** Ändras när en ny bild laddas upp, så att webbläsaren inte visar den gamla. */
   let imageVersion = Date.now();
+  /** Nya kort som kärnan har hittat, och kortet som placeras med nästa klick. */
+  let newCards: Card[] = [];
+  let cardToPlace: Card | null = null;
   /** Riktiga lampor som kärnan har hittat men som inte är placerade, och den som placeras nu. */
   let newLamps: FoundLamp[] = [];
   let lampToPlace: FoundLamp | null = null;
@@ -197,6 +200,9 @@ export function mountEditor(
   fileInput.hidden = true;
   const uploadButton = button("Ladda upp bild", () => fileInput.click(), "tool");
   const removeImageButton = button("Ta bort bilden", () => removeImage(), "tool");
+  /** Riktiga rumskort som kärnan har hittat men som inte är placerade än. */
+  const newCardsList = element("div", { className: "new-cards", hidden: true });
+  newCardsList.setAttribute("aria-label", "Nya rumskort");
   const newLampsList = element("div", { className: "new-lamps", hidden: true });
   newLampsList.setAttribute("aria-label", "Nya lampor");
   const toolbox = element(
@@ -215,6 +221,7 @@ export function mountEditor(
     ...zoneToolbox.nodes,
     element("h2", {}, "Placera"),
     toolButton("node"),
+    newCardsList,
     toolButton("router"),
     toolButton("lamp"),
     newLampsList,
@@ -288,7 +295,30 @@ export function mountEditor(
     }
     removeImageButton.disabled = !hasImage;
     uploadButton.disabled = imageChanging;
+    renderNewCards();
     renderNewLamps();
+  };
+
+  const renderNewCards = () => {
+    const waiting = newCards.filter((card) => shown === null || findItem(shown, card.id) === null);
+    newCardsList.hidden = waiting.length === 0;
+    newCardsList.replaceChildren(
+      element("p", { className: "muted" }, "Nya rumskort som kärnan har hittat:"),
+      ...waiting.map((card) => {
+        const node = button(
+          `Placera ${card.name}`,
+          () => {
+            chooseTool("node");
+            cardToPlace = card;
+            render();
+          },
+          "tool",
+        );
+        node.dataset.card = card.id;
+        node.setAttribute("aria-pressed", String(cardToPlace?.id === card.id));
+        return node;
+      }),
+    );
   };
 
   const renderNewLamps = () => {
@@ -324,11 +354,28 @@ export function mountEditor(
     );
   };
 
+  /** Läser om vilka kort kärnan har hittat. Ett fel här stoppar inte redigeraren. */
+  const refreshCards = () => {
+    deps.api.cards().then(
+      (cards) => {
+        newCards = cards.filter((card) => !card.placed);
+        renderTools();
+      },
+      () => undefined,
+    );
+  };
+
   const instructionText = (): string => {
     if (lampToPlace !== null) {
       return (
         `Klicka där ${lampToPlace.name} sitter, inne i ett rum. Kärnan börjar styra lampan ` +
         "när den är placerad."
+      );
+    }
+    if (cardToPlace !== null) {
+      return (
+        `Klicka där ${cardToPlace.name} sitter, inne i ett rum. Kärnan börjar använda kortet ` +
+        "när det är placerat. Vrid det sedan så att det tittar åt rätt håll."
       );
     }
     return drawing.tool === "zone" ? zoneInstruction(zoneKind) : INSTRUCTIONS[drawing.tool];
@@ -619,6 +666,7 @@ export function mountEditor(
   const chooseTool = (tool: ToolName) => {
     drawing.setTool(tool);
     scalePoints = null;
+    cardToPlace = null;
     lampToPlace = null;
     if (tool !== "select") {
       selection = null;
@@ -693,12 +741,14 @@ export function mountEditor(
   }
 
   /**
-   * Placerar ett rumskort, en router eller en lampa och väljer den. En ny
-   * riktig lampa får lampans id och profil; då börjar kärnan styra den.
+   * Placerar ett rumskort, en router eller en lampa och väljer den. Ett nytt
+   * riktigt kort får kortets namn som id, och en ny riktig lampa lampans id
+   * och profil; då börjar kärnan använda dem.
    */
   const place = (kind: ItemKind, point: Point) => {
     const floor = currentFloor();
-    const found = kind === "lamp" ? (lampToPlace ?? undefined) : undefined;
+    const found: Card | FoundLamp | undefined =
+      (kind === "node" ? cardToPlace : kind === "lamp" ? lampToPlace : null) ?? undefined;
     const placed =
       shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point, found);
     if (placed === null || floor === null) {
@@ -708,13 +758,16 @@ export function mountEditor(
     }
     selection = { kind: "item", id: placed.id };
     if (found !== undefined) {
+      cardToPlace = null;
       lampToPlace = null;
-      newLamps = newLamps.filter((lamp) => lamp.id !== found.id);
+      newCards = newCards.filter((other) => other.id !== found.id);
+      newLamps = newLamps.filter((other) => other.id !== found.id);
       drawing.setTool("select");
     }
     // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
     // gör att den nya saken förblir vald.
-    const given = { id: placed.id, name: placed.name, profile: found?.profile };
+    const profile = found !== undefined && "profile" in found ? found.profile : undefined;
+    const given = { id: placed.id, name: placed.name, profile };
     commit((document) => placeItem(document, kind, floor.id, point, given)?.document ?? document);
   };
 
@@ -866,8 +919,12 @@ export function mountEditor(
   });
 
   chooseTool("select");
-  // Nya lampor dyker upp medan redigeraren är öppen, till exempel när en lampa just har parats ihop.
-  window.setInterval(refreshLamps, LAMP_REFRESH_MS);
+  // Nya kort och lampor dyker upp medan redigeraren är öppen, till exempel
+  // när ett kort just har installerats eller en lampa parats ihop.
+  window.setInterval(() => {
+    refreshCards();
+    refreshLamps();
+  }, FOUND_REFRESH_MS);
   deps.api.load().then(
     (latest) => {
       saved = latest.document;
@@ -878,6 +935,7 @@ export function mountEditor(
       saveStatus.textContent = "Alla ändringar är sparade.";
       setBusy(false);
       render();
+      refreshCards();
       refreshLamps();
       root.dataset.ready = "true";
     },

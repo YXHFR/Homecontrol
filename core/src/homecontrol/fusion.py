@@ -29,8 +29,11 @@ Wi-Fi-rörelse ensam.
 
 Varje rum och zon är upptaget, tomt eller okänt. Ett rum är upptaget om ett
 spår, sett eller kvarhållet, finns i det, eller om Wi-Fi-rörelsen väger
-tillräckligt på egen hand. Annars är det okänt om någon av rummets noder hör
-till en källa som har tappat kontakten, och annars tomt.
+tillräckligt på egen hand. Annars är det okänt om radarn på någon av
+rummets noder har tappat kontakten, eller deras Wi-Fi-mätning när rummet
+använder Wi-Fi (vikten är över 0), och annars tomt. Bortfallet gäller varje
+del av en nod för sig, så ett kort vars radar tystnar blir okänt även om dess
+Wi-Fi-mätning fortsätter att höras.
 
 Modulen läser ingen klocka; tiden lämnas in i varje anrop. Den loggar aldrig
 var någon är.
@@ -42,7 +45,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved
+from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved, SourceLost
 from homecontrol.home import Capability, Home, Node, Point, Room, Zone, ZoneKind
 
 logger = logging.getLogger(__name__)
@@ -76,6 +79,11 @@ MAX_WARNINGS = 100
 
 _STILL = Point(0, 0)
 """Farten hos någon som står still."""
+
+_Part = tuple[str, Capability]
+"""En del av en nod, till exempel radarn på ett visst kort."""
+_PRESENCE_PARTS = (Capability.RADAR, Capability.CSI)
+"""Delarna som närvaron bygger på. Ljusnivån sköts av regeln, inte här."""
 
 
 class Occupancy(StrEnum):
@@ -132,13 +140,12 @@ class Fusion:
 
     def __init__(self, home: Home, now: float) -> None:
         self._tracks: list[_Track] = []
-        self._source_of: dict[str, str] = {}
-        """Källan som senast hördes från varje nod."""
-        self._lost_nodes: set[str] = set()
+        self._source_of: dict[_Part, str] = {}
+        """Källan som senast hördes från varje del av en nod. Radarn och Wi-Fi kan ha olika."""
+        self._lost: set[_Part] = set()
+        """Delar som har tappat kontakten och inte hörts av sedan dess."""
         self._motion: dict[str, float] = {}
         """Wi-Fi-rörelsens poäng per nod, 0 när den inte känner någon rörelse."""
-        self._motion_source: dict[str, str] = {}
-        """Källan som Wi-Fi-rörelsen per nod kom från. Den kan vara en annan än radarns."""
         self._warned: set[tuple[str, str]] = set()
         """Problem som det redan har varnats för, så att loggen inte fylls tio gånger i sekunden."""
         self._rooms: dict[str, Presence] = {}
@@ -169,7 +176,7 @@ class Fusion:
             return
         # Först släpps det vars tid redan har gått ut, så att det inte hittas igen.
         self._expire(now)
-        self._heard(observation.source_id, observation.node_id)
+        self._heard(observation.source_id, (observation.node_id, Capability.RADAR))
         targets = observation.targets
         if len(targets) > MAX_TARGETS:
             self._warn_once(placed.node.id, "för många mål", "Noden %r skickar för många mål")
@@ -189,21 +196,30 @@ class Fusion:
             return
         # Rörelsen gäller från nu. Det som skulle ha släppts innan dess släpps först.
         self._before_change(now)
-        self._heard(observation.source_id, observation.node_id)
+        self._heard(observation.source_id, (observation.node_id, Capability.CSI))
         self._motion[observation.node_id] = score if observation.moving else 0.0
-        self._motion_source[observation.node_id] = observation.source_id
         self._refresh(now)
 
-    def source_lost(self, source_id: str, now: float) -> None:
-        """Källans noder räknas som borta tills de hörs av igen. Deras spår glöms."""
+    def source_lost(self, observation: SourceLost, now: float) -> None:
+        """Delarna som tystnat räknas som borta tills de hörs av igen.
+
+        Spåren från en radar som tystnat glöms, och Wi-Fi-rörelsen från en
+        Wi-Fi-mätning som tystnat.
+        """
         self._before_change(now)
-        nodes = {node_id for node_id, source in self._source_of.items() if source == source_id}
-        self._lost_nodes |= nodes
-        for node_id, source in list(self._motion_source.items()):
-            if source == source_id:
-                del self._motion_source[node_id]
-                self._motion.pop(node_id, None)
-        self._tracks = [track for track in self._tracks if track.node_id not in nodes]
+        if observation.node_id is None:
+            parts = {
+                part for part, source in self._source_of.items() if source == observation.source_id
+            }
+        else:
+            parts = self._parts_of(observation.node_id, observation.capability)
+            for part in parts:
+                self._source_of[part] = observation.source_id
+        self._lost |= parts
+        radars = {node_id for node_id, capability in parts if capability is Capability.RADAR}
+        wifi = {node_id for node_id, capability in parts if capability is Capability.CSI}
+        self._tracks = [track for track in self._tracks if track.node_id not in radars]
+        self._motion = {node: score for node, score in self._motion.items() if node not in wifi}
         self._refresh(now)
 
     def update(self, now: float) -> None:
@@ -232,12 +248,11 @@ class Fusion:
                 track.room = placed.room  # rummet kan till exempel ha fått nya zoner
                 tracks.append(track)
         self._tracks = tracks
-        self._source_of = {node: source for node, source in self._source_of.items() if node in kept}
-        self._lost_nodes &= kept
-        self._motion = {node: score for node, score in self._motion.items() if node in kept}
-        self._motion_source = {
-            node: source for node, source in self._motion_source.items() if node in kept
+        self._source_of = {
+            part: source for part, source in self._source_of.items() if part[0] in kept
         }
+        self._lost = {part for part in self._lost if part[0] in kept}
+        self._motion = {node: score for node, score in self._motion.items() if node in kept}
         self._warned.clear()  # en nod som just placerats kan ha varnats för förut
         self._refresh(now)
 
@@ -284,9 +299,29 @@ class Fusion:
             return
         logger.warning(message, key[0])
 
-    def _heard(self, source_id: str, node_id: str) -> None:
-        self._source_of[node_id] = source_id
-        self._lost_nodes.discard(node_id)
+    def _parts_of(self, node_id: str, capability: Capability | None) -> set[_Part]:
+        """Nodens delar som närvaron bygger på, eller bara `capability` om den är given."""
+        placed = self._placed.get(node_id)
+        if placed is None:
+            return set()
+        return {
+            (node_id, part)
+            for part in _PRESENCE_PARTS
+            if part in placed.node.capabilities and capability in (None, part)
+        }
+
+    def _heard(self, source_id: str, part: _Part) -> None:
+        self._source_of[part] = source_id
+        self._lost.discard(part)
+
+    def _lost_in(self, room: Room) -> bool:
+        """Om radarn i rummet har tappat kontakten, eller Wi-Fi-mätningen som rummet använder."""
+        uses_wifi = room.settings.wifi_weight > 0
+        return any(
+            (node.id, Capability.RADAR) in self._lost
+            or (uses_wifi and (node.id, Capability.CSI) in self._lost)
+            for node in room.nodes
+        )
 
     def _detections(self, placed: _Placed, targets: Iterable[RadarTarget]) -> Iterable[Point]:
         """Målen i hemmets koordinater, utom de som är utanför rummet eller i en ignorera-zon."""
@@ -416,7 +451,7 @@ class Fusion:
             tracks = [track for track in self._tracks if track.room.id == room.id]
             if tracks or self._wifi_weighted(room) >= 1:
                 status = Occupancy.OCCUPIED
-            elif any(node.id in self._lost_nodes for node in room.nodes):
+            elif self._lost_in(room):
                 status = Occupancy.UNKNOWN
             else:
                 status = Occupancy.VACANT

@@ -42,12 +42,22 @@ export interface Lamp {
   virtual: boolean;
 }
 
+/** Ett rumskort på kartan, riktigt eller simulerat. Ett riktigt kort har kortets namn som id. */
+export interface MapNode {
+  id: string;
+  name: string;
+  room_id: string;
+  x: number;
+  y: number;
+}
+
 export interface Floor {
   id: string;
   name: string;
   /** 0 är entréplanet, 1 en trappa upp och -1 källaren. */
   level: number;
   rooms: Room[];
+  nodes: MapNode[];
   lamps: Lamp[];
 }
 
@@ -91,6 +101,30 @@ export interface Simulation {
   /** Dagsljuset i alla rum, i lux. */
   daylight: number | null;
   persons: Person[];
+}
+
+/** En ny version av kortets firmware, som användaren kan godkänna. */
+export interface CardUpdate {
+  version: string;
+  in_progress: boolean;
+  /** Hur långt uppdateringen har kommit, 0–100, om kortet säger det. */
+  progress: number | null;
+}
+
+/** Ett riktigt rumskort (se cards_message i core/src/homecontrol/cards.py). */
+export interface Card {
+  /** Kortets namn, homecontrol-<rum>. Ett placerat kort är en nod med samma id. */
+  id: string;
+  name: string;
+  /** Kortet är placerat på kartan. Annars väntar det på att placeras i kartredigeraren. */
+  placed: boolean;
+  online: boolean;
+  /** Varningar i klartext. Tom när allt fungerar. */
+  problems: string[];
+  calibrating: boolean;
+  wifi_signal: number | null;
+  firmware_version: string | null;
+  update: CardUpdate | null;
 }
 
 export interface RoomState {
@@ -139,6 +173,8 @@ export interface StateMessage {
   events: LampEvent[];
   /** Simuleringsläget, eller null om kärnan inte har någon simulering. */
   simulation: Simulation | null;
+  /** De riktiga rumskorten, eller null om kärnan inte ansluter några. */
+  cards: Card[] | null;
 }
 
 export type ServerMessage = HomeMessage | StateMessage;
@@ -163,7 +199,9 @@ export type ClientMessage =
   | { type: "move_person"; person_id: string; floor_id: string; x: number; y: number }
   | { type: "remove_person"; person_id: string }
   | { type: "set_daylight"; lux: number }
-  | { type: "set_speed"; speed: Speed };
+  | { type: "set_speed"; speed: Speed }
+  /** Användaren har godkänt att kortet uppdateras. */
+  | { type: "install_update"; card: string };
 
 /** Tolkar ett meddelande från kärnan. Okända eller trasiga meddelanden ger null. */
 export function parseServerMessage(text: string): ServerMessage | null {
@@ -185,6 +223,7 @@ export function parseServerMessage(text: string): ServerMessage | null {
     zones?: unknown;
     events?: unknown;
     simulation?: unknown;
+    cards?: unknown;
   };
   if (message.type === "home" && Array.isArray(message.floors) && message.floors.length > 0) {
     return data as HomeMessage;
@@ -196,7 +235,8 @@ export function parseServerMessage(text: string): ServerMessage | null {
     Array.isArray(message.zones) &&
     Array.isArray(message.lamps) &&
     Array.isArray(message.events) &&
-    (message.simulation === null || isSimulation(message.simulation))
+    (message.simulation === null || isSimulation(message.simulation)) &&
+    (message.cards === null || Array.isArray(message.cards))
   ) {
     return data as StateMessage;
   }

@@ -61,6 +61,7 @@ def test_streams_home_and_state_and_lights_the_lamp() -> None:
             "daylight": DEFAULT_DAYLIGHT_LUX,
             "persons": [],
         }
+        assert state["cards"] is None
         assert state["rooms"][0]["lux"] == DEFAULT_DAYLIGHT_LUX
 
         ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 6.0, "y": 2.0})
