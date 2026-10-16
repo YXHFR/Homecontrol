@@ -112,7 +112,16 @@ def load_or_seed_home(settings: Settings) -> Home:
         return example_home()
     with store.connect(settings.database) as conn:
         store.migrate(conn)
-        home = store.load_home(conn)
+        try:
+            home = store.load_home(conn)
+        except HomeFileError as error:
+            # Till exempel ett hem som sparades innan en kontroll skärptes.
+            # Exempelhemmet läses inte in i stället, för då skrivs hemmet över.
+            sys.exit(
+                f"Det sparade hemmet går inte att läsa: {error}\n"
+                "Rätta hemfilen och läs in den med 'homecontrol importera', "
+                "eller börja om med 'homecontrol importera --exempelhem'."
+            )
         if home is None:
             # Första starten: börja med exempelhemmet så att det finns något att se.
             home = example_home()

@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { inPolygon } from "./editing";
 import type { FloorModel, HomeDocument } from "./homefile";
 import {
   addZone,
   deleteZone,
   findZone,
-  inPolygon,
+  nearestOnWall,
+  planZone,
   renameZone,
   roomAround,
   setZoneKind,
-  ZONE_KINDS,
-  ZONE_STYLES,
   zoneProblem,
 } from "./zones";
+import { ZONE_KINDS, ZONE_STYLES } from "./zoneStyles";
 
 /** Ett L-format rum: 4 × 4 meter där den nedre högra kvadranten saknas. */
 function home(): HomeDocument {
@@ -83,6 +84,13 @@ describe("var en zon kan ritas", () => {
   it("inte utanför ett rum eller genom en vägg", () => {
     expect(zoneProblem(floor(home()), square(3, 3, 0.5))).toMatch(/inne i ett rum/);
     expect(zoneProblem(floor(home()), square(3.5, 0.5))).toMatch(/inne i ett rum/);
+    // Hörnen ligger i båda benen av L:et, men kanten mellan dem går genom hacket.
+    const across = [
+      { x: 1, y: 1 },
+      { x: 3.5, y: 1 },
+      { x: 1, y: 3.5 },
+    ];
+    expect(zoneProblem(floor(home()), across)).toMatch(/inne i ett rum/);
   });
 
   it("inte som en åtta, för liten eller med för få hörn", () => {
@@ -95,6 +103,37 @@ describe("var en zon kan ritas", () => {
     expect(zoneProblem(floor(home()), eight)).toMatch(/korsar/);
     expect(zoneProblem(floor(home()), square(1, 1, 0.1))).toMatch(/för liten/);
     expect(zoneProblem(floor(home()), square(1, 1).slice(0, 2))).toMatch(/tre hörn/);
+  });
+});
+
+describe("nearestOnWall", () => {
+  it("drar en punkt nära väggen till väggen, men inte en punkt längre bort", () => {
+    expect(nearestOnWall(floor(home()), { x: 0.02, y: 3 }, 0.05)).toEqual({ x: 0, y: 3 });
+    expect(nearestOnWall(floor(home()), { x: 3, y: 2.03 }, 0.05)).toEqual({ x: 3, y: 2 });
+    expect(nearestOnWall(floor(home()), { x: 1, y: 1 }, 0.05)).toBeNull();
+  });
+});
+
+describe("planZone", () => {
+  it("ger ett problem för en zon utanför rummen", () => {
+    expect(planZone(home(), floor(home()), "vanlig", square(3, 3, 0.5))).toEqual({
+      problem: "Rita zonen inne i ett rum, utan att den går ut genom någon vägg.",
+    });
+  });
+
+  it("ger samma id när ändringen görs på ett nyare hem", () => {
+    const plan = planZone(home(), floor(home()), "entré", square(0, 3));
+    if ("problem" in plan) {
+      throw new Error(plan.problem);
+    }
+    // Någon annan har hunnit byta namn på rummet; zonen läggs ändå till.
+    const newer = structuredClone(home());
+    newer.home.floors[0].rooms[0].name = "Stora rummet";
+
+    const saved = plan.edit(newer);
+
+    expect(findZone(saved, plan.zoneId)?.zone).toMatchObject({ kind: "entré", name: "Entré 1" });
+    expect(findZone(saved, plan.zoneId)?.room.name).toBe("Stora rummet");
   });
 });
 

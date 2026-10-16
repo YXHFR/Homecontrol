@@ -239,15 +239,58 @@ describe("kartredigeraren", () => {
 
     // Välj bort zonen och välj den igen på kartan.
     click("Välj och flytta");
-    map.onSelectRoom(null);
+    map.onSelect(null);
     expect(text(root, ".selection")).toMatch(/Inget valt/);
-    map.onSelectZone("stillhet-1");
-    expect(scenes.at(-1)?.selectedZoneId).toBe("stillhet-1");
+    map.onSelect({ kind: "zone", id: "stillhet-1" });
+    expect(scenes.at(-1)?.selection).toEqual({ kind: "zone", id: "stillhet-1" });
     expect(root.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe("Soffa");
 
     click("Ta bort zonen");
     await settled();
     expect(zones()).toEqual([]);
+    expect(text(root, ".selection")).toMatch(/Inget valt/);
+  });
+
+  it("ett hörn nära väggen hamnar på väggen, så att en entrézon kan ligga längs den", async () => {
+    const { core, map, click, settled } = await setup();
+    click("Entrézon");
+    // metersPerPixel är 0,01, så allt inom 12 cm från väggen dras till den.
+    for (const point of [
+      { x: -0.04, y: 0.5 },
+      { x: 0.8, y: 0.5 },
+      { x: 0.8, y: 1.5 },
+      { x: 0.05, y: 1.5 },
+      { x: -0.04, y: 0.5 },
+    ]) {
+      map.onPointerDown(point);
+    }
+    await settled();
+
+    expect(core.document.home.floors[0].rooms[0].zones?.[0].polygon).toEqual([
+      [0, 0.5],
+      [0.8, 0.5],
+      [0.8, 1.5],
+      [0, 1.5],
+    ]);
+  });
+
+  it("en zon som kärnan nekar försvinner och är inte längre vald", async () => {
+    const { root, core, scenes, map, click, settled } = await setup();
+    core.failures = [new CoreError("Zonen går utanför rummet")];
+    click("Vanlig zon");
+    for (const point of [
+      { x: 0.5, y: 0.5 },
+      { x: 2, y: 0.5 },
+      { x: 2, y: 1.5 },
+    ]) {
+      map.onPointerDown(point);
+    }
+    click("Stäng zonen");
+    await settled();
+
+    expect(text(root, ".message")).toBe("Zonen går utanför rummet");
+    expect(scenes.at(-1)?.floor.rooms[0].zones ?? []).toEqual([]);
+    expect(scenes.at(-1)?.selection).toBeNull();
     expect(text(root, ".selection")).toMatch(/Inget valt/);
   });
 

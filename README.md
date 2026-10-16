@@ -97,8 +97,9 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    rummet genom att klicka på det första hörnet igen (passar L-formade rum).
    **Rum, rektangel**: dra från ett hörn till hörnet snett emot. Ett klick
    nära ett hörn som redan finns hamnar exakt på det, så att rummen möts.
-4. Rita zonerna i rummen på samma sätt som ett rum med fri form. Varje sorts
-   zon har en egen färg:
+4. **Zoner**: välj sort under **Zoner** bland verktygen och klicka ut hörnen
+   inne i ett rum, på samma sätt som ett rum med fri form. Varje sorts zon
+   har en egen färg:
    - **Vanlig zon**: en plats som systemet ska känna till, till exempel
      skrivbordet.
    - **Stillhetszon**: där man sitter eller ligger still, till exempel
@@ -107,11 +108,13 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    - **Ignorera-zon**: störkällor som en fläkt, en gardin eller en växt.
    - **Entrézon**: vid en dörr, där den som försvinner ur sikte har gått ut.
 
-   Alla hörn i en zon ska ligga i samma rum. Zonerna syns i livevyn, men
-   närvaron tar hänsyn till dem först i en kommande version.
+   Zonen ska ligga i ett rum; ett hörn nära en vägg hamnar på väggen. Zonerna
+   syns i livevyn, men närvaron tar hänsyn till dem först i en kommande
+   version.
 5. **Välj och flytta**: klicka på ett rum eller en zon för att byta namn på
-   det eller ta bort det. En zon kan också byta sort. Dra ett rum för att
-   flytta det; zonerna i rummet följer med.
+   det eller ta bort det. En zon kan också byta sort. Klicka en gång till på
+   en vald zon för att välja rummet under den. Dra ett rum för att flytta
+   det; zonerna i rummet följer med.
 
 Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
 Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
@@ -164,8 +167,10 @@ Så läser du filen:
   lamporna släcks när rummet har varit tomt i `off_after_empty_seconds`
   sekunder.
 - `zones` är delar av ett rum: `vanlig`, `stillhet` (soffa, säng),
-  `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr). Alla
-  hörn i en zon ska ligga i rummet (på väggen räknas som i rummet).
+  `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr). En zon
+  ska ligga i sitt rum och får inte gå ut genom någon vägg (längs väggen går
+  bra). Har ett sparat hem en zon som går utanför, startar kärnan inte utan
+  säger vilken zon det gäller. Rätta filen och läs in den igen.
 - `nodes` är rumskorten: var de sitter (`position`), monteringshöjd i
   meter (`height`), åt vilket håll radarn tittar i grader medurs där 0 är
   åt höger (`rotation`), om kortet sitter upp och ned (`mirrored`) och vad

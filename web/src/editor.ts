@@ -13,6 +13,7 @@
 import "./editor.css";
 import {
   addRoom,
+  cornersOnFloor,
   deleteRoom,
   distance,
   findRoom,
@@ -27,22 +28,14 @@ import {
   toXY,
 } from "./editing";
 import { button, element } from "./dom";
-import { createKonvaEditorView, type EditorViewFactory } from "./editorView";
+import { createKonvaEditorView, type EditorViewFactory, type Selection } from "./editorView";
 import { coreApi, CoreError, type HomeApi } from "./homeApi";
 import type { FloorModel, HomeDocument } from "./homefile";
 import type { Point, ZoneKind } from "./protocol";
 import { Drawing, INSTRUCTIONS, type Outcome, type ToolName } from "./tools";
-import { zoneProperties, zoneTools } from "./zonePanel";
-import {
-  addZone,
-  deleteZone,
-  findZone,
-  renameZone,
-  roomAround,
-  setZoneKind,
-  ZONE_STYLES,
-  zoneProblem,
-} from "./zones";
+import { zoneInstruction, zoneProperties, zoneTools } from "./zonePanel";
+import { findZone, nearestOnWall, planZone } from "./zones";
+import { ZONE_STYLES } from "./zoneStyles";
 
 /** En bild som är klar att skickas till kärnan, och hur många bildpunkter bred den är. */
 export interface PreparedImage {
@@ -104,7 +97,7 @@ const TOOL_LABELS: Record<ToolName, string> = {
   polygon: "Rum, fri form",
   rectangle: "Rum, rektangel",
   scale: "Skala bilden",
-  zone: "Zon",
+  zone: "Zon", // visas inte: zonerna har en knapp per sort (zonePanel.ts)
 };
 
 function errorText(error: unknown): string {
@@ -128,8 +121,7 @@ export function mountEditor(
   /** Det som visas: det sparade med de väntande ändringarna ovanpå. */
   let shown: HomeDocument | null = null;
   let floorId: string | null = null;
-  let selectedRoomId: string | null = null;
-  let selectedZoneId: string | null = null;
+  let selection: Selection = null;
   /** Sorten av zon som ritas med verktyget Zon. */
   let zoneKind: ZoneKind = "vanlig";
   /** Punkterna som ska skalas mellan, när användaren har klickat ut två. */
@@ -201,13 +193,13 @@ export function mountEditor(
   const instruction = element("p", { className: "instruction" });
   const draftActions = element("div", { className: "actions" });
   const selectionHeading = element("h2", {}, "Valt rum");
-  const selection = element("div", { className: "selection" });
+  const selectionPanel = element("div", { className: "selection" });
   const summary = element("dl", { className: "summary" });
   const properties = element(
     "aside",
     { className: "properties" },
     element("section", {}, element("h2", {}, "Instruktion"), instruction, draftActions),
-    element("section", {}, selectionHeading, selection),
+    element("section", {}, selectionHeading, selectionPanel),
     element("section", {}, element("h2", {}, "Hemmet"), summary),
   );
 
@@ -245,9 +237,7 @@ export function mountEditor(
   const renderInstruction = () => {
     const draft = drawing.draft;
     instruction.textContent =
-      drawing.tool === "zone"
-        ? `${ZONE_STYLES[zoneKind].label}: ${ZONE_STYLES[zoneKind].description} ${INSTRUCTIONS.zone}`
-        : INSTRUCTIONS[drawing.tool];
+      drawing.tool === "zone" ? zoneInstruction(zoneKind) : INSTRUCTIONS[drawing.tool];
     draftActions.replaceChildren();
     if (draft.kind === "polygon") {
       const done = button(drawing.tool === "zone" ? "Stäng zonen" : "Stäng rummet", () =>
@@ -297,26 +287,23 @@ export function mountEditor(
   };
 
   const renderSelection = () => {
-    const zone = shown === null ? null : findZone(shown, selectedZoneId);
+    const zone =
+      selection?.kind === "zone" && shown !== null
+        ? zoneProperties(shown, selection.id, {
+            commit,
+            deselect: () => (selection = null),
+            showMessage,
+          })
+        : null;
     selectionHeading.textContent = zone === null ? "Valt rum" : "Vald zon";
     if (zone !== null) {
-      const zoneId = zone.zone.id;
-      selection.replaceChildren(
-        ...zoneProperties(zone.zone, zone.room.name, {
-          rename: (name) => commit((document) => renameZone(document, zoneId, name)),
-          setKind: (kind) => commit((document) => setZoneKind(document, zoneId, kind)),
-          remove: () => {
-            selectedZoneId = null;
-            commit((document) => deleteZone(document, zoneId));
-          },
-          complain: showMessage,
-        }),
-      );
+      selectionPanel.replaceChildren(...zone);
       return;
     }
-    const room = selectedRoomId === null || shown === null ? null : findRoom(shown, selectedRoomId);
+    const room =
+      selection?.kind === "room" && shown !== null ? findRoom(shown, selection.id) : null;
     if (room === null) {
-      selection.replaceChildren(
+      selectionPanel.replaceChildren(
         element("p", { className: "muted" }, "Inget valt. Välj ett rum eller en zon på kartan."),
       );
       return;
@@ -336,7 +323,7 @@ export function mountEditor(
         name.blur();
       }
     });
-    selection.replaceChildren(
+    selectionPanel.replaceChildren(
       element("label", {}, "Namn ", name),
       element(
         "p",
@@ -347,7 +334,7 @@ export function mountEditor(
         "Ta bort rummet",
         () => {
           if (shown !== null) {
-            selectedRoomId = null;
+            selection = null;
             commit((document) => deleteRoom(document, room.id));
           }
         },
@@ -381,8 +368,7 @@ export function mountEditor(
       ...floors.map((floor) => {
         const node = button(floor.name, () => {
           floorId = floor.id;
-          selectedRoomId = null;
-          selectedZoneId = null;
+          selection = null;
           cancelDrawing();
         });
         node.setAttribute("aria-pressed", String(floor.id === floorId));
@@ -404,10 +390,9 @@ export function mountEditor(
         floor.plan_image == null
           ? null
           : { url: `${deps.api.planImageUrl(floor.id)}?v=${imageVersion}`, plan: floor.plan_image },
-      selectedRoomId,
-      selectedZoneId,
-      zoneKind,
+      selection,
       tool: drawing.tool,
+      draftColor: drawing.tool === "zone" ? ZONE_STYLES[zoneKind].color : null,
       draft: drawing.draft,
     });
   };
@@ -435,11 +420,14 @@ export function mountEditor(
         shown = change.edit(shown);
       }
     }
-    if (selectedRoomId !== null && shown !== null && findRoom(shown, selectedRoomId) === null) {
-      selectedRoomId = null;
-    }
-    if (selectedZoneId !== null && shown !== null && findZone(shown, selectedZoneId) === null) {
-      selectedZoneId = null;
+    const stillThere =
+      shown === null ||
+      selection === null ||
+      (selection.kind === "room"
+        ? findRoom(shown, selection.id)
+        : findZone(shown, selection.id)) !== null;
+    if (!stillThere) {
+      selection = null;
     }
   };
 
@@ -521,8 +509,7 @@ export function mountEditor(
     drawing.setTool(tool);
     scalePoints = null;
     if (tool !== "select") {
-      selectedRoomId = null;
-      selectedZoneId = null;
+      selection = null;
     }
     render();
   };
@@ -536,17 +523,14 @@ export function mountEditor(
   }
 
   /**
-   * Drar punkten till ett hörn som redan finns om den är nära, annars till hela
-   * centimeter. Punkter utanför planet (till vänster om eller ovanför origo)
+   * Drar punkten till ett hörn som redan finns om den är nära, för en zon
+   * annars till en vägg som är nära, och annars till hela centimeter. Punkter utanför planet (till vänster om eller ovanför origo)
    * flyttas in till kanten.
    */
   const snap = (point: Point): Point => {
     const radius = SNAP_PIXELS * view.metersPerPixel();
-    const corners =
-      currentFloor()?.rooms.flatMap((room) => [
-        ...room.polygon.map(toPoint),
-        ...(room.zones ?? []).flatMap((zone) => zone.polygon.map(toPoint)),
-      ]) ?? [];
+    const floor = currentFloor();
+    const corners = floor === null ? [] : cornersOnFloor(floor);
     let best: Point | null = null;
     for (const corner of corners) {
       if (
@@ -555,6 +539,9 @@ export function mountEditor(
       ) {
         best = corner;
       }
+    }
+    if (best === null && floor !== null && drawing.tool === "zone") {
+      best = nearestOnWall(floor, point, radius);
     }
     return best ?? toPoint(toXY(point));
   };
@@ -567,7 +554,7 @@ export function mountEditor(
         showMessage(problem);
       } else if (shown !== null && floor !== null) {
         const { roomId, name } = addRoom(shown, floor.id, outcome.corners);
-        selectedRoomId = roomId;
+        selection = { kind: "room", id: roomId };
         commit(
           (document) => addRoom(document, floor.id, outcome.corners, { roomId, name }).document,
         );
@@ -575,18 +562,13 @@ export function mountEditor(
       }
     } else if (outcome?.kind === "zone") {
       const floor = currentFloor();
-      const problem = floor === null ? null : zoneProblem(floor, outcome.corners);
-      const room = floor === null ? null : roomAround(floor, outcome.corners);
-      if (problem !== null) {
-        showMessage(problem);
-      } else if (shown !== null && room !== null) {
-        const kind = zoneKind;
-        const { zoneId, name } = addZone(shown, room.id, kind, outcome.corners);
-        selectedZoneId = zoneId;
-        commit(
-          (document) =>
-            addZone(document, room.id, kind, outcome.corners, { zoneId, name }).document,
-        );
+      const plan =
+        shown === null || floor === null ? null : planZone(shown, floor, zoneKind, outcome.corners);
+      if (plan !== null && "problem" in plan) {
+        showMessage(plan.problem);
+      } else if (plan !== null) {
+        selection = { kind: "zone", id: plan.zoneId };
+        commit(plan.edit);
         return;
       }
     } else if (outcome?.kind === "scale") {
@@ -701,14 +683,8 @@ export function mountEditor(
         handle(drawing.pointerUp(snap(point)));
       }
     },
-    onSelectRoom: (roomId) => {
-      selectedRoomId = roomId;
-      selectedZoneId = null;
-      render();
-    },
-    onSelectZone: (zoneId) => {
-      selectedZoneId = zoneId;
-      selectedRoomId = null;
+    onSelect: (next) => {
+      selection = next;
       render();
     },
     onMoveRoom: (roomId, dx, dy) => {

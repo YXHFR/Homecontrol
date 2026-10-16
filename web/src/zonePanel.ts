@@ -1,12 +1,14 @@
 /**
- * Kartredigerarens delar för zoner: en knapp per sorts zon i verktygslådan och
- * egenskaperna för en vald zon. Delarna ändrar inget själva utan säger till
- * kartredigeraren, som sparar.
+ * Kartredigerarens delar för zoner: en knapp per sorts zon i verktygslådan,
+ * instruktionen och egenskaperna för en vald zon. Delarna sparar inget själva
+ * utan lämnar ändringarna till kartredigeraren, som sparar dem.
  */
 import { button, element } from "./dom";
-import type { ZoneModel } from "./homefile";
+import type { HomeDocument } from "./homefile";
 import type { ZoneKind } from "./protocol";
-import { ZONE_KINDS, ZONE_STYLES } from "./zones";
+import { INSTRUCTIONS } from "./tools";
+import { deleteZone, findZone, renameZone, setZoneKind } from "./zones";
+import { ZONE_KINDS, ZONE_STYLES } from "./zoneStyles";
 
 export interface ZoneTools {
   /** Rubriken och knapparna, i den ordning de ska stå i verktygslådan. */
@@ -32,24 +34,43 @@ export function zoneTools(onChoose: (kind: ZoneKind) => void): ZoneTools {
   };
 }
 
-export interface ZoneActions {
-  rename(name: string): void;
-  setKind(kind: ZoneKind): void;
-  remove(): void;
-  /** Visar ett meddelande, till exempel när namnet lämnas tomt. */
-  complain(text: string): void;
+/** Instruktionen för verktyget Zon: vad sorten betyder och hur zonen ritas. */
+export function zoneInstruction(kind: ZoneKind): string {
+  const style = ZONE_STYLES[kind];
+  return `${style.label}: ${style.description} ${INSTRUCTIONS.zone}`;
 }
 
-/** Egenskaperna för en vald zon: namn, sort och knappen för att ta bort den. */
-export function zoneProperties(zone: ZoneModel, roomName: string, actions: ZoneActions): Node[] {
+export interface ZoneActions {
+  /** Sparar en ändring av hemmet. */
+  commit(edit: (document: HomeDocument) => HomeDocument): void;
+  /** Zonen har tagits bort och ska inte längre vara vald. */
+  deselect(): void;
+  /** Visar ett meddelande, till exempel när namnet lämnas tomt. */
+  showMessage(text: string): void;
+}
+
+/**
+ * Egenskaperna för en vald zon: namn, sort och knappen för att ta bort den.
+ * Null om zonen inte finns i hemmet (längre).
+ */
+export function zoneProperties(
+  document: HomeDocument,
+  zoneId: string,
+  actions: ZoneActions,
+): Node[] | null {
+  const found = findZone(document, zoneId);
+  if (found === null) {
+    return null;
+  }
+  const { zone, room } = found;
   const name = element("input", { type: "text", value: zone.name, maxLength: 100, name: "name" });
   name.addEventListener("change", () => {
     const next = name.value.trim();
     if (next === "") {
       name.value = zone.name;
-      actions.complain("Zonen måste ha ett namn.");
+      actions.showMessage("Zonen måste ha ett namn.");
     } else if (next !== zone.name) {
-      actions.rename(next);
+      actions.commit((saved) => renameZone(saved, zoneId, next));
     }
   });
   name.addEventListener("keydown", (event) => {
@@ -69,7 +90,10 @@ export function zoneProperties(zone: ZoneModel, roomName: string, actions: ZoneA
       ),
     ),
   );
-  kind.addEventListener("change", () => actions.setKind(kind.value as ZoneKind));
+  kind.addEventListener("change", () => {
+    const next = kind.value as ZoneKind;
+    actions.commit((saved) => setZoneKind(saved, zoneId, next));
+  });
 
   return [
     element("label", {}, "Namn ", name),
@@ -77,8 +101,15 @@ export function zoneProperties(zone: ZoneModel, roomName: string, actions: ZoneA
     element(
       "p",
       { className: "muted" },
-      `Ligger i ${roomName}. ${ZONE_STYLES[zone.kind].description}`,
+      `Ligger i ${room.name}. ${ZONE_STYLES[zone.kind].description}`,
     ),
-    button("Ta bort zonen", () => actions.remove(), "danger"),
+    button(
+      "Ta bort zonen",
+      () => {
+        actions.deselect();
+        actions.commit((saved) => deleteZone(saved, zoneId));
+      },
+      "danger",
+    ),
   ];
 }

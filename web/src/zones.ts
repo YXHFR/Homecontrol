@@ -1,98 +1,68 @@
 /**
  * Zonerna: delar av ett rum som betyder något särskilt för närvaron (se #36).
- * Här finns hur varje sorts zon ser ut och de ändringar som kartredigeraren
- * gör i zonerna. Precis som i editing.ts returnerar ändringarna ett nytt
- * dokument och lämnar det gamla orört.
+ * Här finns de ändringar som kartredigeraren gör i zonerna. Precis som i
+ * editing.ts returnerar ändringarna ett nytt dokument och lämnar det gamla
+ * orört. Hur zonerna ser ut står i zoneStyles.ts.
  */
-import { polygonArea, selfIntersecting, toPoint, toXY, uniqueId, updateRoom } from "./editing";
+import {
+  allIds,
+  distance,
+  polygonArea,
+  polygonWithin,
+  selfIntersecting,
+  toPoint,
+  toXY,
+  uniqueId,
+  updateRoom,
+} from "./editing";
 import type { FloorModel, HomeDocument, RoomModel, ZoneModel } from "./homefile";
 import type { Point, ZoneKind } from "./protocol";
+import { ZONE_STYLES } from "./zoneStyles";
 
 /** Mindre zoner än så här (i kvadratmeter) är nästan säkert en felklickning. */
 export const MIN_ZONE_AREA = 0.04;
 
-export const ZONE_KINDS: readonly ZoneKind[] = ["vanlig", "stillhet", "ignorera", "entré"];
-
-export interface ZoneStyle {
-  /** Namnet på knappen och i listan över sorter. */
-  label: string;
-  /** Det nya zoner av sorten heter, följt av en siffra. */
-  defaultName: string;
-  /** Vad sorten betyder, i klartext. */
-  description: string;
-  color: string;
-}
-
-export const ZONE_STYLES: Record<ZoneKind, ZoneStyle> = {
-  vanlig: {
-    label: "Vanlig zon",
-    defaultName: "Zon",
-    description: "En plats i rummet som systemet ska känna till, till exempel skrivbordet.",
-    color: "#2e9d5b",
-  },
-  stillhet: {
-    label: "Stillhetszon",
-    defaultName: "Stillhet",
-    description:
-      "Där man sitter eller ligger still länge, till exempel soffan eller sängen. " +
-      "Närvaron hålls kvar även när radarn tappar personen.",
-    color: "#7c5cc9",
-  },
-  ignorera: {
-    label: "Ignorera-zon",
-    defaultName: "Ignorera",
-    description:
-      "Störkällor som radarn inte ska bry sig om, till exempel en fläkt, en gardin eller en växt.",
-    color: "#7a7a7a",
-  },
-  entré: {
-    label: "Entrézon",
-    defaultName: "Entré",
-    description: "Vid en dörr. Den som försvinner ur sikte här har gått ut.",
-    color: "#0e8f8a",
-  },
-};
-
-/** Om punkten är i ytan. Punkter på kanten räknas som inne, som i kärnan (home.py). */
-export function inPolygon(point: Point, polygon: Point[]): boolean {
-  const tolerance = 1e-9;
-  let inside = false;
-  for (let i = 0; i < polygon.length; i++) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    const cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
-    const onEdge =
-      Math.abs(cross) <= tolerance &&
-      Math.min(a.x, b.x) - tolerance <= point.x &&
-      point.x <= Math.max(a.x, b.x) + tolerance &&
-      Math.min(a.y, b.y) - tolerance <= point.y &&
-      point.y <= Math.max(a.y, b.y) + tolerance;
-    if (onEdge) {
-      return true;
-    }
-    // Strålmetoden: räkna hur många sidor en stråle åt höger från punkten korsar.
-    if (a.y > point.y !== b.y > point.y) {
-      const crossingX = a.x + ((point.y - a.y) * (b.x - a.x)) / (b.y - a.y);
-      if (point.x < crossingX) {
-        inside = !inside;
-      }
-    }
-  }
-  return inside;
-}
-
 /**
- * Rummet på våningen som alla hörnen ligger i, eller null. Hörnen avrundas
+ * Rummet på våningen som ytan ligger i, eller null. Hörnen avrundas
  * först som när de sparas, så att kärnan godtar det som godtas här.
  */
 export function roomAround(floor: FloorModel, corners: Point[]): RoomModel | null {
   const saved = corners.map((corner) => toPoint(toXY(corner)));
-  return (
-    floor.rooms.find((room) => {
-      const polygon = room.polygon.map(toPoint);
-      return saved.every((corner) => inPolygon(corner, polygon));
-    }) ?? null
-  );
+  return floor.rooms.find((room) => polygonWithin(saved, room.polygon.map(toPoint))) ?? null;
+}
+
+/**
+ * Den närmaste punkten på en vägg på våningen, om den är högst `radius` meter
+ * bort. Ett hörn som ska ligga längs väggen, som i en entrézon vid dörren,
+ * hamnar då på väggen och inte en centimeter utanför.
+ */
+export function nearestOnWall(floor: FloorModel, point: Point, radius: number): Point | null {
+  let best: Point | null = null;
+  for (const room of floor.rooms) {
+    const corners = room.polygon.map(toPoint);
+    corners.forEach((a, i) => {
+      const b = corners[(i + 1) % corners.length];
+      const length2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+      const t =
+        length2 === 0
+          ? 0
+          : Math.min(
+              1,
+              Math.max(
+                0,
+                ((point.x - a.x) * (b.x - a.x) + (point.y - a.y) * (b.y - a.y)) / length2,
+              ),
+            );
+      const onWall = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+      if (
+        distance(point, onWall) <= radius &&
+        (best === null || distance(point, onWall) < distance(point, best))
+      ) {
+        best = onWall;
+      }
+    });
+  }
+  return best;
 }
 
 /** Varför ytan inte kan bli en zon i något rum på våningen, eller null om den kan det. */
@@ -107,7 +77,7 @@ export function zoneProblem(floor: FloorModel, corners: Point[]): string | null 
     return "Zonen blev för liten. Rita den lite större.";
   }
   if (roomAround(floor, corners) === null) {
-    return "Rita zonen inne i ett rum. Alla hörn ska ligga i samma rum.";
+    return "Rita zonen inne i ett rum, utan att den går ut genom någon vägg.";
   }
   return null;
 }
@@ -125,6 +95,30 @@ export function findZone(
     }
   }
   return null;
+}
+
+/**
+ * Det som ska hända när en zon har ritats: antingen varför den inte kan
+ * sparas, eller den nya zonens id och ändringen som lägger till den. Ändringen
+ * görs på det sparade hemmet när den står på tur och ger zonen samma id och
+ * namn som den fick när den ritades.
+ */
+export function planZone(
+  document: HomeDocument,
+  floor: FloorModel,
+  kind: ZoneKind,
+  corners: Point[],
+): { problem: string } | { zoneId: string; edit: (document: HomeDocument) => HomeDocument } {
+  const problem = zoneProblem(floor, corners);
+  const room = roomAround(floor, corners);
+  if (problem !== null || room === null) {
+    return { problem: problem ?? "Rita zonen inne i ett rum." };
+  }
+  const { zoneId, name } = addZone(document, room.id, kind, corners);
+  return {
+    zoneId,
+    edit: (saved) => addZone(saved, room.id, kind, corners, { zoneId, name }).document,
+  };
 }
 
 function nextZoneName(document: HomeDocument, kind: ZoneKind): string {
@@ -153,8 +147,7 @@ export function addZone(
   given?: { zoneId: string; name: string },
 ): { document: HomeDocument; zoneId: string; name: string } {
   // Ett givet id som redan används (någon annan hann lägga till något) byts ut.
-  const usable =
-    given !== undefined && uniqueId(document, given.zoneId) === given.zoneId ? given : undefined;
+  const usable = given !== undefined && !allIds(document).has(given.zoneId) ? given : undefined;
   const name = usable?.name ?? nextZoneName(document, kind);
   const zoneId = usable?.zoneId ?? uniqueId(document, name);
   const zone: ZoneModel = { id: zoneId, name, kind, polygon: corners.map(toXY) };
