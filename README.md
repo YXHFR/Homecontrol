@@ -275,9 +275,9 @@ någonstans, och inget exporteras av sig självt.
 
 Prickarna på kartan är anonyma. Varje prick får ett slumpat nummer, och
 historiken säger inget om vem det var. Låtsaspersonerna i simuleringsläget
-sparas inte: ingen historik sparas medan simuleringsläget är på. Än så länge
-är simuleringsläget påslaget från början; stäng av det i livevyn för att
-historiken ska börja sparas.
+sparas inte: ingen historik sparas medan simuleringsläget är på. Utan
+`ESPHOME_SECRET` (se ovan) är simuleringsläget påslaget från början; stäng
+av det i livevyn för att historiken ska börja sparas.
 
 Som standard sparas historiken utan tidsgräns, så den växer sakta med
 tiden. Båda tiderna går att ändra i `.env`. Ta bort `#` framför raden och
