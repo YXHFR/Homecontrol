@@ -13,7 +13,8 @@ Det som inte gick att skriva tappas också; historiken är inte viktigare än
 att kärnan fortsätter.
 
 I händelseloggen sparas rummets nya läge före händelsen som det gav upphov
-till, utom när kön har varit full: då kan rumsändringen komma efter.
+till. Båda får tiden då de lades i kön. En rumsändring eller händelse som
+inte fick plats försöks igen nästa gång, och får då den senare tiden.
 
 En position sparas när spåret har flyttat sig eller bytt mellan sett och
 kvarhållet. Ett spår som står helt still ger alltså inga nya punkter.
@@ -197,23 +198,35 @@ class History:
         for event in snapshot.events:
             if event.number <= self._last_event:
                 continue
+            if event.number > self._last_event + 1:
+                # Kärnan minns bara de senaste händelserna; de emellan hann försvinna.
+                self._count_dropped(event.number - self._last_event - 1)
+                self._last_event = event.number - 1
             if not self._put(_Event(now, _EXPLANATION, event.room_id, event.text)):
                 break  # resten försöks nästa gång, i samma ordning
             self._last_event = event.number
 
     def _put(self, item: _Position | _Event) -> bool:
-        """Lägger `item` i kön om den får plats. Returnerar om den fick det."""
+        """Lägger `item` i kön om den får plats. Returnerar om den fick det.
+
+        En position som inte får plats är tappad. Rumsändringar och händelser
+        försöks igen nästa gång och räknas därför inte som tappade här.
+        """
         try:
             self._queue.put_nowait(item)
         except queue.Full:
-            if self._dropped == 0:
-                logger.warning("Historiken hinner inte skrivas, så nya punkter tappas")
-            self._dropped += 1
+            if isinstance(item, _Position):
+                self._count_dropped(1)
             return False
         if self._dropped:
             logger.info("Historiken skrivs igen (%d punkter och händelser tappades)", self._dropped)
             self._dropped = 0
         return True
+
+    def _count_dropped(self, count: int) -> None:
+        if self._dropped == 0:
+            logger.warning("Historiken hinner inte skrivas, så nya punkter tappas")
+        self._dropped += count
 
     def _run(self) -> None:
         conn: psycopg.Connection | None = None

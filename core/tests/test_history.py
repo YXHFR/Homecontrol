@@ -300,7 +300,19 @@ def test_events_that_did_not_fit_are_saved_later_in_order() -> None:
 
     saved = [writer._queue.get_nowait(), writer._queue.get_nowait()]
     assert [item.detail for item in saved if isinstance(item, history._Event)] == [lit().text] * 2
-    assert writer._last_event == 3
+    assert writer.dropped == 0
+
+
+def test_events_the_core_forgot_before_they_fit_are_counted_as_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="homecontrol.history")
+    writer = History("host=127.0.0.1 port=1")
+    writer.record(snapshot(events=(lit(1),)))
+
+    writer.record(snapshot(events=(lit(5), lit(6))))
+
+    assert "3 punkter och händelser tappades" in caplog.text
 
 
 def wait_for(condition: Callable[[], bool]) -> None:
