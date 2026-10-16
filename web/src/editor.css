@@ -124,6 +124,39 @@ body[data-page="editor"] {
   border-radius: 6px;
 }
 
+.properties label.checkbox {
+  flex-direction: row;
+  align-items: center;
+}
+
+.properties select {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.properties .selection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.properties .selection p {
+  margin: 0;
+}
+
+.properties .room-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 8px 12px 12px;
+  margin: 0;
+}
+
 .properties .danger {
   color: #a32020;
   border-color: #e3b0b0;

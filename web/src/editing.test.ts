@@ -24,7 +24,7 @@ function home(): HomeDocument {
           id: "plan",
           name: "Plan 1",
           level: 0,
-          signal_sources: [{ id: "router", position: [1, 1] }],
+          signal_sources: [{ id: "router", name: "Router", position: [1, 1], height: 1 }],
           rooms: [
             {
               id: "kok",
@@ -45,8 +45,8 @@ function home(): HomeDocument {
                   ],
                 },
               ],
-              nodes: [{ position: [1, 1] }],
-              lamps: [{ position: [2.5, 2] }],
+              nodes: [{ id: "nod", name: "Rumskort", position: [1, 1], height: 2 }],
+              lamps: [{ id: "lampa", name: "Lampa", position: [2.5, 2] }],
             },
           ],
         },

@@ -5,6 +5,7 @@
  */
 import Konva from "konva";
 import { toPoint } from "./editing";
+import { drawItems, drawWalls, type ItemCallbacks } from "./editorItems";
 import type { FloorModel, PlanImage } from "./homefile";
 import type { Point } from "./protocol";
 import type { Draft, ToolName } from "./tools";
@@ -15,11 +16,13 @@ export interface EditorScene {
   /** Planritningen och adressen till bilden, eller null om våningen saknar bild. */
   planImage: { url: string; plan: PlanImage } | null;
   selectedRoomId: string | null;
+  /** Det valda rumskortet, den valda routern eller lampan. */
+  selectedItemId: string | null;
   tool: ToolName;
   draft: Draft;
 }
 
-export interface EditorViewCallbacks {
+export interface EditorViewCallbacks extends ItemCallbacks {
   /** Tryck, rörelse och släpp på kartan, i hemmets meter. */
   onPointerDown(point: Point): void;
   onPointerMove(point: Point): void;
@@ -80,8 +83,10 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
   const gridLayer = new Konva.Layer({ listening: false });
   const imageLayer = new Konva.Layer({ listening: false });
   const roomLayer = new Konva.Layer();
+  const wallLayer = new Konva.Layer();
+  const itemLayer = new Konva.Layer();
   const draftLayer = new Konva.Layer({ listening: false });
-  stage.add(gridLayer, imageLayer, roomLayer, draftLayer);
+  stage.add(gridLayer, imageLayer, roomLayer, wallLayer, itemLayer, draftLayer);
 
   const images = new Map<string, HTMLImageElement>();
   let scene: EditorScene | null = null;
@@ -325,6 +330,8 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     drawGrid();
     drawImage(scene);
     drawRooms(scene);
+    drawWalls(wallLayer, scene, callbacks, container);
+    drawItems(itemLayer, scene, callbacks, container, stage);
     drawDraft(scene);
   };
 

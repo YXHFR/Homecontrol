@@ -12,7 +12,9 @@ och släcks efter det.
 > mörkt och släcks när rummet har varit tomt en stund. Dagsljuset ställs med
 > ett reglage, och tiden kan gå 10 eller 60 gånger fortare så att du slipper
 > vänta. I kartredigeraren ritar du dina egna rum ovanpå en bild av
-> planritningen. Riktiga sensorer och lampor kopplas in i senare steg.
+> planritningen, väljer vad väggarna är gjorda av och var dörröppningarna är,
+> och placerar rumskort, routrar och lampor. Varje rum kan få egna ljusgränser
+> och en egen fördröjning. Riktiga sensorer och lampor kopplas in i senare steg.
 
 ## Snabbstart
 

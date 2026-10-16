@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { groundFloor, onMap, openEditor, png, savedHome, waitUntilSaved } from "./helpers";
+import {
+  atMeters,
+  groundFloor,
+  onMap,
+  openEditor,
+  png,
+  savedHome,
+  waitUntilSaved,
+} from "./helpers";
 
 test("ett rum som dras ut som rektangel sparas, byter namn, flyttas och tas bort", async ({ page }) => {
   await openEditor(page);
@@ -133,4 +141,73 @@ test("en bild av planritningen laddas upp och skalas med två punkter", async ({
   await page.getByRole("button", { name: "Ta bort bilden" }).click();
   await waitUntilSaved(page);
   expect(groundFloor(await savedHome(page)).plan_image).toBeNull();
+});
+
+test("ett rumskort placeras i ett rum, vrids med knappar och ring, får höjd och spegling", async ({
+  page,
+}) => {
+  await openEditor(page);
+  const floor = groundFloor(await savedHome(page));
+  const room = floor.rooms[0];
+  const nodesBefore = room.nodes?.length ?? 0;
+  const map = page.locator(".editor-stage canvas").first();
+  // En bit in från rummets övre vänstra hörn, där inget annat är placerat.
+  const [left, top] = room.polygon[0];
+  const spot = { x: left + 1, y: top + 1 };
+
+  await page.getByRole("button", { name: "Rumskort (ESP32)" }).click();
+  await expect(page.locator(".instruction")).toContainText("ringen eller knapparna");
+  const at = await atMeters(map, floor, spot);
+  await page.mouse.click(at.x, at.y);
+  await waitUntilSaved(page);
+
+  const placedNodes = () =>
+    savedHome(page).then((home) => groundFloor(home).rooms.find((r) => r.id === room.id)?.nodes);
+  const nodes = (await placedNodes()) ?? [];
+  expect(nodes).toHaveLength(nodesBefore + 1);
+  const node = nodes[nodes.length - 1];
+  expect(node.position[0]).toBeCloseTo(spot.x, 1);
+  expect(node.position[1]).toBeCloseTo(spot.y, 1);
+  expect(node.rotation).toBe(0);
+  const current = async () => (await placedNodes())?.find((n) => n.id === node.id);
+
+  await page.getByRole("button", { name: "Vrid 15° medurs" }).click();
+  await waitUntilSaved(page);
+  expect((await current())?.rotation).toBe(15);
+
+  // Med Välj och flytta syns ringen runt det valda kortet. Dra handtaget rakt nedåt.
+  await page.getByRole("button", { name: "Välj och flytta" }).click();
+  const ringRadius = 46;
+  const handle = {
+    x: at.x + ringRadius * Math.cos((15 * Math.PI) / 180),
+    y: at.y + ringRadius * Math.sin((15 * Math.PI) / 180),
+  };
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 10, at.y + 40, { steps: 4 });
+  await page.mouse.move(at.x, at.y + ringRadius, { steps: 4 });
+  await page.mouse.up();
+  await waitUntilSaved(page);
+  expect((await current())?.rotation).toBeGreaterThanOrEqual(85);
+  expect((await current())?.rotation).toBeLessThanOrEqual(95);
+
+  const height = page.getByRole("spinbutton", { name: "Höjd över golvet (m)" });
+  await height.fill("2.5");
+  await height.press("Enter");
+  await waitUntilSaved(page);
+  await page.getByRole("checkbox", { name: "Spegelvänd sidled" }).check();
+  await waitUntilSaved(page);
+  expect(await current()).toMatchObject({ height: 2.5, mirrored: true });
+
+  // Dra kortet en bit åt höger.
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 30, at.y, { steps: 5 });
+  await page.mouse.up();
+  await waitUntilSaved(page);
+  expect((await current())?.position[0]).toBeGreaterThan(node.position[0]);
+
+  await page.getByRole("button", { name: "Ta bort rumskortet" }).click();
+  await waitUntilSaved(page);
+  expect(await current()).toBeUndefined();
 });
