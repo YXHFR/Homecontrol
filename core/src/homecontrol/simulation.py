@@ -35,7 +35,6 @@ from typing import Literal, get_args
 from homecontrol.clock import PacedClock, SpeedControl
 from homecontrol.connectors import (
     LampCommand,
-    LampLimit,
     LampStateReported,
     LightLevelObserved,
     MotionObserved,
@@ -45,6 +44,7 @@ from homecontrol.connectors import (
     SourceLost,
 )
 from homecontrol.home import Capability, Home, Node, Point, Room, Target
+from homecontrol.lamplimit import LampLimit
 from homecontrol.rules import FULL_BRIGHTNESS
 
 logger = logging.getLogger(__name__)
@@ -308,23 +308,26 @@ class SimulatedLampOutput:
 
     @property
     def states(self) -> Mapping[str, bool]:
-        """Om varje virtuell lampa är tänd."""
+        """Om varje virtuell lampa är tänd. Uppskjutna kommandon som får utföras utförs först."""
         self._release_held()
         return self._states
 
     @property
     def brightness(self) -> Mapping[str, int]:
-        """Ljusstyrkan i procent som varje virtuell lampa senast fick."""
+        """Ljusstyrkan i procent som varje virtuell lampa senast fick.
+
+        Uppskjutna kommandon som får utföras utförs först.
+        """
         self._release_held()
         return self._brightness
 
     def send(self, command: LampCommand) -> None:
         if command.lamp_id in self._real:
             return
-        self._release_held()
         # Ett nytt kommando ersätter ett som har skjutits upp.
         self._held.pop(command.lamp_id, None)
-        if self._limit.allow([command.lamp_id]):
+        self._release_held()
+        if self._limit.allow(command.lamp_id):
             self._apply(command)
         else:
             self._held[command.lamp_id] = command
@@ -337,7 +340,7 @@ class SimulatedLampOutput:
     def _release_held(self) -> None:
         """Utför de uppskjutna kommandona till lampor som får styras igen."""
         for lamp_id in list(self._held):
-            if self._limit.allow([lamp_id]):
+            if self._limit.allow(lamp_id):
                 self._apply(self._held.pop(lamp_id))
 
     def light_by_room(self, home: Home) -> dict[str, float]:
@@ -346,7 +349,7 @@ class SimulatedLampOutput:
         Ljuset mäts vid rummets första rumskort med ljussensor, eller mitt i
         rummet om det inte har något. Lampor närmare än en meter räknas som en meter bort.
         """
-        states = self.states
+        self._release_held()
         light = {}
         for room in home.rooms:
             sensor = next(
@@ -355,7 +358,7 @@ class SimulatedLampOutput:
             )
             total = 0.0
             for lamp in room.lamps:
-                if states.get(lamp.id) is not True:
+                if self._states.get(lamp.id) is not True:
                     continue
                 distance = max(1.0, math.dist(lamp.position, sensor))
                 share = self._brightness.get(lamp.id, FULL_BRIGHTNESS) / FULL_BRIGHTNESS

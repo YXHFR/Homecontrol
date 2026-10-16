@@ -19,7 +19,6 @@ from zigbee_examples import (
 
 from homecontrol.clock import ManualClock
 from homecontrol.connectors import (
-    LIMIT_BURST,
     LampCommand,
     LampStateReported,
     LightLevelObserved,
@@ -27,6 +26,7 @@ from homecontrol.connectors import (
 )
 from homecontrol.controller import Controller
 from homecontrol.home import Home, LampProfile, Point
+from homecontrol.lamplimit import LIMIT_BURST
 from homecontrol.zigbee import (
     GENERIC,
     IKEA_TRADFRI,
@@ -362,7 +362,7 @@ def test_a_lamp_that_is_switched_too_often_gets_the_latest_command_a_little_late
         harness.output.tick()
 
     assert len(harness.take()) == LIMIT_BURST
-    assert caplog.text.count("styrs oftare än") == 1
+    assert caplog.text.count("styrs för ofta") == 1
 
     harness.now = 2.0
     harness.output.tick()
@@ -371,7 +371,7 @@ def test_a_lamp_that_is_switched_too_often_gets_the_latest_command_a_little_late
     assert harness.take() == []
 
 
-def test_a_group_command_counts_for_every_lamp_in_the_group() -> None:
+def test_a_limited_lamp_is_left_out_of_the_group_command() -> None:
     harness = started()
     for _ in range(LIMIT_BURST):
         harness.send(off(FONSTERLAMPA))
@@ -401,6 +401,48 @@ def test_a_held_command_is_forgotten_when_the_lamp_stops_responding() -> None:
     harness.take()
 
     harness.output.handle("zigbee2mqtt/fonsterlampa/availability", b'{"state": "offline"}')
+    harness.now = 5.0
+    harness.output.tick()
+
+    assert not [topic for topic, _ in harness.take() if topic.endswith("/set")]
+
+
+def test_a_lamp_switched_too_often_for_a_long_time_is_logged_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    harness = started()
+
+    for i in range(40):
+        harness.now = i * 0.5
+        harness.send(on(FONSTERLAMPA) if i % 2 == 0 else off(FONSTERLAMPA))
+        harness.output.tick()
+
+    assert caplog.text.count("styrs för ofta") == 1
+
+
+def test_a_held_command_is_forgotten_when_the_lamp_is_changed_with_a_remote() -> None:
+    """Den som trycker på fjärrkontrollen vill ha lampan så; kärnans gamla kommando går inte ut."""
+    harness = started()
+    for _ in range(LIMIT_BURST + 1):
+        harness.send(off(FONSTERLAMPA))
+    harness.take()
+
+    harness.now = 10.0
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+    harness.output.tick()
+
+    assert harness.take_reports()[-1].external
+    assert not [topic for topic, _ in harness.take() if topic.endswith("/set")]
+
+
+def test_held_commands_are_forgotten_when_the_broker_is_lost() -> None:
+    harness = started()
+    for _ in range(LIMIT_BURST + 1):
+        harness.send(off(FONSTERLAMPA))
+    harness.take()
+
+    harness.output.disconnected()
+    harness.output.connected(lambda topic, payload: harness.published.append((topic, payload)))
     harness.now = 5.0
     harness.output.tick()
 

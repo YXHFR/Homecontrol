@@ -56,15 +56,10 @@ from typing import Any, NamedTuple, Protocol
 import aiomqtt
 
 from homecontrol.config import MqttSettings
-from homecontrol.connectors import (
-    Defer,
-    LampCommand,
-    LampLimit,
-    LampStateReported,
-    ObservationSink,
-)
+from homecontrol.connectors import Defer, LampCommand, LampStateReported, ObservationSink
 from homecontrol.home import Home, LampProfile
 from homecontrol.lampdevices import FoundLamp
+from homecontrol.lamplimit import LampLimit
 
 logger = logging.getLogger(__name__)
 
@@ -810,6 +805,9 @@ class ZigbeeOutput:
             external = on != status.on or (
                 on and abs(level - status.brightness) > BRIGHTNESS_TOLERANCE
             )
+        if external:
+            # Den som ändrade lampan vill ha den så; ett uppskjutet kommando gäller inte längre.
+            self._held.pop(lamp_id, None)
         status.gone = False
         status.on = on
         status.brightness = level
@@ -943,7 +941,7 @@ class ZigbeeOutput:
         for lamp_id, item in pending.items():
             # Ett nytt kommando ersätter ett som har skjutits upp.
             self._held.pop(lamp_id, None)
-            if self._limit.allow([lamp_id]):
+            if self._limit.allow(lamp_id):
                 allowed[lamp_id] = item
             else:
                 self._held[lamp_id] = item
@@ -957,7 +955,7 @@ class ZigbeeOutput:
             if status is not None and not status.state_known:
                 # Som i `send`: kärnan räknar om när lampans läge har lästs.
                 del self._held[lamp_id]
-            elif self._limit.allow([lamp_id]):
+            elif self._limit.allow(lamp_id):
                 released[lamp_id] = self._held.pop(lamp_id)
         self._send_now(released)
 

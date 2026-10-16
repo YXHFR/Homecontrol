@@ -86,7 +86,7 @@ def test_broken_output_does_not_stop_the_others(caplog: pytest.LogCaptureFixture
     assert "kunde inte ta emot" in caplog.text
 
 
-def test_switching_is_logged_only_when_debugging(caplog: pytest.LogCaptureFixture) -> None:
+def test_switching_is_not_logged_at_info(caplog: pytest.LogCaptureFixture) -> None:
     """Tänd och släck säger ungefär när någon kom och gick, så de syns inte på INFO."""
     caplog.set_level("INFO", logger="homecontrol.controller")
     controller, clock, lamps = make()

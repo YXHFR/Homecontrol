@@ -87,8 +87,11 @@ class RoomState:
     """Senast uppmätta ljusnivå, eller None om ingen källa har mätt den än."""
     memory: Memory = field(default_factory=dict)
     """Det regelmotorn minns om rummet sedan förra beslutet (se `RuleResult.memory`)."""
-    silent_lamps: tuple[str, ...] = ()
-    """Namnen på rummets lampor som inte svarar. Då är läget okänt, för förklaringen."""
+    not_responding: tuple[str, ...] = ()
+    """Namnen på rummets lampor som inte svarar, så att förklaringen kan nämna dem.
+
+    Läget (`presence`) är då redan okänt; fältet används bara till texten.
+    """
 
 
 @dataclass(frozen=True)
@@ -102,7 +105,7 @@ class Situation:
     """Läget för var och en av rummets lampor."""
     memory: Memory
     now: float
-    silent_lamps: tuple[str, ...] = ()
+    not_responding: tuple[str, ...] = ()
     """Namnen på rummets lampor som inte svarar."""
 
     @property
@@ -221,8 +224,8 @@ class UnknownRoom:
     def decide(self, situation: Situation) -> Verdict:
         if situation.presence.status is not Occupancy.UNKNOWN:
             return NO_OPINION
-        silent = situation.silent_lamps
-        cause = f"{_join(silent)} inte svarar" if silent else "en sensor inte svarar"
+        lamps = situation.not_responding
+        cause = f"{_join(lamps)} inte svarar" if lamps else "en sensor inte svarar"
         return Verdict(
             Decision(
                 f"Läget i {situation.room.name} är okänt eftersom {cause}, "
@@ -438,7 +441,7 @@ def evaluate(
             lamps={lamp.id: lamps.get(lamp.id, UNKNOWN_LAMP) for lamp in room.lamps},
             memory=state.memory,
             now=now,
-            silent_lamps=state.silent_lamps,
+            not_responding=state.not_responding,
         )
         decision: Decision | None = None
         remembered = dict(state.memory)

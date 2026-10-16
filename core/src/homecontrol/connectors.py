@@ -15,15 +15,11 @@ har en egen tråd (till exempel ett MQTT-bibliotek) lämnar över med
 """
 
 import asyncio
-import logging
-import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
 from homecontrol.home import Capability
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -177,74 +173,6 @@ class LampOutput(Protocol):
 
     Kärnan lämnar varje kommando till alla utgångar. En utgång styr bara sina
     egna lampor och hoppar över kommandon till andra.
-
-    Varje utgång begränsar hur ofta en lampa får styras (se `LampLimit`).
     """
 
     def send(self, command: LampCommand) -> None: ...
-
-
-LIMIT_BURST = 5
-"""Så många kommandon i rad som en lampa tar emot innan gränsen slår till."""
-LIMIT_PER_SECOND = 1.0
-"""Så många kommandon per sekund som en lampa sedan tar emot i längden."""
-
-
-class LampLimit:
-    """Hur ofta varje lampa får styras, så att en trasig eller elak klient inte får den att blinka.
-
-    Varje lampa har en hink med `burst` kommandon som fylls på med
-    `per_second` kommandon i sekunden. Automatikens kommandon, kalibreringen
-    och klick i livevyn kommer mycket glesare än så och märker aldrig gränsen.
-
-    Kärnan skickar inte om ett beslut som inte har ändrats, så en utgång tappar
-    aldrig ett stoppat kommando. Den skjuter upp det senaste kommandot till varje
-    lampa och skickar det när `allow` säger ja (se `ZigbeeOutput` och
-    `SimulatedLampOutput`). Att en lampa stoppas loggas en gång, inte för
-    varje kommando.
-
-    `now` är tiden i sekunder.
-    """
-
-    def __init__(
-        self,
-        now: Callable[[], float] = time.monotonic,
-        *,
-        burst: int = LIMIT_BURST,
-        per_second: float = LIMIT_PER_SECOND,
-    ) -> None:
-        self._now = now
-        self._burst = burst
-        self._per_second = per_second
-        self._buckets: dict[str, tuple[float, float]] = {}
-        """Hur många kommandon som finns kvar i varje lampas hink, och när det räknades."""
-        self._stopped: set[str] = set()
-        """Lamporna som gränsen stoppar just nu, så att det bara loggas en gång."""
-
-    def allow(self, lamp_ids: Iterable[str]) -> bool:
-        """Om ett kommando till alla lamporna får gå ut nu. I så fall räknas det av för var och en.
-
-        Ett gruppkommando räknas som ett kommando till varje lampa i gruppen.
-        """
-        now = self._now()
-        lamp_ids = list(lamp_ids)
-        left = {lamp_id: self._left(lamp_id, now) for lamp_id in lamp_ids}
-        stopped = [lamp_id for lamp_id, tokens in left.items() if tokens < 1]
-        if stopped:
-            for lamp_id in stopped:
-                if lamp_id not in self._stopped:
-                    self._stopped.add(lamp_id)
-                    logger.warning(
-                        "%s styrs oftare än %g gånger i sekunden; kommandona skjuts upp",
-                        lamp_id,
-                        self._per_second,
-                    )
-            return False
-        for lamp_id, tokens in left.items():
-            self._buckets[lamp_id] = (tokens - 1, now)
-            self._stopped.discard(lamp_id)
-        return True
-
-    def _left(self, lamp_id: str, now: float) -> float:
-        tokens, counted_at = self._buckets.get(lamp_id, (self._burst, now))
-        return min(self._burst, tokens + (now - counted_at) * self._per_second)

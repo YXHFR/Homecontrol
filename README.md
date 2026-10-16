@@ -641,9 +641,11 @@ Varje lampa tar emot högst fem kommandon i rad och sedan ett i sekunden, så
 att ett trasigt eller elakt program i nätverket inte kan få lamporna att
 blinka. Det märks aldrig när automatiken, lampkalibreringen eller någon som
 klickar i livevyn styr lamporna. Kommandon utöver gränsen skjuts upp, och
-lampan får till slut det senaste. Kärnans logg säger när en lampa stoppas.
-Däremot loggas tänd och släck bara på felsökningsnivån (DEBUG), eftersom de
-ungefär säger när någon kom och gick.
+lampan får till slut det senaste. Kärnans logg säger när kommandon till en
+lampa skjuts upp.
+
+Kärnans logg säger inte när lamporna tänds och släcks, eftersom det ungefär
+säger när någon kom och gick.
 
 ## Om något inte fungerar
 

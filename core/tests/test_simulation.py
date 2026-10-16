@@ -7,7 +7,6 @@ import pytest
 
 from homecontrol.clock import ManualClock, SystemClock
 from homecontrol.connectors import (
-    LIMIT_BURST,
     LampCommand,
     LightLevelObserved,
     MotionObserved,
@@ -17,6 +16,7 @@ from homecontrol.connectors import (
     SourceLost,
 )
 from homecontrol.home import Point, Target
+from homecontrol.lamplimit import LIMIT_BURST
 from homecontrol.simulation import (
     LAMP_LUX_AT_ONE_METER,
     MAX_PERSONS,
@@ -331,3 +331,16 @@ def test_virtual_lamps_have_the_same_limit_as_real_lamps() -> None:
     clock.advance_to(1)
     assert lamps.states == {"taklampa": False}  # det sista kommandot
     assert len(lamps.history) == LIMIT_BURST + 1
+
+
+def test_the_latest_command_to_a_virtual_lamp_wins() -> None:
+    clock = ManualClock()
+    lamps = SimulatedLampOutput(now=clock.now)
+    for i in range(LIMIT_BURST + 1):
+        lamps.send(LampCommand("taklampa", on=i % 2 == 0, reason="test"))  # det sista skjuts upp
+
+    clock.advance_to(1)
+    lamps.send(LampCommand("taklampa", on=True, reason="test"))
+
+    assert [command.on for command in lamps.history][LIMIT_BURST:] == [True]
+    assert lamps.states == {"taklampa": True}

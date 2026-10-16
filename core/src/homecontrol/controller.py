@@ -12,6 +12,7 @@ som manuell styrning (`LampStateReported.external`).
 Hälsa: ett rum där en källa har tappat kontakten är okänt (se fusion.py), och
 detsamma gäller ett rum där en lampa inte svarar. Automatiken lämnar då
 rummet orört, och när lampan svarar igen tar den över.
+
 Varje beslut som ändrar något sparas som en händelse med klockslag, för
 listan "Varför hände det?" i livevyn. Händelserna finns bara i minnet.
 
@@ -363,7 +364,8 @@ class Controller:
 
         Bara ändringen sparas som en händelse, eftersom utgången kan säga samma sak flera gånger.
         """
-        if responding == (lamp_id not in self._not_responding):
+        was_responding = lamp_id not in self._not_responding
+        if responding == was_responding:
             return
         room = self._home.room_of(lamp_id)
         lamp = next(lamp for lamp in room.lamps if lamp.id == lamp_id)
@@ -378,7 +380,9 @@ class Controller:
                 f"{lamp.name} svarar inte. Läget i {room.name} är okänt, och automatiken "
                 "lämnar rummets lampor som de är tills lampan svarar igen."
             )
-        logger.info("%s %s", lamp_id, "svarar igen" if responding else "svarar inte")
+        # En lampa som slutar svara har ofta slagits av med strömbrytaren, vilket
+        # säger att någon är hemma, så det loggas bara när man felsöker.
+        logger.debug("%s %s", lamp_id, "svarar igen" if responding else "svarar inte")
         self._log_event(room.id, text)
 
     def _changed_outside(self, lamp_id: str, state: rules.LampState) -> None:
@@ -511,17 +515,18 @@ class Controller:
         """Läget i varje rum: sammanvägningens, men okänt där en lampa inte svarar."""
         presence = dict(self._fusion.rooms())
         for room in self._home.rooms:
-            silent = [
+            silent_since = [
                 since
                 for lamp in room.lamps
                 if (since := self._not_responding.get(lamp.id)) is not None
             ]
-            if not silent:
+            if not silent_since:
                 continue
             fused = presence[room.id]
             if fused.status is Occupancy.UNKNOWN:
-                silent.append(fused.since)
-            presence[room.id] = Presence(Occupancy.UNKNOWN, min(silent))
+                silent_since.append(fused.since)
+            # Läget har varit okänt sedan det första felet.
+            presence[room.id] = Presence(Occupancy.UNKNOWN, min(silent_since))
         return presence
 
     def _evaluate(self) -> None:
@@ -531,7 +536,7 @@ class Controller:
                 presence[room.id],
                 self._room_lux(room.id),
                 self._memory.get(room.id, {}),
-                silent_lamps=tuple(
+                not_responding=tuple(
                     lamp.name for lamp in room.lamps if lamp.id in self._not_responding
                 ),
             )
