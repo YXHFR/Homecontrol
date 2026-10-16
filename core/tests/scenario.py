@@ -68,7 +68,7 @@ class Scenario:
         """
         self.home = home if home is not None else one_room_home()
         self.clock = ManualClock()
-        self.lamps = SimulatedLampOutput()
+        self.lamps = SimulatedLampOutput(now=self.clock.now)
         self.controller = Controller(self.home, self.clock, [self.lamps], wall_clock=self.clock.now)
         self.controller.on_calibrated(self._save_calibration)
         if lamps_report:

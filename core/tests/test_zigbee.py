@@ -19,6 +19,7 @@ from zigbee_examples import (
 
 from homecontrol.clock import ManualClock
 from homecontrol.connectors import (
+    LIMIT_BURST,
     LampCommand,
     LampStateReported,
     LightLevelObserved,
@@ -339,6 +340,82 @@ def test_the_group_is_not_used_before_zigbee2mqtt_has_added_the_lamps() -> None:
 
 
 # --- Lampprofilen för IKEA TRÅDFRI ---
+
+
+# --- Styrgränsen ---
+
+
+def test_a_lamp_that_is_switched_too_often_gets_the_latest_command_a_little_later(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """En trasig klient tänder och släcker tjugo gånger på en sekund. Lampan blinkar inte.
+
+    De första kommandona går ut. Resten skjuts upp, och det senaste skickas
+    när lampan får styras igen, så att lampan till slut blir som kärnan vill.
+    Att lampan stoppas loggas en gång.
+    """
+    harness = started()
+
+    for i in range(20):
+        harness.now = i * 0.05
+        harness.send(on(FONSTERLAMPA) if i % 2 == 0 else off(FONSTERLAMPA))
+        harness.output.tick()
+
+    assert len(harness.take()) == LIMIT_BURST
+    assert caplog.text.count("styrs oftare än") == 1
+
+    harness.now = 2.0
+    harness.output.tick()
+    assert harness.take() == [("zigbee2mqtt/fonsterlampa/set", {"state": "OFF", "transition": 1.0})]
+    harness.output.tick()
+    assert harness.take() == []
+
+
+def test_a_group_command_counts_for_every_lamp_in_the_group() -> None:
+    harness = started()
+    for _ in range(LIMIT_BURST):
+        harness.send(off(FONSTERLAMPA))
+    harness.take()
+
+    harness.send(on(TAKLAMPA), on(FONSTERLAMPA))
+
+    # Fönsterlampan har fått sina kommandon, så taklampan tänds ensam och
+    # fönsterlampan väntar på sin tur.
+    assert harness.take() == [
+        (
+            "zigbee2mqtt/0x000b57fffe0000a1/set",
+            {"state": "ON", "brightness": 254, "transition": 1.0},
+        )
+    ]
+    harness.now = 1.0
+    harness.output.tick()
+    assert harness.take() == [
+        ("zigbee2mqtt/fonsterlampa/set", {"state": "ON", "brightness": 254, "transition": 1.0})
+    ]
+
+
+def test_a_held_command_is_forgotten_when_the_lamp_stops_responding() -> None:
+    harness = started()
+    for _ in range(LIMIT_BURST + 1):
+        harness.send(off(FONSTERLAMPA))
+    harness.take()
+
+    harness.output.handle("zigbee2mqtt/fonsterlampa/availability", b'{"state": "offline"}')
+    harness.now = 5.0
+    harness.output.tick()
+
+    assert not [topic for topic, _ in harness.take() if topic.endswith("/set")]
+
+
+def test_normal_use_is_never_stopped() -> None:
+    """Automatiken och klick i livevyn: kommandon med en sekunds mellanrum går alltid ut."""
+    harness = started()
+
+    for i in range(30):
+        harness.now = float(i)
+        lit = i % 2 == 0
+        harness.send(*(on(lamp) if lit else off(lamp) for lamp in (TAKLAMPA, FONSTERLAMPA)))
+        assert len(harness.take()) == 1
 
 
 def test_tradfri_never_gets_a_brightness_below_2() -> None:

@@ -733,3 +733,11 @@ def test_the_room_stays_unknown_while_any_of_its_lamps_is_silent() -> None:
         .lamp_responds_again("golvlampa")
         .expect_room("tomt")
     )
+
+
+def test_clicking_a_lamp_now_and_then_is_never_stopped() -> None:
+    """Klick i livevyn med en sekunds mellanrum går alltid fram, hur många det än blir."""
+    scenario = Scenario().light_level(10)
+    for i in range(20):
+        scenario.switch_lamp(i % 2 == 0).wait(seconds=1)
+    scenario.expect_lamp_switches(*(i % 2 == 0 for i in range(20)))

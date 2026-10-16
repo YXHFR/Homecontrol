@@ -5,8 +5,9 @@ import contextlib
 
 import pytest
 
-from homecontrol.clock import SystemClock
+from homecontrol.clock import ManualClock, SystemClock
 from homecontrol.connectors import (
+    LIMIT_BURST,
     LampCommand,
     LightLevelObserved,
     MotionObserved,
@@ -315,3 +316,18 @@ def test_simulated_sensors_measure_every_five_seconds_in_the_cores_time() -> Non
 
     readings = asyncio.run(run())
     assert 3 <= readings <= 8
+
+
+def test_virtual_lamps_have_the_same_limit_as_real_lamps() -> None:
+    """Lampan som styrs för ofta får det senaste kommandot när den får styras igen."""
+    clock = ManualClock()
+    lamps = SimulatedLampOutput(now=clock.now)
+
+    for i in range(10):
+        lamps.send(LampCommand("taklampa", on=i % 2 == 0, reason="test"))
+
+    assert len(lamps.history) == LIMIT_BURST
+    assert lamps.states == {"taklampa": True}  # det femte kommandot
+    clock.advance_to(1)
+    assert lamps.states == {"taklampa": False}  # det sista kommandot
+    assert len(lamps.history) == LIMIT_BURST + 1

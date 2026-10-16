@@ -70,7 +70,7 @@ def create_app(
     home = home if home is not None else example_home()
     zigbee = None if mqtt is None else ZigbeeOutput(home, defer=defer_in_loop)
     real_lamps = zigbee_lamps if zigbee is not None else _nothing_real
-    lamps = SimulatedLampOutput(real_lamps)
+    lamps = SimulatedLampOutput(real_lamps, clock.now)
     controller = Controller(home, clock, [lamps] if zigbee is None else [lamps, zigbee])
     lamps.report_new_lamps(home, controller.observe)
     cards = (
