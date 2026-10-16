@@ -91,8 +91,9 @@ class FakeLink:
     def stop(self) -> None:
         self.running = False
 
-    def install_update(self, key: int) -> None:
+    def install_update(self, key: int) -> bool:
         self.installs.append(key)
+        return True
 
 
 class FakeNetwork:

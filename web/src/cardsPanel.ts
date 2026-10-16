@@ -74,6 +74,9 @@ export function createCardsPanel(send: (message: ClientMessage) => void): CardsP
     button.dataset.card = card.id;
     button.addEventListener("click", () => {
       button.disabled = true;
+      // Ritas om med nästa läge, så att knappen går att trycka på igen om
+      // kärnan inte kunde starta uppdateringen.
+      shown = "";
       send({ type: "install_update", card: card.id });
     });
     return [

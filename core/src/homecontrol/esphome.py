@@ -93,6 +93,15 @@ Wi-Fi-mätningen skickar sin rörelsepoäng flera gånger i sekunden och
 ljussensorn var 5:e sekund. Radarn skickar bara när något ändras, så den
 räknas som borta när kortet själv säger det (Radar Online, efter 3 sekunder).
 """
+CARD_SILENT_SECONDS = 10.0
+"""Så länge ett anslutet kort får vara helt tyst innan alla dess delar räknas som borta.
+
+Wi-Fi-mätningen skickar flera gånger i sekunden, så ett kort som inte har
+sagt något alls på tio sekunder har tappat ström eller Wi-Fi, även om
+anslutningen ännu inte har brutits.
+"""
+KEEPALIVE_SECONDS = 10.0
+"""Hur ofta anslutningen till ett kort prövas när inget annat skickas."""
 CHECK_INTERVAL = 5.0
 """Så ofta det kontrolleras om någon del har tystnat."""
 MAX_DISCOVERED = 50
@@ -185,6 +194,8 @@ class CardReader:
         self._values: dict[str, float] = {}
         self._csi_motion = False
         self._csi_calibrating = False
+        self._heard_at = -math.inf
+        """När kortet senast skickade något alls."""
         self.wifi_signal: float | None = None
         self.firmware_version: str | None = None
         self.update: FirmwareUpdate | None = None
@@ -192,7 +203,7 @@ class CardReader:
         self.missing: tuple[str, ...] = ()
         """Entiteter som firmware-paketet ska ha men som kortet saknar."""
 
-    def use_entities(self, entities: Iterable[EntityInfo]) -> None:
+    def use_entities(self, entities: Iterable[EntityInfo], now: float) -> None:
         """Kortet har anslutit. Värdena från förra anslutningen gäller inte längre."""
         entities = list(entities)
         self._names = {entity.key: entity.name for entity in entities}
@@ -205,6 +216,7 @@ class CardReader:
         self._values.clear()
         self.update = None
         self.disconnected()
+        self._heard_at = now
 
     def disconnected(self) -> None:
         """Alla delar är tysta tills kortet hörs av igen."""
@@ -214,6 +226,7 @@ class CardReader:
             part.alive = False
             part.heard_at = -math.inf
         self._csi_motion = self._csi_calibrating = False
+        self._heard_at = -math.inf
 
     def alive(self, part: Capability) -> bool:
         return self._parts[part].alive
@@ -222,6 +235,7 @@ class CardReader:
         name = self._names.get(state.key)
         if name is None:
             return
+        self._heard_at = now
         match state:
             case SensorState():
                 self._sensor(name, state, now)
@@ -247,7 +261,7 @@ class CardReader:
                 # Ljussensorn svarar inte (kortet skickar NaN).
                 self._silence(Capability.LUX)
         elif name == CSI_MOVEMENT:
-            if math.isfinite(value):
+            if math.isfinite(value) and not self._csi_calibrating:
                 self._values[name] = value
                 self._hear(Capability.CSI, now)
         elif name == WIFI_SIGNAL:
@@ -265,10 +279,16 @@ class CardReader:
                 self._silence(Capability.RADAR)
         elif name == CSI_MOTION:
             self._csi_motion = on
-            self._hear(Capability.CSI, now, changed=True)
+            if not self._csi_calibrating:
+                self._hear(Capability.CSI, now, changed=True)
         elif name == CSI_CALIBRATING:
+            # Under kalibreringen vet mätningen inget, så den räknas som tyst
+            # och rummet som okänt (om rummet använder Wi-Fi).
             self._csi_calibrating = on
-            self._hear(Capability.CSI, now, changed=True)
+            if on:
+                self._silence(Capability.CSI)
+            else:
+                self._hear(Capability.CSI, now, changed=True)
 
     def _hear(self, part: Capability, now: float, *, changed: bool = False) -> None:
         state = self._parts[part]
@@ -284,9 +304,16 @@ class CardReader:
         state.alive = False
 
     def check(self, now: float) -> None:
-        """Wi-Fi-mätningen och ljussensorn räknas som tysta om de inte har hörts på länge."""
+        """Delar som inte har hörts på länge räknas som tysta.
+
+        Wi-Fi-mätningen och ljussensorn skickar hela tiden. Radarn skickar bara
+        när något ändras, så den räknas som tyst först när hela kortet är tyst.
+        """
         for part in (Capability.CSI, Capability.LUX):
             if now - self._parts[part].heard_at > STALE_SECONDS:
+                self._silence(part)
+        if now - self._heard_at > CARD_SILENT_SECONDS:
+            for part in PARTS:
                 self._silence(part)
 
     def observations(self, room_id: str | None) -> list[Observation]:
@@ -302,9 +329,7 @@ class CardReader:
             elif part is Capability.RADAR:
                 result.append(RadarTargetsObserved(source_id, self.name, self._targets()))
             elif part is Capability.CSI:
-                # Under kalibreringen vet mätningen inget; den räknas då som stilla.
-                moving = self._csi_motion and not self._csi_calibrating
-                result.append(MotionObserved(source_id, self.name, moving))
+                result.append(MotionObserved(source_id, self.name, self._csi_motion))
             elif room_id is not None and ILLUMINANCE in self._values:
                 result.append(LightLevelObserved(source_id, room_id, self._values[ILLUMINANCE]))
         return result
@@ -320,7 +345,13 @@ class CardReader:
 
     def problems(self) -> list[str]:
         """Vad som är fel med ett anslutet kort, i klartext."""
-        problems = [f"{PART_NAMES[part]} skickar inget." for part in PARTS if not self.alive(part)]
+        problems = [
+            "Wi-Fi-mätningen kalibrerar. Håll rummet stilla en stund."
+            if part is Capability.CSI and self._csi_calibrating
+            else f"{PART_NAMES[part]} skickar inget."
+            for part in PARTS
+            if not self.alive(part)
+        ]
         if self.missing:
             problems.append(
                 f"Kortets firmware är för gammal (saknar {', '.join(self.missing)}). "
@@ -363,7 +394,9 @@ class CardLink(Protocol):
 
     def stop(self) -> None: ...
 
-    def install_update(self, key: int) -> None: ...
+    def install_update(self, key: int) -> bool:
+        """Ber kortet uppdatera sig. Returnerar False om anslutningen just har brutits."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -411,7 +444,7 @@ class _Card:
         logger.info("Kortet %s är anslutet", self.name)
         self.online = True
         self.connect_problem = None
-        self.reader.use_entities(entities)
+        self.reader.use_entities(entities, self.source._now())
         if self.reader.missing:
             logger.warning("Kortet %s saknar %s", self.name, ", ".join(self.reader.missing))
         self.source._changed(self)
@@ -448,6 +481,10 @@ class EsphomeSource:
 
     `defer` schemalägger ett anrop strax efter det som pågår, så att alla
     värden från en radarram hinner komma fram innan observationen skickas.
+    Det bygger på att kortet skickar en hel ram på en gång, som ESPHome gör
+    när värdena ändras i samma varv. Kommer en ram ändå i två delar blir
+    det en mellanliggande punkt i högst en tiondels sekund, som
+    utjämningen i sammanvägningen tar hand om.
     `clock` är riktig tid; kortens delar tystnar i riktig tid, även när
     simuleringens tid går fortare.
     """
@@ -647,8 +684,7 @@ class EsphomeSource:
             update.current_version,
             update.latest_version,
         )
-        card.link.install_update(key)
-        return True
+        return card.link.install_update(key)
 
     def subscribe(self, listener: Listener) -> Callable[[], None]:
         """Anropar `listener` när något om korten ändras. Returnerar en funktion som avslutar."""
@@ -699,6 +735,7 @@ class AioesphomeNetwork:
 
     def __init__(self) -> None:
         self._zeroconf: AsyncZeroconf | None = None
+        self._links: list[_AioesphomeLink] = []
 
     def _zc(self) -> AsyncZeroconf:
         if self._zeroconf is None:
@@ -706,7 +743,9 @@ class AioesphomeNetwork:
         return self._zeroconf
 
     def link(self, name: str, key: bytes, events: CardEvents) -> CardLink:
-        return _AioesphomeLink(self._zc(), name, key, events)
+        link = _AioesphomeLink(self._zc(), name, key, events)
+        self._links.append(link)
+        return link
 
     async def discover(
         self, found: Callable[[Discovered], None], gone: Callable[[str], None]
@@ -745,6 +784,12 @@ class AioesphomeNetwork:
                 task.cancel()
 
     async def close(self) -> None:
+        # Korten kopplas ner innan mDNS stängs, men högst några sekunder.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(
+                asyncio.gather(*(link.wait_stopped() for link in self._links)), timeout=5
+            )
+        self._links.clear()
         if self._zeroconf is not None:
             await self._zeroconf.async_close()
             self._zeroconf = None
@@ -776,6 +821,7 @@ class _AioesphomeLink:
             noise_psk=noise_psk,
             expected_name=self._name,
             zeroconf_instance=self._zeroconf,
+            keepalive=KEEPALIVE_SECONDS,
         )
 
     def start(self) -> None:
@@ -784,8 +830,12 @@ class _AioesphomeLink:
     def stop(self) -> None:
         self._spawn(self._shutdown())
 
-    def install_update(self, key: int) -> None:
-        self._client.update_command(key, UpdateCommand.INSTALL)
+    def install_update(self, key: int) -> bool:
+        try:
+            self._client.update_command(key, UpdateCommand.INSTALL)
+        except APIConnectionError:
+            return False
+        return True
 
     def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
         task = asyncio.get_running_loop().create_task(coro)
@@ -795,6 +845,14 @@ class _AioesphomeLink:
     async def _shutdown(self) -> None:
         await self._logic.stop()
         await self._client.disconnect()
+
+    async def _restart(self) -> None:
+        await self._logic.stop()
+        await self._logic.start()
+
+    async def wait_stopped(self) -> None:
+        """Väntar tills det som har startats, till exempel en nedkoppling, är klart."""
+        await asyncio.gather(*self._tasks, return_exceptions=True)
 
     async def _on_connect(self) -> None:
         try:
@@ -818,6 +876,9 @@ class _AioesphomeLink:
             # kortet kan locka ut nyckeln senare.
             if self._events.may_provision() and await self._provision():
                 self._events.provisioned()
+                # Annars väntar återanslutningen en minut, som efter fel nyckel.
+                # Omstarten tar samma lås som det här anropet, så den körs för sig.
+                self._spawn(self._restart())
             else:
                 self._events.problem(OTHER_KEY)
         else:

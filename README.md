@@ -202,6 +202,8 @@ En person som hålls kvar visas som en streckad ring i livevyn. Under
 **Just nu** står om varje rum är upptaget, tomt eller okänt. Okänt betyder att
 radarn på ett rumskort i rummet har slutat svara, eller Wi-Fi-mätningen när
 rummet använder Wi-Fi (vikten är över 0); då lämnas lamporna som de är.
+Wi-Fi-mätningen kalibrerar sig några minuter efter att kortet har startat,
+och under tiden räknas den som tyst.
 
 Wi-Fi-rörelsens vikt ställs per rum, från 0 till 1. Vikten gånger hur säker
 mätningen är (också 0–1) avgör vad rörelsen räcker till. Från en fjärdedel
