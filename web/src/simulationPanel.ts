@@ -29,6 +29,11 @@ export function createSimulationPanel(
     return button;
   });
   const speedPicker = element("div", { className: "speeds" }, ...speedButtons);
+  const speedLocked = element(
+    "p",
+    { className: "help", hidden: true },
+    "Tiden går i vanlig takt, eftersom riktiga lampor styrs. Annars släcks de för tidigt.",
+  );
   speedPicker.setAttribute("role", "group");
   speedPicker.setAttribute("aria-label", "Tidsfart");
 
@@ -45,6 +50,7 @@ export function createSimulationPanel(
     persons,
     element("div", { className: "controls" }, element("label", {}, "Dagsljus ", daylight), " ", daylightValue),
     element("div", { className: "controls" }, element("span", {}, "Tidsfart "), speedPicker),
+    speedLocked,
   );
   const panel = element(
     "section",
@@ -88,7 +94,9 @@ export function createSimulationPanel(
       showPersons(simulation);
       for (const button of speedButtons) {
         button.setAttribute("aria-pressed", String(button.dataset.speed === String(simulation.speed)));
+        button.disabled = simulation.speed_locked && button.dataset.speed !== "1";
       }
+      speedLocked.hidden = !simulation.speed_locked;
       // Reglaget flyttas inte medan användaren drar i det.
       if (simulation.daylight !== null && document.activeElement !== daylight) {
         daylight.value = String(simulation.daylight);

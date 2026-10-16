@@ -1,0 +1,13 @@
+{
+  "beskrivning": "Någon dimrar fönsterlampan till ungefär 30 % i en app.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/fonsterlampa",
+      "payload": {
+        "brightness": 76,
+        "linkquality": 120,
+        "state": "ON"
+      }
+    }
+  ]
+}

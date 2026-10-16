@@ -3,16 +3,19 @@ import { lampStateText, luxText, shouldTurnOn } from "./roomPanels";
 
 describe("panelerna under kartan", () => {
   it("beskriver lampans läge", () => {
-    expect(lampStateText({ id: "a", on: true, brightness: 100, explanation: "" })).toBe("tänd");
-    expect(lampStateText({ id: "a", on: true, brightness: 50, explanation: "" })).toBe("dimrad 50 %");
-    expect(lampStateText({ id: "a", on: false, brightness: 100, explanation: "" })).toBe("släckt");
-    expect(lampStateText({ id: "a", on: null, brightness: 100, explanation: "" })).toBe("okänt läge");
+    expect(lampStateText({ id: "a", on: true, brightness: 100, explanation: "", responding: true })).toBe("tänd");
+    expect(lampStateText({ id: "a", on: true, brightness: 50, explanation: "", responding: true })).toBe("dimrad 50 %");
+    expect(lampStateText({ id: "a", on: false, brightness: 100, explanation: "", responding: true })).toBe("släckt");
+    expect(lampStateText({ id: "a", on: null, brightness: 100, explanation: "", responding: true })).toBe("okänt läge");
     expect(lampStateText(undefined)).toBe("okänt läge");
+    expect(lampStateText({ id: "a", on: null, brightness: 100, explanation: "", responding: false })).toBe(
+      "svarar inte",
+    );
   });
 
   it("ett klick släcker en lampa som lyser, även dimrad, och tänder annars", () => {
-    expect(shouldTurnOn({ id: "a", on: true, brightness: 50, explanation: "" })).toBe(false);
-    expect(shouldTurnOn({ id: "a", on: false, brightness: 100, explanation: "" })).toBe(true);
+    expect(shouldTurnOn({ id: "a", on: true, brightness: 50, explanation: "", responding: true })).toBe(false);
+    expect(shouldTurnOn({ id: "a", on: false, brightness: 100, explanation: "", responding: true })).toBe(true);
     expect(shouldTurnOn(undefined)).toBe(true);
   });
 

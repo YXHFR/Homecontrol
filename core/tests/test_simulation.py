@@ -4,6 +4,7 @@ import pytest
 
 from homecontrol.clock import SystemClock
 from homecontrol.connectors import (
+    LampCommand,
     LightLevelObserved,
     MotionObserved,
     Observation,
@@ -12,7 +13,13 @@ from homecontrol.connectors import (
     SourceLost,
 )
 from homecontrol.home import Point, Target
-from homecontrol.simulation import MAX_PERSONS, SimulatedSource, Simulation, TooManyPersons
+from homecontrol.simulation import (
+    MAX_PERSONS,
+    SimulatedLampOutput,
+    SimulatedSource,
+    Simulation,
+    TooManyPersons,
+)
 from homes import FLOOR, one_room_home, two_floor_home
 
 HOME = one_room_home()
@@ -220,3 +227,39 @@ def test_wifi_motion_is_reported_and_repeated_after_a_restart() -> None:
     source.start(seen.append)
 
     assert not any(isinstance(o, MotionObserved) for o in seen)
+
+
+def test_speed_is_locked_to_normal_while_the_home_has_real_lamps() -> None:
+    seen: list[Observation] = []
+    clock = SystemClock()
+    real = {"value": False}
+    simulation = Simulation(
+        SimulatedSource(HOME, "sim"),
+        seen.append,
+        clock,
+        floor_ids=[FLOOR],
+        real_hardware=lambda _: real["value"],
+    )
+    simulation.set_speed(60)
+    assert clock.speed == 60
+    assert not simulation.view().speed_locked
+
+    # En riktig lampa placeras: tiden går tillbaka till vanlig takt och kan inte snabbas upp.
+    real["value"] = True
+    simulation.use_home(HOME)
+    assert clock.speed == 1
+    assert simulation.view().speed_locked
+    simulation.set_speed(10)
+    assert clock.speed == 1
+
+
+def test_virtual_lamps_never_report_or_control_real_lamps() -> None:
+    seen: list[Observation] = []
+    lamps = SimulatedLampOutput(real_lamps=lambda _: frozenset({"taklampa"}))
+
+    lamps.report_new_lamps(HOME, seen.append)
+    lamps.send(LampCommand("taklampa", on=True, reason="test"))
+
+    assert seen == []
+    assert lamps.states == {}
+    assert not lamps.history

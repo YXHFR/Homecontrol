@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from homecontrol.config import Settings
+from homecontrol.zigbee import MqttSettings
 
 
 def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -12,6 +13,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_WEB_DIR",
         "HOMECONTROL_ALLOWED_HOSTS",
         "HOMECONTROL_DATABASE",
+        "HOMECONTROL_MQTT_HOST",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -48,3 +50,19 @@ def test_empty_database_setting_means_no_database(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("HOMECONTROL_DATABASE", "")
 
     assert Settings.from_env().database is None
+
+
+def test_reads_the_mqtt_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_MQTT_HOST", " mosquitto ")
+    monkeypatch.setenv("HOMECONTROL_MQTT_PORT", "1884")
+    monkeypatch.setenv("HOMECONTROL_MQTT_USER", "homecontrol")
+    monkeypatch.setenv("HOMECONTROL_MQTT_PASSWORD", "hemligt")
+
+    assert Settings.from_env().mqtt == MqttSettings("mosquitto", 1884, "homecontrol", "hemligt")
+
+
+def test_without_mqtt_host_no_real_lamps_are_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_MQTT_HOST", "")
+    monkeypatch.setenv("HOMECONTROL_MQTT_PASSWORD", "hemligt")
+
+    assert Settings.from_env().mqtt is None

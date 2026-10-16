@@ -1,0 +1,17 @@
+{
+  "beskrivning": "Taklampans ström bryts: Zigbee2MQTT märker att den inte svarar. Sedan kommer strömmen tillbaka.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000a1/availability",
+      "payload": {
+        "state": "offline"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000a1/availability",
+      "payload": {
+        "state": "online"
+      }
+    }
+  ]
+}

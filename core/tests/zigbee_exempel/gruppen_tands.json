@@ -1,0 +1,40 @@
+{
+  "beskrivning": "Det Zigbee2MQTT skickar efter ett gruppkommando som tänder vardagsrummet: gruppens läge och, eftersom Zigbee2MQTT uppdaterar medlemmarna, varje lampas läge. Taklampan rapporterar också en ljusstyrka mitt i övergången.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/homecontrol-vardagsrum",
+      "payload": {
+        "brightness": 254,
+        "state": "ON"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000a1",
+      "payload": {
+        "brightness": 254,
+        "color_mode": "color_temp",
+        "color_temp": 370,
+        "linkquality": 148,
+        "state": "ON"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/fonsterlampa",
+      "payload": {
+        "brightness": 254,
+        "linkquality": 120,
+        "state": "ON"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000a1",
+      "payload": {
+        "brightness": 203,
+        "color_mode": "color_temp",
+        "color_temp": 370,
+        "linkquality": 148,
+        "state": "ON"
+      }
+    }
+  ]
+}

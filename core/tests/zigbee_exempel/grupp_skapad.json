@@ -1,0 +1,43 @@
+{
+  "beskrivning": "Svaret när kärnan har bett Zigbee2MQTT skapa vardagsrummets grupp, och grupplistan efteråt.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/bridge/response/group/add",
+      "payload": {
+        "data": {
+          "friendly_name": "homecontrol-vardagsrum",
+          "id": 2
+        },
+        "status": "ok"
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/bridge/groups",
+      "payload": [
+        {
+          "id": 1,
+          "friendly_name": "alla-lampor",
+          "description": null,
+          "members": [
+            {
+              "ieee_address": "0x000b57fffe0000a1",
+              "endpoint": 1
+            },
+            {
+              "ieee_address": "0x0017880100000c01",
+              "endpoint": 11
+            }
+          ],
+          "scenes": []
+        },
+        {
+          "id": 2,
+          "friendly_name": "homecontrol-vardagsrum",
+          "description": null,
+          "members": [],
+          "scenes": []
+        }
+      ]
+    }
+  ]
+}

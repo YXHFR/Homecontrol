@@ -1,0 +1,41 @@
+{
+  "beskrivning": "Lampornas svar på frågan om sitt läge (<lampa>/get). Taklampan lyser fullt, fönsterlampan är släckt och Hue-lampan lyser på halv styrka.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/0x000b57fffe0000a1",
+      "payload": {
+        "brightness": 254,
+        "color_mode": "color_temp",
+        "color_temp": 370,
+        "linkquality": 148,
+        "state": "ON",
+        "update": {
+          "installed_version": 604241925,
+          "latest_version": 604241925,
+          "state": "idle"
+        }
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/fonsterlampa",
+      "payload": {
+        "brightness": 1,
+        "linkquality": 120,
+        "state": "OFF",
+        "update": {
+          "installed_version": 604241925,
+          "latest_version": 604241925,
+          "state": "idle"
+        }
+      }
+    },
+    {
+      "topic": "zigbee2mqtt/0x0017880100000c01",
+      "payload": {
+        "brightness": 127,
+        "linkquality": 96,
+        "state": "ON"
+      }
+    }
+  ]
+}

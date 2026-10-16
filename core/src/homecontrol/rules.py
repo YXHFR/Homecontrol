@@ -483,6 +483,20 @@ def manual_command(room: Room, lamp: Lamp, on: bool) -> LampCommand:
     )
 
 
+def external_change_text(room: Room, lamp: Lamp, state: LampState) -> str:
+    """Förklaringen när någon har ändrat en lampa med fjärrkontroll eller app."""
+    if not state.on:
+        action = "släcktes"
+    elif state.brightness < FULL_BRIGHTNESS:
+        action = f"ställdes på {state.brightness} %"
+    else:
+        action = "tändes"
+    return (
+        f"{lamp.name} {action} med fjärrkontroll eller app. Automatiken i {room.name} pausar "
+        f"tills rummet har varit tomt i {duration(room.settings.off_after_empty_seconds)}."
+    )
+
+
 def start_manual(memory: Memory, now: float) -> Memory:
     """Rummets minne efter att någon har styrt en lampa där för hand."""
     return {**memory, MANUAL: now}

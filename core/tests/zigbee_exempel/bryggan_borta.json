@@ -1,0 +1,11 @@
+{
+  "beskrivning": "Zigbee2MQTT stängs av: det sista den skickar (dess testamente) är att bryggan är borta.",
+  "meddelanden": [
+    {
+      "topic": "zigbee2mqtt/bridge/state",
+      "payload": {
+        "state": "offline"
+      }
+    }
+  ]
+}

@@ -58,6 +58,7 @@ const COLORS = {
   lampOff: "#b8b8b8",
   lampUnknown: "#ececec",
   person: "#d64545",
+  warning: "#c62828",
   text: "#222222",
 };
 
@@ -193,13 +194,15 @@ function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
       );
     }
     const unknown = lampState === undefined || lampState.on === null;
+    // En lampa som inte svarar får en röd ring och en varning.
+    const silent = lampState?.responding === false;
     // En virtuell lampa finns bara i simuleringen och ritas streckad.
     const bulb = new Konva.Circle({
       ...center,
       radius: LAMP_RADIUS,
       fill: on ? COLORS.lampOn : unknown ? COLORS.lampUnknown : COLORS.lampOff,
-      stroke: COLORS.wall,
-      strokeWidth: lamp.virtual ? 1.5 : 1,
+      stroke: silent ? COLORS.warning : COLORS.wall,
+      strokeWidth: silent ? 3 : lamp.virtual ? 1.5 : 1,
       dash: lamp.virtual ? [4, 3] : undefined,
       lampId: lamp.id,
     });
@@ -218,6 +221,18 @@ function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
         listening: false,
       }),
     );
+    if (silent) {
+      layer.add(
+        new Konva.Text({
+          x: center.x + LAMP_RADIUS,
+          y: center.y - LAMP_RADIUS - 8,
+          text: "⚠",
+          fontSize: 16,
+          fill: COLORS.warning,
+          listening: false,
+        }),
+      );
+    }
   }
 }
 

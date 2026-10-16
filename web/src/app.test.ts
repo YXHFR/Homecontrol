@@ -48,7 +48,7 @@ const upstairs: Floor = {
 const home: HomeMessage = { type: "home", name: "Hemmet", floors: [groundFloor] };
 const twoFloors: HomeMessage = { type: "home", name: "Hemmet", floors: [upstairs, groundFloor] };
 
-const simulationOn: Simulation = { enabled: true, speed: 1, daylight: 10, persons: [] };
+const simulationOn: Simulation = { enabled: true, speed: 1, speed_locked: false, daylight: 10, persons: [] };
 
 function state(
   lux: number | null,
@@ -69,7 +69,7 @@ function state(
       },
     ],
     zones: [],
-    lamps: [{ id: "taklampa", on, brightness: 100, explanation: "" }],
+    lamps: [{ id: "taklampa", on, brightness: 100, explanation: "", responding: true }],
     events: [],
     simulation,
   };
@@ -386,6 +386,26 @@ describe("mountApp", () => {
     buttons[2].click();
 
     expect(sent).toEqual([{ type: "set_speed", speed: 60 }]);
+  });
+
+  it("låser tidsfarten när riktiga lampor styrs", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false, { ...simulationOn, speed_locked: true }));
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>(".speeds button")];
+
+    expect(buttons.map((b) => b.disabled)).toEqual([false, true, true]);
+    expect(root.querySelector(".simulation")?.textContent).toContain("riktiga lampor styrs");
+  });
+
+  it("visar att en lampa inte svarar", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    const silent = state(10, false);
+    silent.lamps = [{ id: "taklampa", on: null, brightness: 100, explanation: "", responding: false }];
+    handlers.onMessage(silent);
+
+    expect(root.textContent).toContain("Taklampa: svarar inte");
   });
 });
 

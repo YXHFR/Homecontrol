@@ -14,8 +14,11 @@ export interface RoomActions {
   resumeAutomation(roomId: string): void;
 }
 
-/** Lampans läge i klartext: "tänd", "dimrad 50 %", "släckt" eller "okänt läge". */
+/** Lampans läge i klartext: "tänd", "dimrad 50 %", "släckt", "svarar inte" eller "okänt läge". */
 export function lampStateText(state: LampState | undefined): string {
+  if (state?.responding === false) {
+    return "svarar inte";
+  }
   if (state === undefined || state.on === null) {
     return "okänt läge";
   }

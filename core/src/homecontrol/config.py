@@ -8,6 +8,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from homecontrol.zigbee import MqttSettings
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -22,6 +24,12 @@ class Settings:
     Lösenordet står inte här utan läses av databasbiblioteket från PGPASSWORD.
     Utan databas används exempelhemmet, och inget sparas.
     """
+    mqtt: MqttSettings | None = None
+    """MQTT-brokern där Zigbee2MQTT finns (se zigbee.py).
+
+    Lösenordet läses från HOMECONTROL_MQTT_PASSWORD. Utan broker styrs inga
+    riktiga lampor, och simuleringsläget är påslaget från start.
+    """
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -35,4 +43,17 @@ class Settings:
                 if name.strip()
             ),
             database=os.environ.get("HOMECONTROL_DATABASE", "").strip() or None,
+            mqtt=_mqtt_from_env(),
         )
+
+
+def _mqtt_from_env() -> MqttSettings | None:
+    host = os.environ.get("HOMECONTROL_MQTT_HOST", "").strip()
+    if not host:
+        return None
+    return MqttSettings(
+        host=host,
+        port=int(os.environ.get("HOMECONTROL_MQTT_PORT", "1883")),
+        username=os.environ.get("HOMECONTROL_MQTT_USER", "").strip() or None,
+        password=os.environ.get("HOMECONTROL_MQTT_PASSWORD") or None,
+    )

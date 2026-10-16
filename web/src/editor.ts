@@ -44,7 +44,7 @@ import {
   placeItem,
   updateItem,
 } from "./placing";
-import type { Point, ZoneKind } from "./protocol";
+import type { FoundLamp, Point, ZoneKind } from "./protocol";
 import {
   Drawing,
   INSTRUCTIONS,
@@ -71,6 +71,8 @@ export interface EditorDependencies {
 
 /** Större bilder förminskas; mer än så här syns ändå inte på en skärm. */
 const MAX_IMAGE_SIDE = 4000;
+/** Så ofta redigeraren frågar kärnan om nya lampor. */
+const LAMP_REFRESH_MS = 10_000;
 /** Så nära (i skärmpunkter) ett klick måste vara ett hörn för att träffa det. */
 const SNAP_PIXELS = 12;
 
@@ -172,6 +174,9 @@ export function mountEditor(
   let scalePoints: { a: Point; b: Point } | null = null;
   /** Ändras när en ny bild laddas upp, så att webbläsaren inte visar den gamla. */
   let imageVersion = Date.now();
+  /** Riktiga lampor som kärnan har hittat men som inte är placerade, och den som placeras nu. */
+  let newLamps: FoundLamp[] = [];
+  let lampToPlace: FoundLamp | null = null;
   /** Ändringarna skickas en i taget. */
   let queue: Promise<void> = Promise.resolve();
   let savedCount = 0;
@@ -192,6 +197,8 @@ export function mountEditor(
   fileInput.hidden = true;
   const uploadButton = button("Ladda upp bild", () => fileInput.click(), "tool");
   const removeImageButton = button("Ta bort bilden", () => removeImage(), "tool");
+  const newLampsList = element("div", { className: "new-lamps", hidden: true });
+  newLampsList.setAttribute("aria-label", "Nya lampor");
   const toolbox = element(
     "aside",
     { className: "toolbox" },
@@ -210,6 +217,7 @@ export function mountEditor(
     toolButton("node"),
     toolButton("router"),
     toolButton("lamp"),
+    newLampsList,
     element("h2", {}, "Kartan"),
     element(
       "div",
@@ -280,12 +288,55 @@ export function mountEditor(
     }
     removeImageButton.disabled = !hasImage;
     uploadButton.disabled = imageChanging;
+    renderNewLamps();
+  };
+
+  const renderNewLamps = () => {
+    const waiting = newLamps.filter((lamp) => shown === null || findItem(shown, lamp.id) === null);
+    newLampsList.hidden = waiting.length === 0;
+    newLampsList.replaceChildren(
+      element("p", { className: "muted" }, "Nya lampor som kärnan har hittat:"),
+      ...waiting.map((lamp) => {
+        const node = button(
+          `Placera ${lamp.name}`,
+          () => {
+            chooseTool("lamp");
+            lampToPlace = lamp;
+            render();
+          },
+          "tool",
+        );
+        node.dataset.lamp = lamp.id;
+        node.setAttribute("aria-pressed", String(lampToPlace?.id === lamp.id));
+        return node;
+      }),
+    );
+  };
+
+  /** Läser om vilka lampor kärnan har hittat. Ett fel här stoppar inte redigeraren. */
+  const refreshLamps = () => {
+    deps.api.lamps().then(
+      (lamps) => {
+        newLamps = lamps.filter((lamp) => !lamp.placed);
+        renderTools();
+      },
+      () => undefined,
+    );
+  };
+
+  const instructionText = (): string => {
+    if (lampToPlace !== null) {
+      return (
+        `Klicka där ${lampToPlace.name} sitter, inne i ett rum. Kärnan börjar styra lampan ` +
+        "när den är placerad."
+      );
+    }
+    return drawing.tool === "zone" ? zoneInstruction(zoneKind) : INSTRUCTIONS[drawing.tool];
   };
 
   const renderInstruction = () => {
     const draft = drawing.draft;
-    instruction.textContent =
-      drawing.tool === "zone" ? zoneInstruction(zoneKind) : INSTRUCTIONS[drawing.tool];
+    instruction.textContent = instructionText();
     draftActions.replaceChildren();
     if (draft.kind === "polygon") {
       const done = button(drawing.tool === "zone" ? "Stäng zonen" : "Stäng rummet", () =>
@@ -568,6 +619,7 @@ export function mountEditor(
   const chooseTool = (tool: ToolName) => {
     drawing.setTool(tool);
     scalePoints = null;
+    lampToPlace = null;
     if (tool !== "select") {
       selection = null;
     }
@@ -640,20 +692,29 @@ export function mountEditor(
     render();
   }
 
-  /** Placerar ett rumskort, en router eller en lampa och väljer den. */
+  /**
+   * Placerar ett rumskort, en router eller en lampa och väljer den. En ny
+   * riktig lampa får lampans id och profil; då börjar kärnan styra den.
+   */
   const place = (kind: ItemKind, point: Point) => {
     const floor = currentFloor();
+    const found = kind === "lamp" ? (lampToPlace ?? undefined) : undefined;
     const placed =
-      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point);
+      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point, found);
     if (placed === null || floor === null) {
       showMessage("Klicka inne i ett rum. Rumskort och lampor hör till rummet de sitter i.");
       render();
       return;
     }
     selection = { kind: "item", id: placed.id };
+    if (found !== undefined) {
+      lampToPlace = null;
+      newLamps = newLamps.filter((lamp) => lamp.id !== found.id);
+      drawing.setTool("select");
+    }
     // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
     // gör att den nya saken förblir vald.
-    const given = { id: placed.id, name: placed.name };
+    const given = { id: placed.id, name: placed.name, profile: found?.profile };
     commit((document) => placeItem(document, kind, floor.id, point, given)?.document ?? document);
   };
 
@@ -805,6 +866,8 @@ export function mountEditor(
   });
 
   chooseTool("select");
+  // Nya lampor dyker upp medan redigeraren är öppen, till exempel när en lampa just har parats ihop.
+  window.setInterval(refreshLamps, LAMP_REFRESH_MS);
   deps.api.load().then(
     (latest) => {
       saved = latest.document;
@@ -815,6 +878,7 @@ export function mountEditor(
       saveStatus.textContent = "Alla ändringar är sparade.";
       setBusy(false);
       render();
+      refreshLamps();
       root.dataset.ready = "true";
     },
     (error: unknown) => {

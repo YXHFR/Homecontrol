@@ -4,6 +4,7 @@ import type { EditorScene, EditorViewCallbacks } from "./editorView";
 import { setPlanImage } from "./editing";
 import { CoreError, type HomeApi } from "./homeApi";
 import type { HomeDocument } from "./homefile";
+import type { FoundLamp } from "./protocol";
 
 function home(): HomeDocument {
   return {
@@ -44,6 +45,8 @@ class FakeCore {
   saved: HomeDocument[] = [];
   /** Svar att ge på de kommande anropen som ändrar något, i tur och ordning. */
   failures: (CoreError | null)[] = [];
+  /** De riktiga lamporna som kärnan har hittat. */
+  found: FoundLamp[] = [];
 
   private change(revision: string, apply: () => void): Promise<string> {
     const failure = this.failures.shift() ?? null;
@@ -84,11 +87,13 @@ class FakeCore {
         this.document = setPlanImage(this.document, floorId, null);
       }),
     planImageUrl: (floorId) => `/bild/${floorId}`,
+    lamps: () => Promise.resolve(structuredClone(this.found)),
   };
 }
 
-async function setup() {
+async function setup(found: FoundLamp[] = []) {
   const core = new FakeCore();
+  core.found = found;
   const scenes: EditorScene[] = [];
   let callbacks: EditorViewCallbacks | undefined;
   const deps: EditorDependencies = {
@@ -574,6 +579,31 @@ describe("kartredigeraren", () => {
 
     expect(core.saved).toEqual([]);
     expect(text(root, ".message")).toMatch(/inne i ett rum/);
+  });
+
+  it("en ny riktig lampa placeras med sitt id och sin profil", async () => {
+    const found: FoundLamp[] = [
+      { id: "zigbee-000b57fffe0000a1", name: "TRÅDFRI", profile: "ikea-tradfri", placed: false },
+      { id: "zigbee-000b57fffe0000a2", name: "Redan placerad", profile: "ikea-tradfri", placed: true },
+    ];
+    const { root, core, map, click, settled } = await setup(found);
+    await vi.waitFor(() => expect(root.querySelector(".new-lamps")?.hasAttribute("hidden")).toBe(false));
+    expect([...root.querySelectorAll(".new-lamps button")].map((b) => b.textContent)).toEqual([
+      "Placera TRÅDFRI",
+    ]);
+
+    click("Placera TRÅDFRI");
+    expect(text(root, ".instruction")).toMatch(/Klicka där TRÅDFRI sitter/);
+    map.onPointerDown({ x: 2, y: 1 });
+    await settled();
+
+    expect(core.document.home.floors[0].rooms[0].lamps).toContainEqual({
+      id: "zigbee-000b57fffe0000a1",
+      name: "TRÅDFRI",
+      position: [2, 1],
+      profile: "ikea-tradfri",
+    });
+    expect(root.querySelector(".new-lamps")?.hasAttribute("hidden")).toBe(true);
   });
 
   it("lampor och routrar placeras, flyttas och tas bort, och lampor kopplas till ett rum", async () => {

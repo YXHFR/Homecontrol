@@ -85,19 +85,24 @@ class LampStateReported:
 
     Utgången skickar det när den startar, när lampan svarar igen och när
     lampan har ändrats. `on` är None när lampan inte svarar och läget är
-    okänt. Kärnan antar aldrig att en lampa är släckt; tills lampan har
-    rapporterat eller kärnan själv har styrt den är läget okänt.
+    okänt; kärnan visar då att lampan inte svarar. Kärnan antar aldrig att en
+    lampa är släckt; tills lampan har rapporterat eller kärnan själv har styrt
+    den är läget okänt.
 
-    Än så länge ersätter beskedet bara det kärnan vet om lampan. Att en
-    ändring med fjärrkontroll eller app ska räknas som manuell styrning
-    (`Controller.set_lamp`) hör till den riktiga lampkopplingen, som först
-    måste skilja lampans svar på kärnans egna kommandon från sådana ändringar.
+    Bara utgången vet om beskedet är lampans svar på kärnans eget kommando
+    eller en ändring utifrån, så den talar om det med `external`.
     """
 
     lamp_id: str
     on: bool | None
     brightness: int = 100
     """Ljusstyrkan i procent (1–100) när lampan är tänd."""
+    external: bool = False
+    """Lampan ändrades utanför kärnan, till exempel med fjärrkontroll eller app.
+
+    Kärnan räknar det som manuell styrning (se `Controller.set_lamp`). Lampans
+    svar på kärnans kommandon och läget när lampan läses är inte ändringar utifrån.
+    """
 
 
 Observation = (
@@ -133,6 +138,8 @@ class LampCommand:
     reason: str
     brightness: int = 100
     """Ljusstyrkan i procent (1–100) när lampan tänds, till exempel lägre under en dimring."""
+    color_temp: int | None = None
+    """Färgtemperaturen i kelvin, eller None för att lämna den. Ingen regel sätter den än."""
 
 
 class LampOutput(Protocol):
@@ -140,6 +147,9 @@ class LampOutput(Protocol):
 
     `send` får inte blockera. En utgång som pratar med nätverket lägger
     kommandot i en egen kö och skickar det i bakgrunden.
+
+    Kärnan lämnar varje kommando till alla utgångar. En utgång styr bara sina
+    egna lampor och hoppar över kommandon till andra.
     """
 
     def send(self, command: LampCommand) -> None: ...

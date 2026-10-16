@@ -10,7 +10,8 @@ Protokollet är JSON. Kärnan skickar:
   (``held`` är ett spår som radarn har tappat men som hålls kvar), läget i
   varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), om rummet
   är i manuellt läge och varför lamporna är som de är, lamporna (``on`` är
-  null när läget är okänt), de senaste händelserna för "Varför hände det?"
+  null när läget är okänt, och ``responding`` är false när lampan inte
+  svarar), de senaste händelserna för "Varför hände det?"
   (``at`` är Unix-tid i sekunder) och simuleringen. Fältet ``simulation``
   visar simuleringsläget, eller är null om det inte finns.
 
@@ -33,7 +34,8 @@ Livevyn skickar kommandon till simuleringen:
 * ``{"type": "set_speed", "speed": 60}``
 
 Personerna och dagsljuset går in i kärnan genom låtsaskällan, precis som en
-riktig källa. Utan simulering, eller när simuleringsläget är avslaget,
+riktig källa. Så länge riktiga lampor styrs är tidsfarten låst till 1×
+(``speed_locked`` i ``simulation``), och snabbare tidsfart ignoreras. Utan simulering, eller när simuleringsläget är avslaget,
 ignoreras kommandona, men läget strömmas ändå.
 """
 
@@ -211,6 +213,7 @@ def state_message(snapshot: Snapshot, simulation: SimulationView | None) -> dict
                 "id": lamp.lamp_id,
                 "on": lamp.on,
                 "brightness": lamp.brightness,
+                "responding": lamp.responding,
                 "explanation": lamp.explanation,
             }
             for lamp in snapshot.lamps
@@ -227,6 +230,7 @@ def simulation_message(simulation: SimulationView) -> dict[str, Any]:
     return {
         "enabled": simulation.enabled,
         "speed": simulation.speed,
+        "speed_locked": simulation.speed_locked,
         "daylight": simulation.daylight,
         "persons": [
             {

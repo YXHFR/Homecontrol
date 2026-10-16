@@ -57,6 +57,7 @@ def test_streams_home_and_state_and_lights_the_lamp() -> None:
         assert state["simulation"] == {
             "enabled": True,
             "speed": 1,
+            "speed_locked": False,
             "daylight": DEFAULT_DAYLIGHT_LUX,
             "persons": [],
         }
