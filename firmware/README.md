@@ -38,7 +38,9 @@ Stiften kan ändras med `substitutions` överst i `homecontrol.yaml`.
 ## Installera
 
 1. Öppna webbinstalleraren: <https://yxhfr.github.io/Homecontrol/>
-   (Chrome eller Edge på en dator).
+   (Chrome eller Edge på en dator). Obs: den är inte publicerad än, eftersom
+   GitHub Pages inte är påslaget för repot. Tills dess bygger du själv (se
+   **Rummet finns inte i listan** nedan).
 2. Välj rum. Kortet får namnet `homecontrol-<rum>`.
 3. Anslut kortet med USB. På kort med två USB-uttag: använd det som är
    märkt **USB** (inte **UART**). Annars går det inte att ställa in Wi-Fi.
