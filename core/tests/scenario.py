@@ -114,6 +114,14 @@ class Scenario:
         self.controller.observe(LampStateReported(self._lamp_view(lamp).lamp_id, on=None))
         return self
 
+    def lamp_responds_again(self, lamp: str | None = None) -> Self:
+        """Lampan svarar igen och säger hur den är: som den virtuella lampan senast blev."""
+        lamp_id = self._lamp_view(lamp).lamp_id
+        on = self.lamps.states.get(lamp_id, False)
+        brightness = self.lamps.brightness.get(lamp_id, 100)
+        self.controller.observe(LampStateReported(lamp_id, on=on, brightness=brightness))
+        return self
+
     def lamp_changed_with_remote(self, on: bool, lamp: str | None = None) -> Self:
         """Någon tänder eller släcker lampan med fjärrkontrollen."""
         lamp_id = self._lamp_view(lamp).lamp_id
@@ -394,6 +402,14 @@ class Scenario:
             raise AssertionError(
                 f"{lamp_id} skulle ha bidraget {lux:g} lux men har {saved.lux_contribution:g}"
             )
+        return self
+
+    def expect_lamp_warning(self, warning: bool = True, lamp: str | None = None) -> Self:
+        """Kartan varnar för att lampan inte svarar."""
+        view = self._lamp_view(lamp)
+        if view.responding == warning:
+            wanted = "inte svarar" if warning else "svarar"
+            raise AssertionError(f"Kartan skulle visa att {view.lamp_id} {wanted}")
         return self
 
     def expect_explanation(self, text: str, lamp: str | None = None) -> Self:
