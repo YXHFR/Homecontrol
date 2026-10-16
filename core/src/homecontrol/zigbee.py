@@ -121,7 +121,7 @@ class Setting:
     """Färgtemperaturen i kelvin, eller None för att lämna den som den är."""
 
     @classmethod
-    def of(cls, command: LampCommand) -> "Setting":
+    def of(cls, command: LampCommand) -> Setting:
         return cls(command.on, command.brightness, command.color_temp)
 
 
@@ -648,7 +648,7 @@ class ZigbeeOutput:
             return  # kärnans egna meddelanden kommer tillbaka
         try:
             data = json.loads(payload) if payload else None
-        except (ValueError, RecursionError):
+        except ValueError, RecursionError:
             if payload in (b"online", b"offline"):
                 data = payload.decode()
             else:

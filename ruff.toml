@@ -1,6 +1,9 @@
 # Gemensam lint- och formatinställning för all Python i repot.
 line-length = 100
-target-version = "py313"
+target-version = "py314"
+# Skripten körs också med systemets python3 (till exempel i firmware-flödet med 3.13),
+# så de ska fortsätta fungera med 3.13.
+per-file-target-version = { "scripts/**" = "py313" }
 
 [lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
