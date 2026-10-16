@@ -1,13 +1,18 @@
 import Konva from "konva";
-import { corners, fitTransform, parkingSpot, wallSegments, type Transform } from "./geometry";
-import type { Floor, Point, StateMessage, WallKind } from "./protocol";
+import { corners, fitTransform, wallSegments, type Transform } from "./geometry";
+import type { Floor, Person, Point, StateMessage, WallKind } from "./protocol";
 
 export interface LiveViewCallbacks {
-  /** Låtsaspersonen har dragits till en ny plats, i hemmets meter. */
-  onMovePerson(position: Point): void;
+  /** En låtsasperson har dragits till en ny plats, i hemmets meter. */
+  onMovePerson(personId: string, position: Point): void;
 }
 
-/** Ritytan i livevyn. Den ritar en våning åt gången, och bara det kärnan har skickat. */
+/**
+ * Ritytan i livevyn. Den ritar en våning åt gången, och bara det kärnan har skickat.
+ *
+ * Det kärnan ser (från alla källor) ritas som små prickar. Låtsaspersonerna
+ * ritas ovanpå som större ringar som går att dra med mus eller finger.
+ */
 export interface LiveView {
   setFloor(floor: Floor): void;
   setState(state: StateMessage): void;
@@ -19,6 +24,9 @@ export type ViewFactory = (container: HTMLDivElement, callbacks: LiveViewCallbac
 const MAX_WIDTH = 800;
 const ASPECT = 0.65;
 const PERSON_RADIUS = 12;
+/** Extra yta runt personen som går att ta tag i, så att den är lätt att dra med fingret. */
+const PERSON_HIT_WIDTH = 24;
+const TARGET_RADIUS = 5;
 const LAMP_RADIUS = 14;
 /** Skenet runt en tänd lampa, i meter, och hur genomskinligt det är. */
 const GLOW_RADIUS_METERS = 0.9;
@@ -38,6 +46,7 @@ const COLORS = {
   lampOn: "#ffc933",
   lampOff: "#b8b8b8",
   person: "#d64545",
+  target: "#7a1f1f",
   text: "#222222",
 };
 
@@ -127,25 +136,43 @@ function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
         }),
       );
     }
+    // En virtuell lampa finns bara i simuleringen och ritas streckad.
     layer.add(
       new Konva.Circle({
         ...center,
         radius: LAMP_RADIUS,
         fill: on ? COLORS.lampOn : COLORS.lampOff,
         stroke: COLORS.wall,
-        strokeWidth: 1,
+        strokeWidth: lamp.virtual ? 1.5 : 1,
+        dash: lamp.virtual ? [4, 3] : undefined,
       }),
       new Konva.Text({
-        x: center.x - 50,
+        x: center.x - 60,
         y: center.y + LAMP_RADIUS + 6,
-        width: 100,
+        width: 120,
         align: "center",
-        text: `${lamp.name} (${on ? "tänd" : "släckt"})`,
+        text: `${lamp.name} (${lamp.virtual ? "virtuell, " : ""}${on ? "tänd" : "släckt"})`,
         fontSize: 13,
         fill: COLORS.text,
       }),
     );
   }
+}
+
+function drawTargets(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
+  for (const target of state?.targets ?? []) {
+    if (target.floor_id === floor.id) {
+      layer.add(new Konva.Circle({ ...t.toScreen(target), radius: TARGET_RADIUS, fill: COLORS.target }));
+    }
+  }
+}
+
+/** En låtsasperson på ritytan och vad vyn vet om dragningen av den. */
+interface PersonMarker {
+  group: Konva.Group;
+  dragging: boolean;
+  lastSent: number;
+  settledAt: number;
 }
 
 export const createKonvaView: ViewFactory = (container, callbacks) => {
@@ -154,51 +181,79 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
   const personLayer = new Konva.Layer();
   stage.add(roomLayer, personLayer);
 
-  const person = new Konva.Circle({
-    radius: PERSON_RADIUS,
-    fill: COLORS.person,
-    stroke: "white",
-    strokeWidth: 2,
-    draggable: true,
-  });
-  personLayer.add(person);
-
   let shownFloor: Floor | null = null;
   let state: StateMessage | null = null;
-  /** Senaste omräkningen mellan meter och pixlar; behövs när personen dras. */
+  /** Senaste omräkningen mellan meter och pixlar; behövs när personer dras. */
   let transform: Transform | null = null;
-  let dragging = false;
-  let lastSent = 0;
-  let settledAt = 0;
+  const markers = new Map<string, PersonMarker>();
 
-  const sendPosition = (force: boolean) => {
+  const sendPosition = (personId: string, marker: PersonMarker, force: boolean) => {
     const now = performance.now();
-    if (transform === null || (!force && now - lastSent < SEND_INTERVAL_MS)) {
+    if (transform === null || (!force && now - marker.lastSent < SEND_INTERVAL_MS)) {
       return;
     }
-    lastSent = now;
-    callbacks.onMovePerson(transform.toHome(person.position()));
+    marker.lastSent = now;
+    callbacks.onMovePerson(personId, transform.toHome(marker.group.position()));
   };
-  person.on("dragstart", () => {
-    dragging = true;
-  });
-  person.on("dragmove", () => sendPosition(false));
-  person.on("dragend", () => {
-    dragging = false;
-    settledAt = performance.now() + SETTLE_MS;
-    sendPosition(true);
-  });
-  person.on("mouseenter", () => (stage.container().style.cursor = "grab"));
-  person.on("mouseleave", () => (stage.container().style.cursor = ""));
 
-  const placePerson = (t: Transform, shown: Floor) => {
-    if (dragging || performance.now() < settledAt) {
-      return;
+  const createMarker = (person: Person): PersonMarker => {
+    const group = new Konva.Group({ draggable: true });
+    group.add(
+      new Konva.Circle({
+        radius: PERSON_RADIUS,
+        fill: COLORS.person,
+        opacity: 0.85,
+        stroke: "white",
+        strokeWidth: 2,
+        hitStrokeWidth: PERSON_HIT_WIDTH,
+      }),
+      new Konva.Text({
+        x: -PERSON_RADIUS,
+        y: -6,
+        width: 2 * PERSON_RADIUS,
+        align: "center",
+        text: person.id,
+        fontSize: 12,
+        fill: "white",
+        listening: false,
+      }),
+    );
+    const marker: PersonMarker = { group, dragging: false, lastSent: 0, settledAt: 0 };
+    group.on("dragstart", () => {
+      marker.dragging = true;
+    });
+    group.on("dragmove", () => sendPosition(person.id, marker, false));
+    group.on("dragend", () => {
+      marker.dragging = false;
+      marker.settledAt = performance.now() + SETTLE_MS;
+      sendPosition(person.id, marker, true);
+    });
+    group.on("mouseenter", () => (stage.container().style.cursor = "grab"));
+    group.on("mouseleave", () => (stage.container().style.cursor = ""));
+    personLayer.add(group);
+    return marker;
+  };
+
+  /** Ritar låtsaspersonerna på våningen som visas, där kärnan senast sa att de var. */
+  const placePersons = (t: Transform, shown: Floor) => {
+    const simulation = state?.simulation;
+    const persons = simulation?.enabled
+      ? simulation.persons.filter((person) => person.floor_id === shown.id)
+      : [];
+    const ids = new Set(persons.map((person) => person.id));
+    for (const [id, marker] of markers) {
+      if (!ids.has(id)) {
+        marker.group.destroy();
+        markers.delete(id);
+      }
     }
-    // Kärnans bild av var personen är gäller. Är den inte på den här
-    // våningen står den och väntar utanför rummen.
-    const target = state?.targets.find((candidate) => candidate.floor_id === shown.id);
-    person.position(t.toScreen(target ?? parkingSpot(shown.rooms)));
+    for (const person of persons) {
+      const marker = markers.get(person.id) ?? createMarker(person);
+      markers.set(person.id, marker);
+      if (!marker.dragging && performance.now() >= marker.settledAt) {
+        marker.group.position(t.toScreen(person));
+      }
+    }
   };
 
   const render = () => {
@@ -215,7 +270,8 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
     drawWalls(roomLayer, transform, shownFloor);
     drawRoomNames(roomLayer, transform, shownFloor);
     drawLamps(roomLayer, transform, shownFloor, state);
-    placePerson(transform, shownFloor);
+    drawTargets(roomLayer, transform, shownFloor, state);
+    placePersons(transform, shownFloor);
   };
 
   const onResize = () => render();

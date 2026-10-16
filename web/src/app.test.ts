@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LUX, mountApp, startFloor, type AppDependencies, type Connection } from "./app";
+import { mountApp, startFloor, type AppDependencies, type Connection } from "./app";
 import type { ConnectionHandlers } from "./connection";
-import type { ClientMessage, Floor, HomeMessage, Room, StateMessage } from "./protocol";
+import type { ClientMessage, Floor, HomeMessage, Room, Simulation, StateMessage } from "./protocol";
 import type { LiveViewCallbacks } from "./view";
 
 function rectangle(id: string, name: string): Room {
@@ -23,7 +23,7 @@ const groundFloor: Floor = {
   name: "Entréplan",
   level: 0,
   rooms: [rectangle("vardagsrum", "Vardagsrum")],
-  lamps: [{ id: "taklampa", name: "Taklampa", room_id: "vardagsrum", x: 2.5, y: 2 }],
+  lamps: [{ id: "taklampa", name: "Taklampa", room_id: "vardagsrum", x: 2.5, y: 2, virtual: true }],
 };
 
 const upstairs: Floor = {
@@ -31,18 +31,27 @@ const upstairs: Floor = {
   name: "Övervåning",
   level: 1,
   rooms: [rectangle("sovrum", "Sovrum")],
-  lamps: [{ id: "sovrumslampa", name: "Sovrumslampa", room_id: "sovrum", x: 2.5, y: 2 }],
+  lamps: [
+    { id: "sovrumslampa", name: "Sovrumslampa", room_id: "sovrum", x: 2.5, y: 2, virtual: true },
+  ],
 };
 
 const home: HomeMessage = { type: "home", name: "Hemmet", floors: [groundFloor] };
 const twoFloors: HomeMessage = { type: "home", name: "Hemmet", floors: [upstairs, groundFloor] };
 
-function state(lux: number | null, on: boolean): StateMessage {
+const simulationOn: Simulation = { enabled: true, speed: 1, daylight: 10, persons: [] };
+
+function state(
+  lux: number | null,
+  on: boolean,
+  simulation: Simulation | null = simulationOn,
+): StateMessage {
   return {
     type: "state",
     targets: [],
     rooms: [{ id: "vardagsrum", occupied: on, lux }],
     lamps: [{ id: "taklampa", on, explanation: on ? "Tänd: någon är här." : "Släckt: tomt." }],
+    simulation,
   };
 }
 
@@ -128,86 +137,101 @@ describe("mountApp", () => {
     expect(buttons[1].getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("visar ljusnivån för våningen som visas", () => {
-    const { root, handlers } = setup();
-    handlers.onMessage(twoFloors);
-    handlers.onMessage({
-      type: "state",
-      targets: [],
-      rooms: [
-        { id: "vardagsrum", occupied: false, lux: 40 },
-        { id: "sovrum", occupied: false, lux: 5 },
-      ],
-      lamps: [],
-    });
-    const output = find<HTMLOutputElement>(root, "output");
-    expect(output.textContent).toBe("40 lux");
-
-    find<HTMLButtonElement>(root, ".floors button").click();
-
-    expect(output.textContent).toBe("5 lux");
-  });
-
-  it("flyttar personen till våningen som visas", () => {
+  it("flyttar personen på våningen som visas", () => {
     const { root, sent, handlers, callbacks } = setup();
     handlers.onMessage(twoFloors);
     find<HTMLButtonElement>(root, ".floors button").click();
 
-    callbacks.onMovePerson({ x: 1, y: 2 });
+    callbacks.onMovePerson("1", { x: 1, y: 2 });
 
-    expect(sent).toContainEqual({ type: "move_person", floor_id: "uppe", x: 1, y: 2 });
-  });
-
-  it("frågar bara en gång per rum när ljusnivån är okänd", () => {
-    const { sent, handlers } = setup();
-    handlers.onMessage(home);
-
-    handlers.onMessage(state(null, false));
-    handlers.onMessage(state(null, false));
-
-    expect(sent).toHaveLength(1);
-  });
-
-  it("ger kärnan en mörk ljusnivå om den inte vet någon", () => {
-    const { sent, handlers } = setup();
-
-    handlers.onMessage(home);
-    handlers.onMessage(state(null, false));
-
-    expect(sent).toEqual([{ type: "set_light_level", room_id: "vardagsrum", lux: DEFAULT_LUX }]);
-  });
-
-  it("skickar ny ljusnivå när reglaget dras", () => {
-    const { root, sent, handlers } = setup();
-    handlers.onMessage(home);
-    const slider = find<HTMLInputElement>(root, "input[type=range]");
-
-    slider.value = "150";
-    slider.dispatchEvent(new Event("input"));
-
-    expect(sent).toEqual([{ type: "set_light_level", room_id: "vardagsrum", lux: 150 }]);
-    expect(root.querySelector("output")?.textContent).toBe("150 lux");
-  });
-
-  it("skickar personens nya plats och kan låta den gå", () => {
-    const { root, sent, handlers, callbacks } = setup();
-    handlers.onMessage(home);
-
-    callbacks.onMovePerson({ x: 1, y: 2 });
-    find<HTMLButtonElement>(root, ".controls button").click();
-
-    expect(sent).toEqual([
-      { type: "move_person", floor_id: "plan", x: 1, y: 2 },
-      { type: "remove_person" },
-    ]);
+    expect(sent).toContainEqual({ type: "move_person", person_id: "1", floor_id: "uppe", x: 1, y: 2 });
   });
 
   it("flyttar ingen person innan hemmet har kommit", () => {
     const { sent, callbacks } = setup();
 
-    callbacks.onMovePerson({ x: 1, y: 2 });
+    callbacks.onMovePerson("1", { x: 1, y: 2 });
 
     expect(sent).toEqual([]);
+  });
+
+  it("döljer simuleringspanelen när kärnan inte har någon simulering", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+
+    handlers.onMessage(state(10, false, null));
+
+    expect(find<HTMLElement>(root, ".simulation").hidden).toBe(true);
+  });
+
+  it("slår på och av simuleringsläget", () => {
+    const { root, sent, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false, { ...simulationOn, enabled: false }));
+    const toggle = find<HTMLInputElement>(root, ".simulation input[type=checkbox]");
+
+    expect(find<HTMLElement>(root, ".simulation").hidden).toBe(false);
+    expect(toggle.checked).toBe(false);
+    expect(find<HTMLElement>(root, ".simulation-controls").hidden).toBe(true);
+
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change"));
+    handlers.onMessage(state(10, false));
+
+    expect(sent).toEqual([{ type: "set_simulation", enabled: true }]);
+    expect(find<HTMLElement>(root, ".simulation-controls").hidden).toBe(false);
+  });
+
+  it("lägger till personer bredvid rummen och tar bort dem", () => {
+    const { root, sent, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false));
+
+    find<HTMLButtonElement>(root, ".simulation .controls button").click();
+    handlers.onMessage(
+      state(10, false, { ...simulationOn, persons: [{ id: "1", floor_id: "plan", x: 6, y: 0.5 }] }),
+    );
+    find<HTMLButtonElement>(root, ".simulation .controls button").click();
+    const persons = find<HTMLElement>(root, ".persons");
+    find<HTMLButtonElement>(persons, "button").click();
+
+    expect(persons.textContent).toBe("Person 1 Ta bort");
+    expect(sent).toEqual([
+      { type: "add_person", floor_id: "plan", x: 6, y: 0.5 },
+      { type: "add_person", floor_id: "plan", x: 6, y: 1.5 },
+      { type: "remove_person", person_id: "1" },
+    ]);
+  });
+
+  it("visar och skickar dagsljuset", () => {
+    const { root, sent, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false, { ...simulationOn, daylight: 40 }));
+    const slider = find<HTMLInputElement>(root, "input[type=range]");
+    const output = find<HTMLOutputElement>(root, "output");
+
+    expect(slider.value).toBe("40");
+    expect(output.textContent).toBe("40 lux");
+
+    slider.value = "150";
+    slider.dispatchEvent(new Event("input"));
+
+    expect(sent).toEqual([{ type: "set_daylight", lux: 150 }]);
+    expect(output.textContent).toBe("150 lux");
+  });
+
+  it("visar och byter tidsfart", () => {
+    const { root, sent, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false, { ...simulationOn, speed: 10 }));
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>(".speeds button")];
+
+    expect(buttons.map((b) => b.textContent)).toEqual(["1×", "10×", "60×"]);
+    expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "true", "false"]);
+
+    buttons[2].click();
+
+    expect(sent).toEqual([{ type: "set_speed", speed: 60 }]);
   });
 });
 

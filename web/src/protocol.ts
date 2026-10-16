@@ -26,6 +26,8 @@ export interface Lamp {
   room_id: string;
   x: number;
   y: number;
+  /** Lampan finns bara i simuleringen; ingen riktig lampa styrs av den. */
+  virtual: boolean;
 }
 
 export interface Floor {
@@ -48,19 +50,42 @@ export interface Target extends Point {
   floor_id: string;
 }
 
+/** Tidsfarterna som simuleringen kan köra i. Vid 60× går en minut på en sekund. */
+export const SPEEDS = [1, 10, 60] as const;
+export type Speed = (typeof SPEEDS)[number];
+
+/** En låtsasperson i simuleringen. Id:t behövs för att flytta eller ta bort den. */
+export interface Person extends Target {
+  id: string;
+}
+
+export interface Simulation {
+  enabled: boolean;
+  speed: Speed;
+  /** Dagsljuset i alla rum, i lux. */
+  daylight: number | null;
+  persons: Person[];
+}
+
 export interface StateMessage {
   type: "state";
+  /** Allt som kärnan ser, från alla källor, även låtsaspersonerna. */
   targets: Target[];
   rooms: { id: string; occupied: boolean; lux: number | null }[];
   lamps: { id: string; on: boolean; explanation: string }[];
+  /** Simuleringsläget, eller null om kärnan inte har någon simulering. */
+  simulation: Simulation | null;
 }
 
 export type ServerMessage = HomeMessage | StateMessage;
 
 export type ClientMessage =
-  | { type: "move_person"; floor_id: string; x: number; y: number }
-  | { type: "remove_person" }
-  | { type: "set_light_level"; room_id: string; lux: number };
+  | { type: "set_simulation"; enabled: boolean }
+  | { type: "add_person"; floor_id: string; x: number; y: number }
+  | { type: "move_person"; person_id: string; floor_id: string; x: number; y: number }
+  | { type: "remove_person"; person_id: string }
+  | { type: "set_daylight"; lux: number }
+  | { type: "set_speed"; speed: Speed };
 
 /** Tolkar ett meddelande från kärnan. Okända eller trasiga meddelanden ger null. */
 export function parseServerMessage(text: string): ServerMessage | null {
@@ -79,6 +104,7 @@ export function parseServerMessage(text: string): ServerMessage | null {
     rooms?: unknown;
     lamps?: unknown;
     targets?: unknown;
+    simulation?: unknown;
   };
   if (message.type === "home" && Array.isArray(message.floors) && message.floors.length > 0) {
     return data as HomeMessage;
@@ -87,9 +113,22 @@ export function parseServerMessage(text: string): ServerMessage | null {
     message.type === "state" &&
     Array.isArray(message.targets) &&
     Array.isArray(message.rooms) &&
-    Array.isArray(message.lamps)
+    Array.isArray(message.lamps) &&
+    (message.simulation === null || isSimulation(message.simulation))
   ) {
     return data as StateMessage;
   }
   return null;
+}
+
+function isSimulation(data: unknown): data is Simulation {
+  if (typeof data !== "object" || data === null) {
+    return false;
+  }
+  const simulation = data as { enabled?: unknown; speed?: unknown; persons?: unknown };
+  return (
+    typeof simulation.enabled === "boolean" &&
+    (SPEEDS as readonly unknown[]).includes(simulation.speed) &&
+    Array.isArray(simulation.persons)
+  );
 }

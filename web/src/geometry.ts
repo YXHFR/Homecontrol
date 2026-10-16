@@ -67,8 +67,19 @@ export function fitTransform(rooms: Room[], width: number, height: number): Tran
   };
 }
 
-/** Där låtsaspersonen väntar utanför rummen innan någon drar in den. */
-export function parkingSpot(rooms: Room[]): Point {
+/** Avståndet mellan låtsaspersoner som väntar bredvid varandra, i meter. */
+const PARKING_GAP_METERS = 1;
+
+/**
+ * Där en ny låtsasperson väntar utanför rummen innan någon drar in den.
+ * Person nummer `index` ställer sig under de som redan väntar, i en kö längs
+ * rummens högra kant som börjar om uppifrån när den når botten.
+ */
+export function parkingSpot(rooms: Room[], index = 0): Point {
   const b = bounds(rooms);
-  return { x: b.maxX + MARGIN_METERS / 2, y: (b.minY + b.maxY) / 2 };
+  const places = Math.max(1, Math.floor((b.maxY - b.minY) / PARKING_GAP_METERS));
+  return {
+    x: b.maxX + MARGIN_METERS / 2,
+    y: b.minY + PARKING_GAP_METERS / 2 + (index % places) * PARKING_GAP_METERS,
+  };
 }

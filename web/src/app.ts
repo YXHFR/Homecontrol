@@ -1,5 +1,13 @@
 import { LiveConnection, liveUrl, type ConnectionHandlers, type ConnectionStatus } from "./connection";
-import type { ClientMessage, Floor, HomeMessage, StateMessage } from "./protocol";
+import { parkingSpot } from "./geometry";
+import {
+  SPEEDS,
+  type ClientMessage,
+  type Floor,
+  type HomeMessage,
+  type Simulation,
+  type StateMessage,
+} from "./protocol";
 import { createKonvaView, type ViewFactory } from "./view";
 
 export interface Connection {
@@ -16,9 +24,6 @@ const defaultDependencies: AppDependencies = {
   createView: createKonvaView,
   connect: (handlers) => new LiveConnection(liveUrl(window.location), handlers),
 };
-
-/** Ljusnivån som livevyn ställer in om kärnan inte vet någon än: mörkt. */
-export const DEFAULT_LUX = 10;
 
 const STATUS_TEXT: Record<ConnectionStatus, string> = {
   connecting: "Ansluter till kärnan …",
@@ -42,66 +47,73 @@ export function startFloor(home: HomeMessage): Floor {
 }
 
 /**
- * Ritar upp livevyn: hemmet en våning åt gången, de virtuella lamporna och
- * en låtsasperson att dra omkring.
+ * Ritar upp livevyn: hemmet en våning åt gången, lamporna, och panelen för
+ * simuleringsläget med låtsaspersoner, dagsljus och tidsfart.
  */
 export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDependencies): void {
   const status = element("p", { className: "status" }, STATUS_TEXT.connecting);
   const stageContainer = element("div", { className: "stage" });
-  const lux = element("input", {
-    type: "range",
-    min: "0",
-    max: "300",
-    step: "5",
-    value: String(DEFAULT_LUX),
-  });
-  const luxValue = element("output", {}, `${DEFAULT_LUX} lux`);
-  const luxLabel = element("label", {}, "Ljusnivå i rummen ", lux, " ", luxValue);
-  const removePerson = element("button", { type: "button" }, "Låt personen gå hemifrån");
   const explanations = element("ul", { className: "explanations" });
   const floorPicker = element("nav", { className: "floors", hidden: true });
   floorPicker.setAttribute("aria-label", "Våningar");
 
-  root.replaceChildren(
-    element("h1", {}, "Homecontrol – livevy"),
-    status,
+  // Simuleringspanelen. Den visas bara om kärnan har en simulering.
+  const simulationToggle = element("input", { type: "checkbox" });
+  const addPerson = element("button", { type: "button" }, "Lägg till person");
+  const persons = element("ul", { className: "persons" });
+  const daylight = element("input", { type: "range", min: "0", max: "300", step: "5" });
+  const daylightValue = element("output", {}, "– lux");
+  const speedButtons = SPEEDS.map((speed) => {
+    const button = element("button", { type: "button" }, `${speed}×`);
+    button.dataset.speed = String(speed);
+    button.addEventListener("click", () => connection.send({ type: "set_speed", speed }));
+    return button;
+  });
+  const speedPicker = element("div", { className: "speeds" }, ...speedButtons);
+  speedPicker.setAttribute("role", "group");
+  speedPicker.setAttribute("aria-label", "Tidsfart");
+  const simulationControls = element(
+    "div",
+    { className: "simulation-controls", hidden: true },
     element(
       "p",
       { className: "help" },
-      "Dra den röda pricken in i ett rum. När det är mörkt tänds lampan. " +
-        "När rummet har varit tomt en stund släcks den igen.",
+      "Lägg till en låtsasperson och dra in den i ett rum med musen eller fingret. " +
+        "När det är mörkt tänds lampan, och när rummet har varit tomt en stund släcks den.",
     ),
+    element("div", { className: "controls" }, addPerson),
+    persons,
+    element("div", { className: "controls" }, element("label", {}, "Dagsljus ", daylight), " ", daylightValue),
+    element("div", { className: "controls" }, element("span", {}, "Tidsfart "), speedPicker),
+  );
+  const simulationPanel = element(
+    "section",
+    { className: "simulation", hidden: true },
+    element("h2", {}, "Simulering"),
+    element("label", {}, simulationToggle, " Simuleringsläge"),
+    simulationControls,
+  );
+  simulationPanel.setAttribute("aria-label", "Simulering");
+
+  root.replaceChildren(
+    element("h1", {}, "Homecontrol – livevy"),
+    status,
     floorPicker,
     stageContainer,
-    element("div", { className: "controls" }, luxLabel, removePerson),
+    simulationPanel,
     element("h2", {}, "Varför lamporna är som de är"),
     explanations,
   );
 
-  let home: HomeMessage | null = null;
   let shownFloor: Floor | null = null;
   let lastState: StateMessage | null = null;
   const view = deps.createView(stageContainer, {
-    onMovePerson: (position) => {
+    onMovePerson: (personId, position) => {
       if (shownFloor !== null) {
-        connection.send({ type: "move_person", floor_id: shownFloor.id, ...position });
+        connection.send({ type: "move_person", person_id: personId, floor_id: shownFloor.id, ...position });
       }
     },
   });
-
-  /** Rum som redan har fått reglagets värde för att kärnan inte visste något. */
-  const roomsGivenSliderLux = new Set<string>();
-
-  const sendLightLevel = (roomIds: string[]) => {
-    for (const roomId of roomIds) {
-      connection.send({ type: "set_light_level", room_id: roomId, lux: Number(lux.value) });
-    }
-  };
-
-  /** Samma ljusnivå i alla rum, som dagsljuset ute. */
-  const sendLightLevelEverywhere = () => {
-    sendLightLevel(home?.floors.flatMap((floor) => floor.rooms.map((room) => room.id)) ?? []);
-  };
 
   const showExplanations = () => {
     const lamps = shownFloor?.lamps ?? [];
@@ -116,16 +128,34 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     );
   };
 
-  /** Reglaget visar ljusnivån i första rummet på våningen som visas. */
-  const showLux = () => {
-    if (document.activeElement === lux) {
-      return; // användaren drar i reglaget just nu
+  const showPersons = (simulation: Simulation) => {
+    persons.replaceChildren(
+      ...simulation.persons.map((person) => {
+        const remove = element("button", { type: "button" }, "Ta bort");
+        remove.setAttribute("aria-label", `Ta bort person ${person.id}`);
+        remove.addEventListener("click", () =>
+          connection.send({ type: "remove_person", person_id: person.id }),
+        );
+        return element("li", {}, `Person ${person.id} `, remove);
+      }),
+    );
+  };
+
+  const showSimulation = (simulation: Simulation | null) => {
+    simulationPanel.hidden = simulation === null;
+    if (simulation === null) {
+      return;
     }
-    const shownRoom = shownFloor?.rooms[0]?.id;
-    const roomLux = lastState?.rooms.find((room) => room.id === shownRoom)?.lux;
-    if (roomLux !== undefined && roomLux !== null) {
-      lux.value = String(roomLux);
-      luxValue.textContent = `${roomLux} lux`;
+    simulationToggle.checked = simulation.enabled;
+    simulationControls.hidden = !simulation.enabled;
+    showPersons(simulation);
+    for (const button of speedButtons) {
+      button.setAttribute("aria-pressed", String(button.dataset.speed === String(simulation.speed)));
+    }
+    // Reglaget flyttas inte medan användaren drar i det.
+    if (simulation.daylight !== null && document.activeElement !== daylight) {
+      daylight.value = String(simulation.daylight);
+      daylightValue.textContent = `${simulation.daylight} lux`;
     }
   };
 
@@ -135,14 +165,10 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
       button.setAttribute("aria-pressed", String(button.dataset.floor === next.id));
     }
     view.setFloor(next);
-    showLux();
     showExplanations();
   };
 
   const showHome = (next: HomeMessage) => {
-    home = next;
-    // Ny anslutning: kärnan kan ha startat om och glömt ljusnivåerna.
-    roomsGivenSliderLux.clear();
     floorPicker.replaceChildren(
       ...next.floors.map((floor) => {
         const button = element("button", { type: "button" }, floor.name);
@@ -160,13 +186,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   const showState = (state: StateMessage) => {
     lastState = state;
     view.setState(state);
-    // Kärnan vet inte hur ljust det är i de här rummen; ge dem reglagets värde.
-    const unknown = state.rooms
-      .filter((room) => room.lux === null && !roomsGivenSliderLux.has(room.id))
-      .map((room) => room.id);
-    unknown.forEach((roomId) => roomsGivenSliderLux.add(roomId));
-    sendLightLevel(unknown);
-    showLux();
+    showSimulation(state.simulation);
     showExplanations();
   };
 
@@ -184,11 +204,22 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     },
   });
 
-  lux.addEventListener("input", () => {
-    luxValue.textContent = `${lux.value} lux`;
-    sendLightLevelEverywhere();
+  simulationToggle.addEventListener("change", () =>
+    connection.send({ type: "set_simulation", enabled: simulationToggle.checked }),
+  );
+  addPerson.addEventListener("click", () => {
+    if (shownFloor === null) {
+      return;
+    }
+    // Nya personer väntar i kö bredvid rummen tills någon drar in dem.
+    const waiting = lastState?.simulation?.persons.length ?? 0;
+    const spot = parkingSpot(shownFloor.rooms, waiting);
+    connection.send({ type: "add_person", floor_id: shownFloor.id, ...spot });
   });
-  removePerson.addEventListener("click", () => connection.send({ type: "remove_person" }));
+  daylight.addEventListener("input", () => {
+    daylightValue.textContent = `${daylight.value} lux`;
+    connection.send({ type: "set_daylight", lux: Number(daylight.value) });
+  });
 
   connection.start();
   root.dataset.ready = "true";
