@@ -54,6 +54,9 @@ export interface Target extends Point {
 export const SPEEDS = [1, 10, 60] as const;
 export type Speed = (typeof SPEEDS)[number];
 
+/** Högst så här många låtsaspersoner (samma gräns som MAX_PERSONS i kärnans simulation.py). */
+export const MAX_PERSONS = 10;
+
 /** En låtsasperson i simuleringen. Id:t behövs för att flytta eller ta bort den. */
 export interface Person extends Target {
   id: string;

@@ -115,6 +115,8 @@ def test_invalid_messages_are_ignored() -> None:
             '{"type": "add_person", "floor_id": "plan", "x": "NaN", "y": 0}',
             '{"type": "add_person", "x": 1, "y": 1}',
             '{"type": "set_speed", "speed": 1000}',
+            '{"type": "set_speed", "speed": true}',
+            '{"type": "add_person", "floor_id": "vinden", "x": 1, "y": 1}',
             '{"type": "set_daylight", "lux": -1}',
             '{"type": "set_simulation", "enabled": "kanske"}',
             "inte json",

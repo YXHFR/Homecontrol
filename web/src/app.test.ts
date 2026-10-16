@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { mountApp, startFloor, type AppDependencies, type Connection } from "./app";
 import type { ConnectionHandlers } from "./connection";
-import type { ClientMessage, Floor, HomeMessage, Room, Simulation, StateMessage } from "./protocol";
+import {
+  MAX_PERSONS,
+  type ClientMessage,
+  type Floor,
+  type HomeMessage,
+  type Room,
+  type Simulation,
+  type StateMessage,
+} from "./protocol";
 import type { LiveViewCallbacks } from "./view";
 
 function rectangle(id: string, name: string): Room {
@@ -201,6 +209,22 @@ describe("mountApp", () => {
       { type: "add_person", floor_id: "plan", x: 6, y: 1.5 },
       { type: "remove_person", person_id: "1" },
     ]);
+  });
+
+  it("tar inte emot fler personer än kärnan tillåter", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    const persons = Array.from({ length: MAX_PERSONS }, (_, i) => ({
+      id: String(i + 1),
+      floor_id: "plan",
+      x: 6,
+      y: 1,
+    }));
+
+    handlers.onMessage(state(10, false, { ...simulationOn, persons }));
+
+    expect(find<HTMLButtonElement>(root, ".simulation .controls button").disabled).toBe(true);
+    expect(root.querySelector(".simulation")?.textContent).toContain("Högst 10 personer");
   });
 
   it("visar och skickar dagsljuset", () => {

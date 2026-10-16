@@ -17,6 +17,15 @@ class Clock(Protocol):
         ...
 
 
+class SpeedControl(Protocol):
+    """En klocka vars tidsfart simuleringen kan ändra."""
+
+    @property
+    def speed(self) -> float: ...
+
+    def set_speed(self, speed: float) -> None: ...
+
+
 class PacedClock(Clock, Protocol):
     """En klocka som går av sig själv, i en viss takt jämfört med riktig tid."""
 
@@ -71,10 +80,18 @@ class SystemClock:
 
 
 class ManualClock:
-    """Tid som bara går framåt när någon säger till. Används i scenariotester."""
+    """Tid som bara går framåt när någon säger till. Används i scenariotester.
+
+    Tidsfarten går att ställa så att simuleringsläget kan köras i scenarier,
+    men den påverkar inget: scenariot bestämmer själv när tiden går.
+    """
 
     def __init__(self, start: float = 0.0) -> None:
         self._now = start
+        self.speed = 1.0
+
+    def set_speed(self, speed: float) -> None:
+        self.speed = speed
 
     def now(self) -> float:
         return self._now

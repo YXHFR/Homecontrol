@@ -5,12 +5,13 @@ observationer genom samma ingång som riktiga källor. Kärnan kan alltså inte
 se skillnad på en låtsasperson och en person som radarn ser.
 """
 
+import logging
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from itertools import count
 from typing import Literal, get_args
 
-from homecontrol.clock import SystemClock
+from homecontrol.clock import SpeedControl
 from homecontrol.connectors import (
     LampCommand,
     LightLevelObserved,
@@ -19,6 +20,8 @@ from homecontrol.connectors import (
     TargetsObserved,
 )
 from homecontrol.home import Point, Target
+
+logger = logging.getLogger(__name__)
 
 Listener = Callable[[], None]
 
@@ -141,23 +144,33 @@ class Simulation:
     När läget är avslaget tystnar låtsaskällan, precis som en radar som stängs
     av, och tiden går i vanlig takt. Kommandon till personerna och dagsljuset
     ignoreras då.
+
+    Tidsfarten gäller hela kärnan, eftersom kärnan har en enda klocka. Det går
+    bra så länge alla lampor är virtuella; med riktiga lampor skulle de släckas
+    60 gånger för tidigt.
+
+    `floor_ids` är hemmets våningar. Personer på andra våningar avvisas. Utan
+    `daylight` lämnas ljusnivån i rummen okänd tills någon ställer den.
     """
 
     def __init__(
         self,
         source: SimulatedSource,
         sink: ObservationSink,
-        clock: SystemClock,
+        clock: SpeedControl,
         *,
+        floor_ids: Iterable[str],
         enabled: bool = True,
-        daylight: float = DEFAULT_DAYLIGHT_LUX,
+        daylight: float | None = DEFAULT_DAYLIGHT_LUX,
     ) -> None:
         self._source = source
         self._sink = sink
         self._clock = clock
+        self._floor_ids = frozenset(floor_ids)
         self._enabled = False
         self._listeners: list[Listener] = []
-        source.set_daylight(daylight)  # minns värdet tills källan startar
+        if daylight is not None:
+            source.set_daylight(daylight)  # minns värdet tills källan startar
         self.set_enabled(enabled)
 
     @property
@@ -183,16 +196,20 @@ class Simulation:
             self._clock.set_speed(1)
         self._notify()
 
-    def add_person(self, floor_id: str, position: Point) -> None:
-        if self._enabled:
-            try:
-                self._source.add_person(floor_id, position)
-            except TooManyPersons:
-                return
-            self._notify()
+    def add_person(self, floor_id: str, position: Point) -> str | None:
+        """Lägger till en person och returnerar dess id, eller None om det inte gick."""
+        if not self._enabled or not self._known_floor(floor_id):
+            return None
+        try:
+            person_id = self._source.add_person(floor_id, position)
+        except TooManyPersons:
+            logger.info("Simuleringen har redan %d personer", MAX_PERSONS)
+            return None
+        self._notify()
+        return person_id
 
     def move_person(self, person_id: str, floor_id: str, position: Point) -> None:
-        if self._enabled:
+        if self._enabled and self._known_floor(floor_id):
             self._source.move_person(person_id, floor_id, position)
             self._notify()
 
@@ -217,6 +234,12 @@ class Simulation:
         """Anropar `listener` efter varje ändring. Returnerar en funktion som avslutar."""
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
+
+    def _known_floor(self, floor_id: str) -> bool:
+        if floor_id in self._floor_ids:
+            return True
+        logger.warning("Person på okänd våning ignoreras")
+        return False
 
     def _notify(self) -> None:
         for listener in list(self._listeners):

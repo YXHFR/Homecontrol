@@ -13,7 +13,10 @@ def make(enabled: bool = True) -> tuple[Simulation, list[Observation], SystemClo
     seen: list[Observation] = []
     clock = SystemClock()
     source = SimulatedSource("sim", room_ids=["kök", "hall"])
-    return Simulation(source, seen.append, clock, enabled=enabled, daylight=20), seen, clock
+    simulation = Simulation(
+        source, seen.append, clock, floor_ids=[FLOOR], enabled=enabled, daylight=20
+    )
+    return simulation, seen, clock
 
 
 def test_starts_by_reporting_no_one_and_the_daylight_in_every_room() -> None:
@@ -35,8 +38,43 @@ def test_persons_are_added_moved_and_removed_through_the_sink() -> None:
     simulation.remove_person("2")
     simulation.move_person("2", FLOOR, Point(4, 4))  # borta, ignoreras
 
-    assert seen[-1] == TargetsObserved("sim", (at(3, 3),))
+    assert seen[3:] == [
+        TargetsObserved("sim", (at(1, 1),)),
+        TargetsObserved("sim", (at(1, 1), at(2, 2))),
+        TargetsObserved("sim", (at(3, 3), at(2, 2))),
+        TargetsObserved("sim", (at(3, 3),)),
+    ]
     assert simulation.view().persons == {"1": at(3, 3)}
+
+
+def test_persons_on_unknown_floors_are_refused() -> None:
+    simulation, seen, _ = make()
+    simulation.add_person(FLOOR, Point(1, 1))
+    before = list(seen)
+
+    assert simulation.add_person("vinden", Point(1, 1)) is None
+    simulation.move_person("1", "vinden", Point(2, 2))
+
+    assert seen == before
+    assert simulation.view().persons == {"1": at(1, 1)}
+
+
+def test_too_many_persons_are_refused_without_error() -> None:
+    simulation, _, _ = make()
+    for _ in range(MAX_PERSONS):
+        assert simulation.add_person(FLOOR, Point(1, 1)) is not None
+
+    assert simulation.add_person(FLOOR, Point(1, 1)) is None
+    assert len(simulation.view().persons) == MAX_PERSONS
+
+
+def test_switching_on_twice_starts_the_source_once() -> None:
+    simulation, seen, _ = make()
+    before = list(seen)
+
+    simulation.set_enabled(True)
+
+    assert seen == before
 
 
 def test_switching_off_forgets_persons_and_resets_speed() -> None:

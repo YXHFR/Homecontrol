@@ -208,6 +208,21 @@ def test_daylight_slider_decides_darkness_in_every_room() -> None:
     )
 
 
+def test_switching_off_the_simulation_empties_the_rooms() -> None:
+    """Simuleringsläget slås av: låtsaspersonen är borta och lampan släcks efter 3 minuter."""
+    (
+        Scenario()
+        .daylight(10)
+        .person_enters()
+        .expect_lamp_on()
+        .simulation_off()
+        .wait(minutes=2, seconds=59)
+        .expect_lamp_on()
+        .wait(seconds=1)
+        .expect_lamp_off()
+    )
+
+
 # fmt: on
 
 

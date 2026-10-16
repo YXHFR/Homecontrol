@@ -18,7 +18,8 @@ Livevyn skickar kommandon till simuleringen:
 * ``{"type": "set_speed", "speed": 60}``
 
 Personerna och dagsljuset går in i kärnan genom låtsaskällan, precis som en
-riktig källa. Utan simulering ignoreras kommandona, men läget strömmas ändå.
+riktig källa. Utan simulering, eller när simuleringsläget är avslaget,
+ignoreras kommandona, men läget strömmas ändå.
 """
 
 import asyncio
@@ -32,7 +33,7 @@ from urllib.parse import urlsplit
 import anyio
 import anyio.abc
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
 from homecontrol.clock import PacedClock
 from homecontrol.controller import Controller, Snapshot
@@ -85,6 +86,14 @@ class SetDaylight(BaseModel):
 class SetSpeed(BaseModel):
     type: Literal["set_speed"]
     speed: Speed
+
+    @field_validator("speed", mode="before")
+    @classmethod
+    def _not_bool(cls, value: object) -> object:
+        # Annars tolkas true som tidsfarten 1.
+        if isinstance(value, bool):
+            raise ValueError("Tidsfarten är ett tal")
+        return value
 
 
 ClientMessage = SetSimulation | AddPerson | MovePerson | RemovePerson | SetDaylight | SetSpeed
@@ -154,8 +163,13 @@ def simulation_message(simulation: SimulationView) -> dict[str, Any]:
         "speed": simulation.speed,
         "daylight": simulation.daylight,
         "persons": [
-            {"id": person_id, "floor_id": t.floor_id, "x": t.position.x, "y": t.position.y}
-            for person_id, t in simulation.persons.items()
+            {
+                "id": person_id,
+                "floor_id": person.floor_id,
+                "x": person.position.x,
+                "y": person.position.y,
+            }
+            for person_id, person in simulation.persons.items()
         ],
     }
 

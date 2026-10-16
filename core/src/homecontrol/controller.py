@@ -56,8 +56,9 @@ class Controller:
         self._clock = clock
         self._outputs = tuple(outputs)
         self._targets: dict[str, tuple[Target, ...]] = {}
-        # Ljusnivån per rum och källan som mätte den, så att den glöms om källan tappas.
-        self._lux: dict[str, tuple[str, float]] = {}
+        # Ljusnivån per rum och källa. Det senast mätta värdet gäller, och en
+        # källa som tappas tar sina värden med sig.
+        self._lux: dict[str, dict[str, float]] = {}
         self._presence = presence.initial_presence(home, clock.now())
         # Lamporna antas vara släckta vid start.
         self._lamps_on = {lamp.id: False for lamp in home.lamps}
@@ -84,11 +85,8 @@ class Controller:
                 self._assess_presence()
             case SourceLost(source_id=source_id):
                 self._targets.pop(source_id, None)
-                self._lux = {
-                    room_id: measured
-                    for room_id, measured in self._lux.items()
-                    if measured[0] != source_id
-                }
+                for by_source in self._lux.values():
+                    by_source.pop(source_id, None)
                 self._assess_presence()
             case LightLevelObserved(source_id=source_id, room_id=room_id, lux=lux):
                 if room_id not in self._room_ids:
@@ -97,7 +95,9 @@ class Controller:
                 if not math.isfinite(lux) or lux < 0:
                     logger.warning("Ogiltig ljusnivå %r ignoreras", lux)
                     return
-                self._lux[room_id] = (source_id, lux)
+                by_source = self._lux.setdefault(room_id, {})
+                by_source.pop(source_id, None)  # sist i ordningen är senast mätt
+                by_source[source_id] = lux
         self._evaluate()
         self._notify()
 
@@ -131,8 +131,8 @@ class Controller:
         )
 
     def _room_lux(self, room_id: str) -> float | None:
-        measured = self._lux.get(room_id)
-        return None if measured is None else measured[1]
+        by_source = self._lux.get(room_id)
+        return next(reversed(by_source.values()), None) if by_source else None
 
     def _all_targets(self) -> tuple[Target, ...]:
         return tuple(target for targets in self._targets.values() for target in targets)

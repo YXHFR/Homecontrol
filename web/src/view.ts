@@ -28,6 +28,8 @@ const PERSON_RADIUS = 12;
 const PERSON_HIT_WIDTH = 24;
 const TARGET_RADIUS = 5;
 const LAMP_RADIUS = 14;
+/** Hur bred lampans namnetikett får vara, i pixlar. Den centreras under lampan. */
+const LAMP_LABEL_WIDTH = 120;
 /** Skenet runt en tänd lampa, i meter, och hur genomskinligt det är. */
 const GLOW_RADIUS_METERS = 0.9;
 const GLOW_OPACITY = 0.35;
@@ -147,9 +149,9 @@ function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
         dash: lamp.virtual ? [4, 3] : undefined,
       }),
       new Konva.Text({
-        x: center.x - 60,
+        x: center.x - LAMP_LABEL_WIDTH / 2,
         y: center.y + LAMP_RADIUS + 6,
-        width: 120,
+        width: LAMP_LABEL_WIDTH,
         align: "center",
         text: `${lamp.name} (${lamp.virtual ? "virtuell, " : ""}${on ? "tänd" : "släckt"})`,
         fontSize: 13,
@@ -243,6 +245,8 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
     const ids = new Set(persons.map((person) => person.id));
     for (const [id, marker] of markers) {
       if (!ids.has(id)) {
+        // Personen kan försvinna mitt i en dragning, till exempel från en annan flik.
+        marker.group.stopDrag();
         marker.group.destroy();
         markers.delete(id);
       }

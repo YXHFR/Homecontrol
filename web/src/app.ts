@@ -1,13 +1,8 @@
 import { LiveConnection, liveUrl, type ConnectionHandlers, type ConnectionStatus } from "./connection";
+import { element } from "./dom";
 import { parkingSpot } from "./geometry";
-import {
-  SPEEDS,
-  type ClientMessage,
-  type Floor,
-  type HomeMessage,
-  type Simulation,
-  type StateMessage,
-} from "./protocol";
+import type { ClientMessage, Floor, HomeMessage, StateMessage } from "./protocol";
+import { createSimulationPanel } from "./simulationPanel";
 import { createKonvaView, type ViewFactory } from "./view";
 
 export interface Connection {
@@ -31,16 +26,6 @@ const STATUS_TEXT: Record<ConnectionStatus, string> = {
   closed: "Tappade kontakten med kärnan, försöker igen …",
 };
 
-function element<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = Object.assign(document.createElement(tag), props);
-  node.append(...children);
-  return node;
-}
-
 /** Våningen som visas först: entréplanet om det finns, annars den första. */
 export function startFloor(home: HomeMessage): Floor {
   return home.floors.find((floor) => floor.level === 0) ?? home.floors[0];
@@ -57,50 +42,24 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   const floorPicker = element("nav", { className: "floors", hidden: true });
   floorPicker.setAttribute("aria-label", "Våningar");
 
-  // Simuleringspanelen. Den visas bara om kärnan har en simulering.
-  const simulationToggle = element("input", { type: "checkbox" });
-  const addPerson = element("button", { type: "button" }, "Lägg till person");
-  const persons = element("ul", { className: "persons" });
-  const daylight = element("input", { type: "range", min: "0", max: "300", step: "5" });
-  const daylightValue = element("output", {}, "– lux");
-  const speedButtons = SPEEDS.map((speed) => {
-    const button = element("button", { type: "button" }, `${speed}×`);
-    button.dataset.speed = String(speed);
-    button.addEventListener("click", () => connection.send({ type: "set_speed", speed }));
-    return button;
-  });
-  const speedPicker = element("div", { className: "speeds" }, ...speedButtons);
-  speedPicker.setAttribute("role", "group");
-  speedPicker.setAttribute("aria-label", "Tidsfart");
-  const simulationControls = element(
-    "div",
-    { className: "simulation-controls", hidden: true },
-    element(
-      "p",
-      { className: "help" },
-      "Lägg till en låtsasperson och dra in den i ett rum med musen eller fingret. " +
-        "När det är mörkt tänds lampan, och när rummet har varit tomt en stund släcks den.",
-    ),
-    element("div", { className: "controls" }, addPerson),
-    persons,
-    element("div", { className: "controls" }, element("label", {}, "Dagsljus ", daylight), " ", daylightValue),
-    element("div", { className: "controls" }, element("span", {}, "Tidsfart "), speedPicker),
+  // Nya personer ställer sig i kö bredvid rummen, en ny plats för varje klick.
+  let personsAdded = 0;
+  const simulation = createSimulationPanel(
+    (message) => connection.send(message),
+    () => {
+      if (shownFloor !== null) {
+        const spot = parkingSpot(shownFloor.rooms, personsAdded++);
+        connection.send({ type: "add_person", floor_id: shownFloor.id, ...spot });
+      }
+    },
   );
-  const simulationPanel = element(
-    "section",
-    { className: "simulation", hidden: true },
-    element("h2", {}, "Simulering"),
-    element("label", {}, simulationToggle, " Simuleringsläge"),
-    simulationControls,
-  );
-  simulationPanel.setAttribute("aria-label", "Simulering");
 
   root.replaceChildren(
     element("h1", {}, "Homecontrol – livevy"),
     status,
     floorPicker,
     stageContainer,
-    simulationPanel,
+    simulation.element,
     element("h2", {}, "Varför lamporna är som de är"),
     explanations,
   );
@@ -126,37 +85,6 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
           : [element("li", {}, `${lamp.name}: ${lampState.explanation}`)];
       }),
     );
-  };
-
-  const showPersons = (simulation: Simulation) => {
-    persons.replaceChildren(
-      ...simulation.persons.map((person) => {
-        const remove = element("button", { type: "button" }, "Ta bort");
-        remove.setAttribute("aria-label", `Ta bort person ${person.id}`);
-        remove.addEventListener("click", () =>
-          connection.send({ type: "remove_person", person_id: person.id }),
-        );
-        return element("li", {}, `Person ${person.id} `, remove);
-      }),
-    );
-  };
-
-  const showSimulation = (simulation: Simulation | null) => {
-    simulationPanel.hidden = simulation === null;
-    if (simulation === null) {
-      return;
-    }
-    simulationToggle.checked = simulation.enabled;
-    simulationControls.hidden = !simulation.enabled;
-    showPersons(simulation);
-    for (const button of speedButtons) {
-      button.setAttribute("aria-pressed", String(button.dataset.speed === String(simulation.speed)));
-    }
-    // Reglaget flyttas inte medan användaren drar i det.
-    if (simulation.daylight !== null && document.activeElement !== daylight) {
-      daylight.value = String(simulation.daylight);
-      daylightValue.textContent = `${simulation.daylight} lux`;
-    }
   };
 
   const showFloor = (next: Floor) => {
@@ -186,7 +114,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   const showState = (state: StateMessage) => {
     lastState = state;
     view.setState(state);
-    showSimulation(state.simulation);
+    simulation.show(state.simulation);
     showExplanations();
   };
 
@@ -202,23 +130,6 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
         showState(message);
       }
     },
-  });
-
-  simulationToggle.addEventListener("change", () =>
-    connection.send({ type: "set_simulation", enabled: simulationToggle.checked }),
-  );
-  addPerson.addEventListener("click", () => {
-    if (shownFloor === null) {
-      return;
-    }
-    // Nya personer väntar i kö bredvid rummen tills någon drar in dem.
-    const waiting = lastState?.simulation?.persons.length ?? 0;
-    const spot = parkingSpot(shownFloor.rooms, waiting);
-    connection.send({ type: "add_person", floor_id: shownFloor.id, ...spot });
-  });
-  daylight.addEventListener("input", () => {
-    daylightValue.textContent = `${daylight.value} lux`;
-    connection.send({ type: "set_daylight", lux: Number(daylight.value) });
   });
 
   connection.start();
