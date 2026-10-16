@@ -6,18 +6,19 @@ Nya API-vägar läggs under /api så att de aldrig krockar med webbgränssnittet
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Set
+from collections.abc import AsyncIterator, Callable, Mapping, Set
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from homecontrol import __version__
+from homecontrol.calibration_api import calibration_saver, create_calibration_router
 from homecontrol.cards import create_cards_router
 from homecontrol.clock import SystemClock
 from homecontrol.connectors import defer_in_loop
 from homecontrol.controller import Controller
-from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
+from homecontrol.editor import HomeChanges, HomeStore, MemoryStore, create_editor_router
 from homecontrol.esphome import (
     AioesphomeNetwork,
     EsphomeSource,
@@ -64,8 +65,28 @@ def create_app(
     home = home if home is not None else example_home()
     zigbee = None if mqtt is None else ZigbeeOutput(home, defer=defer_in_loop)
     real_lamps = zigbee_lamps if zigbee is not None else _nothing_real
-    lamps = SimulatedLampOutput(real_lamps)
-    controller = Controller(home, clock, [lamps] if zigbee is None else [lamps, zigbee])
+
+    def lamp_light_changed() -> None:
+        # Kärnan är mitt i ett beslut, så sensorerna mäter strax efteråt.
+        # Innan servern har startat finns ingen loop. Lamporna har inte tänts
+        # än, och sensorerna mäter nästa gång en lampa ändras.
+        with contextlib.suppress(RuntimeError):
+            defer_in_loop(measure_lamp_light)
+
+    def measure_lamp_light() -> None:
+        source.set_lamp_light(lamps.light_by_room(source.home))
+
+    lamps = SimulatedLampOutput(real_lamps, on_change=lamp_light_changed)
+
+    def save_calibration(results: Mapping[str, float]) -> None:
+        saver(results)
+
+    controller = Controller(
+        home,
+        clock,
+        [lamps] if zigbee is None else [lamps, zigbee],
+        on_calibrated=save_calibration,
+    )
     lamps.report_new_lamps(home, controller.observe)
     cards = (
         None
@@ -156,14 +177,14 @@ def create_app(
     )
     app.include_router(create_cards_router(cards, allowed_hosts))
     app.include_router(create_lamp_devices_router(zigbee, allowed_hosts))
-    app.include_router(
-        create_editor_router(
-            controller,
-            home_store if home_store is not None else MemoryStore(),
-            allowed_hosts,
-            on_home_replaced=use_home,
-        )
+    changes = HomeChanges(
+        controller,
+        home_store if home_store is not None else MemoryStore(),
+        on_home_replaced=use_home,
     )
+    saver: Callable[[Mapping[str, float]], None] = calibration_saver(changes)
+    app.include_router(create_editor_router(changes, allowed_hosts))
+    app.include_router(create_calibration_router(controller, allowed_hosts))
 
     # Webbgränssnittet monteras sist så att API-vägarna ovan har företräde.
     if web_dir is not None:

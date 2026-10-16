@@ -13,6 +13,10 @@ mer eller mindre, och sammanvägningen ska klara det.
 Riktiga rumskort simuleras inte. Låtsaspersonerna syns bara för de virtuella
 radarerna, och dagsljuset sätts bara i rum utan riktiga kort, så att
 simuleringen aldrig blandas med det de riktiga korten mäter.
+
+De virtuella lamporna kan lysa upp de virtuella ljussensorerna (se
+`SimulatedLampOutput.light_by_room`), så att lampkalibreringen går att prova.
+Ljuset avtar med avståndet från lampan till rummets rumskort.
 """
 
 import logging
@@ -61,6 +65,12 @@ MAX_HISTORY = 1000
 DEFAULT_DAYLIGHT_LUX = 10.0
 """Dagsljuset när simuleringen startar: mörkt, så att lamporna tänds."""
 
+LAMP_LUX_AT_ONE_METER = 80.0
+"""Så mycket en virtuell lampa på full styrka lyser upp en sensor en meter bort, i lux.
+
+Ungefär som en vanlig lampa på 800 lumen. Ljuset avtar med kvadraten på avståndet.
+"""
+
 
 class TooManyPersons(Exception):
     pass
@@ -91,6 +101,8 @@ class SimulatedSource:
         """Om varje nods Wi-Fi-mätning känner rörelse."""
         self._next_id = count(1)
         self._daylight: float | None = None
+        self._lamp_light: dict[str, float] = {}
+        """Ljuset från de virtuella lamporna i varje rum, utöver dagsljuset."""
 
     @property
     def source_id(self) -> str:
@@ -180,7 +192,18 @@ class SimulatedSource:
         """Samma ljusnivå i alla rum, som när solen går upp eller ner."""
         self._daylight = lux
         for room in self._simulated_rooms(self._home):
-            self.set_light_level(room.id, lux)
+            self._measure(room.id)
+
+    def set_lamp_light(self, light: Mapping[str, float]) -> None:
+        """Ljuset från de virtuella lamporna per rum, som sensorerna mäter ihop med dagsljuset.
+
+        Varje simulerad sensor mäter på nytt, som när en riktig sensor mäter
+        efter att en lampa har tänts eller släckts.
+        """
+        self._lamp_light = dict(light)
+        if self._daylight is not None:
+            for room in self._simulated_rooms(self._home):
+                self._measure(room.id)
 
     def use_home(self, home: Home) -> None:
         """Byter hem, till exempel när det har ritats om. Nya rum får dagsljuset."""
@@ -191,7 +214,7 @@ class SimulatedSource:
         if self._daylight is not None:
             for room in self._simulated_rooms(home):
                 if room.id not in before:
-                    self.set_light_level(room.id, self._daylight)
+                    self._measure(room.id)
         self._emit_targets()
 
     def _simulated_rooms(self, home: Home) -> list[Room]:
@@ -200,9 +223,14 @@ class SimulatedSource:
         return [room for room in home.rooms if not any(node.id in real for node in room.nodes)]
 
     def set_light_level(self, room_id: str, lux: float) -> None:
-        """Ljusnivån i ett enda rum."""
+        """Ljusnivån i ett enda rum, som sensorn mäter den."""
         if self._sink is not None:
             self._sink(LightLevelObserved(self._source_id, room_id, lux))
+
+    def _measure(self, room_id: str) -> None:
+        """Den simulerade sensorn i rummet mäter dagsljuset och lampornas ljus."""
+        if self._daylight is not None:
+            self.set_light_level(room_id, self._daylight + self._lamp_light.get(room_id, 0.0))
 
     def _emit_targets(self) -> None:
         """Varje radar skickar personerna den ser, i sina egna koordinater.
@@ -247,15 +275,22 @@ def _in_view(target: Point) -> bool:
 class SimulatedLampOutput:
     """En lamputgång med virtuella lampor, som bara minns vad de senast fick för kommando.
 
-    Den virtuella lampan lyser inte upp någon ljussensor; dagsljuset i
-    simuleringen är det enda ljuset som mäts.
-
     `real_lamps` ger lamporna i ett hem som en riktig lamputgång styr. De är
     inte virtuella, så den här utgången varken rapporterar eller styr dem.
+
+    `on_change` anropas när en virtuell lampa har fått ett kommando, till
+    exempel för att låta lampornas ljus nå de simulerade sensorerna (se
+    `light_by_room`). Den anropas mitt i kärnans beslut och får därför inte
+    lämna observationer direkt, utan ska skjuta upp det (se `connectors.Defer`).
     """
 
-    def __init__(self, real_lamps: Callable[[Home], Set[str]] = lambda _: frozenset()) -> None:
+    def __init__(
+        self,
+        real_lamps: Callable[[Home], Set[str]] = lambda _: frozenset(),
+        on_change: Callable[[], None] | None = None,
+    ) -> None:
         self._real_lamps = real_lamps
+        self._on_change = on_change
         self._real: Set[str] = frozenset()
         self.states: dict[str, bool] = {}
         self.brightness: dict[str, int] = {}
@@ -269,6 +304,30 @@ class SimulatedLampOutput:
         self.states[command.lamp_id] = command.on
         self.brightness[command.lamp_id] = command.brightness
         self.history.append(command)
+        if self._on_change is not None:
+            self._on_change()
+
+    def light_by_room(self, home: Home) -> dict[str, float]:
+        """Hur mycket de tända virtuella lamporna lyser upp varje rums ljussensor, i lux.
+
+        Ljuset mäts vid rummets första rumskort med ljussensor, eller mitt i
+        rummet om det inte har något. Lampor närmare än en meter räknas som en meter bort.
+        """
+        light = {}
+        for room in home.rooms:
+            sensor = next(
+                (node.position for node in room.nodes if Capability.LUX in node.capabilities),
+                room.center,
+            )
+            total = 0.0
+            for lamp in room.lamps:
+                if self.states.get(lamp.id) is not True:
+                    continue
+                distance = max(1.0, math.dist(lamp.position, sensor))
+                share = self.brightness.get(lamp.id, 100) / 100
+                total += LAMP_LUX_AT_ONE_METER * share / distance**2
+            light[room.id] = total
+        return light
 
     def report_new_lamps(self, home: Home, sink: ObservationSink) -> None:
         """Berättar att hemmets virtuella lampor som inte har styrts än är släckta.

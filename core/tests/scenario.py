@@ -24,10 +24,14 @@ Varje steg returnerar scenariot, så stegen kan kedjas. Ett misslyckat
 Ramverket hör till testerna och följer inte med i den körbara kärnan.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Self
 
+import pytest
+
+from homecontrol.calibration import Phase, with_contributions
 from homecontrol.clock import ManualClock
+from homecontrol.connectors import LampStateReported
 from homecontrol.controller import Controller, LampView
 from homecontrol.fusion import HOLD_SECONDS, Occupancy
 from homecontrol.home import Capability, Home, Point
@@ -42,12 +46,27 @@ RADAR_INTERVAL = 0.1
 
 
 class Scenario:
-    def __init__(self, home: Home | None = None, *, lamps_report: bool = True) -> None:
-        """Utan `lamps_report` säger de virtuella lamporna aldrig hur de är, och läget är okänt."""
+    def __init__(
+        self, home: Home | None = None, *, lamps_report: bool = True, lamp_light: bool = False
+    ) -> None:
+        """Utan `lamps_report` säger de virtuella lamporna aldrig hur de är, och läget är okänt.
+
+        Med `lamp_light` lyser de virtuella lamporna upp de simulerade
+        ljussensorerna, som i livevyn (se `SimulatedLampOutput.light_by_room`).
+        En lampkalibrering sparar då lampornas bidrag i hemmet.
+        """
         self.home = home if home is not None else one_room_home()
         self.clock = ManualClock()
-        self.lamps = SimulatedLampOutput()
-        self.controller = Controller(self.home, self.clock, [self.lamps], wall_clock=self.clock.now)
+        # Det som kärnan skjuter upp tills den är klar med ett beslut (se connectors.Defer).
+        self._deferred: list[Callable[[], None]] = []
+        self.lamps = SimulatedLampOutput(on_change=self._lamp_changed if lamp_light else None)
+        self.controller = Controller(
+            self.home,
+            self.clock,
+            [self.lamps],
+            wall_clock=self.clock.now,
+            on_calibrated=self._save_calibration,
+        )
         if lamps_report:
             self.lamps.report_new_lamps(self.home, self.controller.observe)
         # Samma simuleringsläge som i livevyn, men med en klocka som scenariot styr.
@@ -71,6 +90,75 @@ class Scenario:
     def daylight(self, lux: float) -> Self:
         """Samma ljusnivå i alla rum, som dagsljusreglaget i livevyn."""
         self.simulation.set_daylight(lux)
+        self._run_deferred()
+        return self
+
+    def start_calibration(self, room: str | None = None) -> Self:
+        """Någon startar lampkalibreringen i rummet från livevyn."""
+        problem = self.controller.start_calibration(self._room_id(room))
+        if problem is not None:
+            raise AssertionError(f"Lampkalibreringen startade inte: {problem}")
+        self._run_deferred()
+        return self
+
+    def cancel_calibration(self) -> Self:
+        self.controller.cancel_calibration()
+        self._run_deferred()
+        return self
+
+    def lamp_stops_responding(self, lamp: str | None = None) -> Self:
+        self.controller.observe(LampStateReported(self._lamp_view(lamp).lamp_id, on=None))
+        return self
+
+    def lamp_changed_with_remote(self, on: bool, lamp: str | None = None) -> Self:
+        """Någon tänder eller släcker lampan med fjärrkontrollen."""
+        lamp_id = self._lamp_view(lamp).lamp_id
+        self.lamps.states[lamp_id] = on
+        self._lamp_changed()
+        self.controller.observe(LampStateReported(lamp_id, on=on, external=True))
+        self._run_deferred()
+        return self
+
+    def move_lamp(self, lamp: str, *, x: float, y: float) -> Self:
+        """Lampan flyttas i kartredigeraren."""
+        floors = tuple(
+            floor.model_copy(
+                update={
+                    "rooms": tuple(
+                        room.model_copy(
+                            update={
+                                "lamps": tuple(
+                                    item.model_copy(update={"position": Point(x, y)})
+                                    if item.id == lamp
+                                    else item
+                                    for item in room.lamps
+                                )
+                            }
+                        )
+                        for room in floor.rooms
+                    )
+                }
+            )
+            for floor in self.home.floors
+        )
+        self._replace_home(self.home.model_copy(update={"floors": floors}))
+        return self
+
+    def remove_lamps(self, room: str | None = None) -> Self:
+        """Rummets lampor tas bort i kartredigeraren."""
+        room_id = self._room_id(room)
+        floors = tuple(
+            floor.model_copy(
+                update={
+                    "rooms": tuple(
+                        r.model_copy(update={"lamps": ()}) if r.id == room_id else r
+                        for r in floor.rooms
+                    )
+                }
+            )
+            for floor in self.home.floors
+        )
+        self._replace_home(self.home.model_copy(update={"floors": floors}))
         return self
 
     def simulation_off(self) -> Self:
@@ -162,6 +250,7 @@ class Scenario:
         duration = (hours * 60 + minutes) * 60 + seconds
         if duration < 0:
             raise ValueError("Ett scenario kan inte vänta en negativ tid")
+        self._run_deferred()  # det som kärnan sköt upp hinner hända innan tiden går
         until = self.clock.now() + duration
         wakes = 0
         while (wake_at := self.controller.wake_at) is not None and wake_at <= until:
@@ -173,6 +262,7 @@ class Scenario:
                 )
             self.clock.advance_to(max(wake_at, self.clock.now()))
             self.controller.tick()
+            self._run_deferred()
             if self.controller.wake_at == wake_at:
                 raise RuntimeError(
                     f"Regeln bad om att väckas vid {wake_at} s, men när den väcktes bad den "
@@ -180,7 +270,17 @@ class Scenario:
                 )
         self.clock.advance_to(until)
         self.controller.tick()
+        self._run_deferred()
         return self
+
+    def wait_for_calibration(self) -> Self:
+        """Väntar tills lampkalibreringen är klar eller har avbrutits, högst en halvtimme."""
+        for _ in range(30 * 60):
+            view = self.controller.snapshot().calibration
+            if view is None or view.phase is not Phase.RUNNING:
+                return self
+            self.wait(seconds=1)
+        raise AssertionError("Lampkalibreringen blev aldrig klar")
 
     # --- Förväntningar ---
 
@@ -257,6 +357,34 @@ class Scenario:
             raise AssertionError(f"{lamp_id} slogs om {actual}, väntade {switches}")
         return self
 
+    def expect_calibration(self, phase: str, text: str = "") -> Self:
+        """Lampkalibreringens läge ("pågår", "klar" eller "avbruten"), och en del av texten."""
+        view = self.controller.snapshot().calibration
+        if view is None:
+            raise AssertionError("Ingen lampkalibrering har körts")
+        if view.phase is not Phase(phase) or text not in view.text:
+            raise AssertionError(
+                f"Lampkalibreringen skulle vara {phase} ({text!r}) efter {self.clock.now():g} s "
+                f"men är {view.phase.value}: {view.text}"
+            )
+        return self
+
+    def expect_calibration_refused(self, text: str, room: str | None = None) -> Self:
+        problem = self.controller.start_calibration(self._room_id(room))
+        if problem is None or text not in problem:
+            raise AssertionError(f"Lampkalibreringen skulle vägras med {text!r}, men: {problem!r}")
+        return self
+
+    def expect_lamp_light(self, lux: float, lamp: str | None = None) -> Self:
+        """Lampans sparade bidrag till ljusnivån vid sensorn, från lampkalibreringen."""
+        lamp_id = self._lamp_view(lamp).lamp_id
+        saved = next(item for item in self.controller.home.lamps if item.id == lamp_id)
+        if saved.lux_contribution != pytest.approx(lux, abs=0.2):
+            raise AssertionError(
+                f"{lamp_id} skulle ha bidraget {lux:g} lux men har {saved.lux_contribution:g}"
+            )
+        return self
+
     def expect_explanation(self, text: str, lamp: str | None = None) -> Self:
         view = self._lamp_view(lamp)
         if text not in view.explanation:
@@ -277,6 +405,27 @@ class Scenario:
         return self
 
     # --- Hjälpfunktioner ---
+
+    def _lamp_changed(self) -> None:
+        if self._measure_lamp_light not in self._deferred:
+            self._deferred.append(self._measure_lamp_light)
+
+    def _measure_lamp_light(self) -> None:
+        self.source.set_lamp_light(self.lamps.light_by_room(self.controller.home))
+
+    def _run_deferred(self) -> None:
+        while self._deferred:
+            self._deferred.pop(0)()
+
+    def _save_calibration(self, results: Mapping[str, float]) -> None:
+        """Sparar lampornas bidrag, som kartredigeraren gör (se calibration_api.py)."""
+        self._replace_home(with_contributions(self.controller.home, results))
+
+    def _replace_home(self, home: Home) -> None:
+        self.home = home
+        self.controller.replace_home(home)
+        self.simulation.use_home(home)
+        self._run_deferred()
 
     def _expect_status(self, name: str, actual: Occupancy, wanted: str) -> Self:
         if actual is not Occupancy(wanted):
