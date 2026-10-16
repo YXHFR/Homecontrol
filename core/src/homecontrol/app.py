@@ -13,10 +13,17 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from homecontrol import __version__
+from homecontrol.cards import create_cards_router
 from homecontrol.clock import SystemClock
 from homecontrol.controller import Controller
 from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
-from homecontrol.esphome import AioesphomeNetwork, EsphomeSource, Network, defer_in_loop
+from homecontrol.esphome import (
+    AioesphomeNetwork,
+    EsphomeSource,
+    Network,
+    defer_in_loop,
+    placed_cards,
+)
 from homecontrol.home import Home
 from homecontrol.homefile import example_home
 from homecontrol.live import create_live_router, run_timer
@@ -57,10 +64,11 @@ def create_app(
             defer=defer_in_loop,
         )
     )
-    real_nodes = cards.placed_cards if cards is not None else frozenset
+    # Utan kopplingen finns inga riktiga kort, och alla noder simuleras.
+    real_nodes = placed_cards if cards is not None else _no_real_nodes
     # Simuleringsläget börjar påslaget bara när inga riktiga kort kan anslutas,
     # så att det finns något att se. Tidsfarten gäller hela kärnan och spärras
-    # därför till 1× så länge riktiga kort är placerade (se Simulation).
+    # därför till 1× så länge hemmet har riktiga kort (se Simulation).
     # Riktiga lampor ska spärra den på samma sätt när de kopplas in.
     source = SimulatedSource(home, real_nodes=real_nodes)
     simulation = Simulation(
@@ -69,14 +77,13 @@ def create_app(
         clock,
         floor_ids=(floor.id for floor in home.floors),
         enabled=cards is None,
-        real_hardware=lambda: bool(real_nodes()),
+        real_hardware=lambda changed: bool(real_nodes(changed)),
     )
 
     def use_home(changed: Home) -> None:
-        # Korten först, så att simuleringen vet vilka noder som är riktiga.
+        simulation.use_home(changed)
         if cards is not None:
             cards.use_home(changed)
-        simulation.use_home(changed)
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -110,6 +117,7 @@ def create_app(
     app.include_router(
         create_live_router(controller, simulation, allowed_hosts, _virtual_lamps, cards)
     )
+    app.include_router(create_cards_router(cards, allowed_hosts))
     app.include_router(
         create_editor_router(
             controller,
@@ -127,6 +135,10 @@ def create_app(
             logger.warning("Hittar inte webbgränssnittet i %s, serverar bara API:t", web_dir)
 
     return app
+
+
+def _no_real_nodes(_: Home) -> frozenset[str]:
+    return frozenset()
 
 
 def _virtual_lamps(home: Home) -> frozenset[str]:

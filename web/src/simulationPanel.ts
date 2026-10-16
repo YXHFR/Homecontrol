@@ -32,7 +32,7 @@ export function createSimulationPanel(
   const speedLocked = element(
     "p",
     { className: "help", hidden: true },
-    "Tiden går i vanlig takt så länge riktiga rumskort används, " +
+    "Tiden går i vanlig takt så länge riktiga sensorer eller lampor används, " +
       "så att riktiga lampor inte släcks för tidigt.",
   );
   speedPicker.setAttribute("role", "group");

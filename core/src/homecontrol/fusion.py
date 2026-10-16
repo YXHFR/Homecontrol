@@ -217,10 +217,9 @@ class Fusion:
                 self._source_of[part] = observation.source_id
         self._lost |= parts
         radars = {node_id for node_id, capability in parts if capability is Capability.RADAR}
-        for node_id, capability in parts:
-            if capability is Capability.CSI:
-                self._motion.pop(node_id, None)
+        wifi = {node_id for node_id, capability in parts if capability is Capability.CSI}
         self._tracks = [track for track in self._tracks if track.node_id not in radars]
+        self._motion = {node: score for node, score in self._motion.items() if node not in wifi}
         self._refresh(now)
 
     def update(self, now: float) -> None:

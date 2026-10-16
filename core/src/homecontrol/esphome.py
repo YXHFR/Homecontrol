@@ -7,8 +7,10 @@ placerat kort är en nod vars id är kortets namn.
 
 Anslutningen är krypterad. Varje kort får en egen nyckel som räknas fram ur
 hemligheten i .env och kortets namn, så nycklarna sparas ingenstans. Ett
-nyinstallerat kort har ingen nyckel; kärnan ger det sin nyckel första gången
-det ansluts, efter att det har placerats.
+nyinstallerat kort har ingen nyckel. Kärnan ger det sin nyckel bara en gång
+och bara under `PROVISION_SECONDS` efter att någon har placerat det på
+kartan. Annars kunde vem som helst i hemnätet som låtsas vara kortet (mDNS
+går att förfalska) få nyckeln genom att säga att det saknar en.
 
 Varje kort är tre delar, var och en en egen källa för kärnan: radarn,
 Wi-Fi-mätningen och ljussensorn. Tystnar en del, till exempel radarn när
@@ -21,7 +23,7 @@ livevyn (`EsphomeSource.install_update`). Kortet hämtar då själv filen.
 
 Modulen är uppdelad så att tolkningen går att pröva utan nätverk:
 
-* `CardReader` tolkar det ett kort skickar (se tests/esphome_recordings).
+* `CardReader` tolkar det ett kort skickar (se tests/esphome_exempel).
 * `EsphomeSource` håller reda på korten och lämnar observationerna till kärnan.
 * `AioesphomeNetwork` pratar med korten (aioesphomeapi) och söker efter dem (mDNS).
 
@@ -62,6 +64,7 @@ from aioesphomeapi.reconnect_logic import ReconnectLogic
 from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
+from homecontrol.cards import CardView, FirmwareUpdate
 from homecontrol.connectors import (
     LightLevelObserved,
     MotionObserved,
@@ -94,6 +97,8 @@ CHECK_INTERVAL = 5.0
 """Så ofta det kontrolleras om någon del har tystnat."""
 MAX_DISCOVERED = 50
 """Fler okända kort än så här visas inte, så att ingen kan fylla listan via mDNS."""
+PROVISION_SECONDS = 10 * 60.0
+"""Så länge efter placeringen som ett kort utan nyckel får sin nyckel."""
 
 # Entiteterna som firmware-paketet exponerar (firmware/homecontrol.yaml).
 # Namnen ändras inte, så att kärnan kan lita på dem (se firmware/README.md).
@@ -125,8 +130,9 @@ PART_NAMES = {
 
 NOT_ANSWERING = "Kortet svarar inte."
 OTHER_KEY = (
-    "Kortet har en annan nyckel än kärnan. Radera kortet och installera om det "
-    "(se firmware/README.md)."
+    "Kortet har en annan nyckel än kärnan, eller ingen nyckel än. Ta bort kortet från "
+    "kartan och placera det igen medan det har ström. Hjälper inte det: radera kortet "
+    "och installera om det (se firmware/README.md)."
 )
 NO_ENCRYPTION = "Kortet tar inte emot krypterade anslutningar. Installera om firmware."
 
@@ -147,6 +153,11 @@ def is_card_name(name: str) -> bool:
     return CARD_NAME.fullmatch(name) is not None
 
 
+def placed_cards(home: Home) -> frozenset[str]:
+    """Korten som är placerade i hemmet: noderna som har ett korts namn som id."""
+    return frozenset(node.id for room in home.rooms for node in room.nodes if is_card_name(node.id))
+
+
 # --- Tolkningen ---
 
 
@@ -156,19 +167,6 @@ class _Part:
     heard_at: float = -math.inf
     changed: bool = False
     """Något nytt ska skickas till kärnan."""
-
-
-@dataclass(frozen=True)
-class FirmwareUpdate:
-    current_version: str
-    latest_version: str
-    in_progress: bool
-    progress: float | None
-    """Hur långt uppdateringen har kommit, 0–100, om kortet säger det."""
-
-    @property
-    def available(self) -> bool:
-        return bool(self.latest_version) and self.latest_version != self.current_version
 
 
 class CardReader:
@@ -324,7 +322,10 @@ class CardReader:
         """Vad som är fel med ett anslutet kort, i klartext."""
         problems = [f"{PART_NAMES[part]} skickar inget." for part in PARTS if not self.alive(part)]
         if self.missing:
-            problems.append(f"Kortet saknar {', '.join(self.missing)}. Uppdatera kortets firmware.")
+            problems.append(
+                f"Kortets firmware är för gammal (saknar {', '.join(self.missing)}). "
+                "Installera om den med webbinstalleraren."
+            )
         return problems
 
     @property
@@ -346,6 +347,13 @@ class CardEvents(Protocol):
 
     def problem(self, text: str | None) -> None:
         """Varför kortet inte går att ansluta, eller None när det är löst."""
+
+    def may_provision(self) -> bool:
+        """Om kortet just nu får sin nyckel, om det saknar en (se `PROVISION_SECONDS`)."""
+        ...
+
+    def provisioned(self) -> None:
+        """Kortet har fått sin nyckel. Det får den aldrig igen."""
 
 
 class CardLink(Protocol):
@@ -378,22 +386,6 @@ class Network(Protocol):
     async def close(self) -> None: ...
 
 
-@dataclass(frozen=True)
-class CardView:
-    """Det som går att visa om ett kort."""
-
-    name: str
-    friendly_name: str
-    placed: bool
-    online: bool
-    problems: tuple[str, ...]
-    """Varningar i klartext. Tom när allt fungerar."""
-    calibrating: bool
-    wifi_signal: float | None
-    firmware_version: str | None
-    update: FirmwareUpdate | None
-
-
 Listener = Callable[[], None]
 
 
@@ -408,6 +400,8 @@ class _Card:
     """Varför kortet inte går att ansluta, om det är känt."""
     room_id: str | None = None
     flush_pending: bool = False
+    provision_until: float = -math.inf
+    """Fram till när kortet får sin nyckel. Bara direkt efter att någon har placerat det."""
 
     # CardEvents
 
@@ -440,6 +434,13 @@ class _Card:
             logger.warning("Kortet %s: %s", self.name, text)
         self.connect_problem = text
         self.source._notify()
+
+    def may_provision(self) -> bool:
+        return self.link is not None and self.source._now() < self.provision_until
+
+    def provisioned(self) -> None:
+        logger.info("Kortet %s har fått sin nyckel", self.name)
+        self.provision_until = -math.inf
 
 
 class EsphomeSource:
@@ -478,15 +479,14 @@ class EsphomeSource:
 
     def placed_cards(self) -> frozenset[str]:
         """Korten som är placerade på kartan (deras nod-id)."""
-        return frozenset(
-            node.id for room in self._home.rooms for node in room.nodes if is_card_name(node.id)
-        )
+        return placed_cards(self._home)
 
     # Source
 
     def start(self, sink: ObservationSink) -> None:
         self._sink = sink
-        self.use_home(self._home)
+        # Kort som redan var placerade när kärnan startade får ingen nyckel.
+        self._use(self._home, just_placed=False)
 
     def stop(self) -> None:
         for name in list(self._cards):
@@ -526,7 +526,13 @@ class EsphomeSource:
                 self._changed(card)
 
     def use_home(self, home: Home) -> None:
-        """Ansluter till kort som har placerats och kopplar från kort som har tagits bort."""
+        """Ansluter till kort som har placerats och kopplar från kort som har tagits bort.
+
+        Ett kort som just har placerats får sin nyckel om det saknar en.
+        """
+        self._use(home, just_placed=True)
+
+    def _use(self, home: Home, *, just_placed: bool) -> None:
         self._home = home
         if self._sink is None:
             return
@@ -538,6 +544,8 @@ class EsphomeSource:
             card = self._cards.get(name)
             if card is None:
                 card = self._add(name)
+                if just_placed:
+                    card.provision_until = self._now() + PROVISION_SECONDS
             if card.room_id != rooms[name]:
                 # Ljusnivån gällde det gamla rummet.
                 self._emit(SourceLost(part_source(name, Capability.LUX)))
@@ -593,7 +601,17 @@ class EsphomeSource:
             friendly = found.friendly_name if found is not None else name
             if card is None:
                 views.append(
-                    CardView(name, friendly, name in placed, False, (), False, None, None, None)
+                    CardView(
+                        name=name,
+                        friendly_name=friendly,
+                        placed=name in placed,
+                        online=False,
+                        problems=(),
+                        calibrating=False,
+                        wifi_signal=None,
+                        firmware_version=None,
+                        update=None,
+                    )
                 )
                 continue
             problems = (
@@ -694,7 +712,7 @@ class AioesphomeNetwork:
         self, found: Callable[[Discovered], None], gone: Callable[[str], None]
     ) -> None:
         zeroconf = self._zc()
-        tasks: set[asyncio.Task[None]] = set()
+        looking_up: dict[str, asyncio.Task[None]] = {}
 
         async def look_up(service_type: str, service: str, name: str) -> None:
             info = AsyncServiceInfo(service_type, service)
@@ -711,17 +729,19 @@ class AioesphomeNetwork:
                 return
             if state_change is ServiceStateChange.Removed:
                 gone(card)
-            else:
+            elif card not in looking_up and len(looking_up) < MAX_DISCOVERED:
+                # En uppslagning i taget per kort, så att en flod av annonser
+                # inte startar hur många som helst.
                 task = asyncio.get_running_loop().create_task(look_up(service_type, name, card))
-                tasks.add(task)
-                task.add_done_callback(tasks.discard)
+                looking_up[card] = task
+                task.add_done_callback(lambda _: looking_up.pop(card, None))
 
         browser = AsyncServiceBrowser(zeroconf.zeroconf, MDNS_SERVICE, handlers=[on_change])
         try:
             await asyncio.Event().wait()
         finally:
             await browser.async_cancel()
-            for task in tasks:
+            for task in list(looking_up.values()):
                 task.cancel()
 
     async def close(self) -> None:
@@ -793,8 +813,12 @@ class _AioesphomeLink:
         if isinstance(error, EncryptionPlaintextAPIError):
             self._events.problem(NO_ENCRYPTION)
         elif isinstance(error, InvalidEncryptionKeyAPIError):
-            # Ett nyinstallerat kort har ingen nyckel än och får kärnans.
-            if not await self._provision():
+            # Ett nyinstallerat kort har ingen nyckel än. Det får kärnans bara
+            # strax efter att det har placerats, så att ingen som låtsas vara
+            # kortet kan locka ut nyckeln senare.
+            if self._events.may_provision() and await self._provision():
+                self._events.provisioned()
+            else:
                 self._events.problem(OTHER_KEY)
         else:
             self._events.problem(None)
@@ -812,6 +836,4 @@ class _AioesphomeLink:
             return False
         finally:
             await client.disconnect()
-        if ok:
-            logger.info("Kortet %s har fått sin nyckel", self._name)
         return ok

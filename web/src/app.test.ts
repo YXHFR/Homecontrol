@@ -320,7 +320,7 @@ describe("mountApp", () => {
     const buttons = [...root.querySelectorAll<HTMLButtonElement>(".speeds button")];
 
     expect(buttons.map((b) => b.disabled)).toEqual([false, true, true]);
-    expect(text(root, ".simulation")).toMatch(/vanlig takt så länge riktiga rumskort används/);
+    expect(text(root, ".simulation")).toMatch(/vanlig takt så länge riktiga sensorer eller lampor används/);
   });
 
   it("varnar för kort som inte svarar och visar nya kort att placera", () => {

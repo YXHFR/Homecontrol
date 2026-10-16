@@ -100,6 +100,9 @@ class Source(Protocol):
     i stället får läget okänt. Det gäller också när bara en del av källan
     tystnar, till exempel radarn på ett av korten: kärnan litar på att det
     radarn senast såg finns kvar tills radarn säger något annat.
+
+    En källa får lämna observationer med flera `source_id`, till exempel ett
+    per del av ett kort (se esphome.py), så att varje del kan tystna för sig.
     """
 
     @property

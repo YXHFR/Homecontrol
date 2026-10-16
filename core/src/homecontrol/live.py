@@ -11,7 +11,7 @@ Protokollet är JSON. Kärnan skickar:
   varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), lamporna
   och simuleringen. Fältet ``simulation`` visar simuleringsläget, eller är
   null om det inte finns. Fältet ``cards`` visar de riktiga rumskorten (se
-  `cards_message`), eller är null om inga kort kan anslutas.
+  `cards.cards_message`), eller är null om inga kort kan anslutas.
 
 Livevyn kan be om en uppdatering av ett korts firmware, som användaren har
 godkänt genom att trycka på knappen:
@@ -36,17 +36,16 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable, Sequence, Set
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal
 
 import anyio
 import anyio.abc
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
+from homecontrol.cards import Cards, CardView, cards_message
 from homecontrol.clock import PacedClock
 from homecontrol.controller import Controller, Snapshot
-from homecontrol.esphome import CardView
 from homecontrol.home import Home, Point
 from homecontrol.simulation import Simulation, SimulationView, Speed
 from homecontrol.trust import trusted
@@ -115,16 +114,6 @@ class InstallUpdate(BaseModel):
 ClientMessage = (
     SetSimulation | AddPerson | MovePerson | RemovePerson | SetDaylight | SetSpeed | InstallUpdate
 )
-
-
-class Cards(Protocol):
-    """De riktiga rumskorten (se esphome.py)."""
-
-    def cards(self) -> Sequence[CardView]: ...
-
-    def install_update(self, name: str) -> bool: ...
-
-    def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]: ...
 
 
 _client_message: TypeAdapter[ClientMessage] = TypeAdapter(
@@ -218,37 +207,6 @@ def state_message(
     }
 
 
-def cards_message(cards: Sequence[CardView]) -> list[dict[str, Any]]:
-    """Korten: placerade kort med sina varningar, och nya kort som väntar på att placeras.
-
-    Ett kort är ``"placed": false`` tills det har placerats i kartredigeraren.
-    ``problems`` är varningar i klartext. ``update`` är null, eller den version
-    som kortet kan uppdateras till.
-    """
-    return [
-        {
-            "id": card.name,
-            "name": card.friendly_name,
-            "placed": card.placed,
-            "online": card.online,
-            "problems": list(card.problems),
-            "calibrating": card.calibrating,
-            "wifi_signal": card.wifi_signal,
-            "firmware_version": card.firmware_version,
-            "update": (
-                None
-                if card.update is None or not card.update.available
-                else {
-                    "version": card.update.latest_version,
-                    "in_progress": card.update.in_progress,
-                    "progress": card.update.progress,
-                }
-            ),
-        }
-        for card in cards
-    ]
-
-
 def simulation_message(simulation: SimulationView) -> dict[str, Any]:
     return {
         "enabled": simulation.enabled,
@@ -279,21 +237,9 @@ def create_live_router(
     `virtual_lamps` ger lamporna i ett hem som bara finns i simuleringen, utan
     någon riktig lampa. Den anropas varje gång hemmet har bytts.
 
-    `cards` är de riktiga rumskorten. Kartredigeraren hämtar dem från
-    ``GET /api/cards`` (samma form som ``cards`` i läget) för att kunna
-    placera nya kort.
+    `cards` är de riktiga rumskorten (se cards.py).
     """
     router = APIRouter()
-
-    @router.get("/api/cards")
-    def get_cards(request: Request) -> JSONResponse:
-        # Samma kontroll som strömmen: korten säger vilka rum som finns.
-        if not trusted(request.headers, allowed_hosts):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Okänd adress eller avsändare")
-        return JSONResponse(
-            [] if cards is None else cards_message(cards.cards()),
-            headers={"Cache-Control": "no-store"},
-        )
 
     @router.websocket("/api/live")
     async def live(websocket: WebSocket) -> None:
@@ -354,7 +300,7 @@ def _handle(simulation: Simulation | None, cards: Cards | None, text: str) -> No
         return
     if isinstance(message, InstallUpdate):
         if cards is None or not cards.install_update(message.card):
-            logger.info("Kortet kan inte uppdateras just nu")
+            logger.info("Kortet %s kan inte uppdateras just nu", message.card[:64])
         return
     if simulation is None:
         return

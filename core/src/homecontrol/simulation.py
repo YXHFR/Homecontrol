@@ -12,7 +12,7 @@ mer eller mindre, och sammanvägningen ska klara det.
 
 Riktiga rumskort simuleras inte. Låtsaspersonerna syns bara för de virtuella
 radarerna, och dagsljuset sätts bara i rum utan riktiga kort, så att
-simuleringen aldrig blandas med det riktiga korten mäter.
+simuleringen aldrig blandas med det de riktiga korten mäter.
 """
 
 import logging
@@ -72,9 +72,9 @@ class SimulatedSource:
         self,
         home: Home,
         source_id: str = "simulering",
-        real_nodes: Callable[[], Set[str]] = frozenset,
+        real_nodes: Callable[[Home], Set[str]] = lambda _: frozenset(),
     ) -> None:
-        """`real_nodes` ger de riktiga rumskorten i hemmet, som inte ska simuleras."""
+        """`real_nodes` ger de riktiga rumskorten i ett hem, som inte ska simuleras."""
         self._source_id = source_id
         self._home = home
         self._real_nodes = real_nodes
@@ -94,6 +94,10 @@ class SimulatedSource:
     @property
     def persons(self) -> Mapping[str, Target]:
         return dict(self._persons)
+
+    @property
+    def home(self) -> Home:
+        return self._home
 
     @property
     def daylight(self) -> float | None:
@@ -187,7 +191,7 @@ class SimulatedSource:
 
     def _simulated_rooms(self, home: Home) -> list[Room]:
         """Rummen utan riktiga rumskort, där simuleringen bestämmer dagsljuset."""
-        real = self._real_nodes()
+        real = self._real_nodes(home)
         return [room for room in home.rooms if not any(node.id in real for node in room.nodes)]
 
     def set_light_level(self, room_id: str, lux: float) -> None:
@@ -206,7 +210,7 @@ class SimulatedSource:
         seen = [
             person for person_id, person in self._persons.items() if person_id not in self._unseen
         ]
-        real = self._real_nodes()
+        real = self._real_nodes(self._home)
         for floor in self._home.floors:
             on_floor = [person.position for person in seen if person.floor_id == floor.id]
             for node in (node for room in floor.rooms for node in room.nodes):
@@ -268,8 +272,8 @@ class Simulation:
 
     Tidsfarten gäller hela kärnan, eftersom kärnan har en enda klocka. Det går
     bra så länge allt är simulerat; med riktiga lampor skulle de släckas 60
-    gånger för tidigt. Så länge `real_hardware` säger att riktiga sensorer
-    eller lampor används är tidsfarten därför spärrad till 1×.
+    gånger för tidigt. Så länge `real_hardware` säger att hemmet har riktiga
+    sensorer eller lampor är tidsfarten därför spärrad till 1×.
 
     `floor_ids` är hemmets våningar. Personer på andra våningar avvisas. Utan
     `daylight` lämnas ljusnivån i rummen okänd tills någon ställer den.
@@ -284,7 +288,7 @@ class Simulation:
         floor_ids: Iterable[str],
         enabled: bool = True,
         daylight: float | None = DEFAULT_DAYLIGHT_LUX,
-        real_hardware: Callable[[], bool] = lambda: False,
+        real_hardware: Callable[[Home], bool] = lambda _: False,
     ) -> None:
         self._source = source
         self._real_hardware = real_hardware
@@ -305,7 +309,7 @@ class Simulation:
         return SimulationView(
             enabled=self._enabled,
             speed=self._clock.speed,
-            speed_locked=self._real_hardware(),
+            speed_locked=self._speed_locked(),
             daylight=self._source.daylight,
             persons=self._source.persons,
         )
@@ -328,7 +332,7 @@ class Simulation:
         """
         self._floor_ids = frozenset(floor.id for floor in home.floors)
         self._source.use_home(home)
-        if self._real_hardware() and self._clock.speed != 1:
+        if self._speed_locked() and self._clock.speed != 1:
             self._clock.set_speed(1)
             self._notify()
 
@@ -362,7 +366,7 @@ class Simulation:
     def set_speed(self, speed: Speed) -> None:
         if isinstance(speed, bool) or speed not in SPEEDS:
             raise ValueError(f"Tidsfarten ska vara en av {SPEEDS}, inte {speed}")
-        if self._enabled and (speed == 1 or not self._real_hardware()):
+        if self._enabled and (speed == 1 or not self._speed_locked()):
             self._clock.set_speed(speed)
             self._notify()
 
@@ -370,6 +374,9 @@ class Simulation:
         """Anropar `listener` efter varje ändring. Returnerar en funktion som avslutar."""
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
+
+    def _speed_locked(self) -> bool:
+        return self._real_hardware(self._source.home)
 
     def _known_floor(self, floor_id: str) -> bool:
         if floor_id in self._floor_ids:

@@ -42,8 +42,8 @@ export interface Lamp {
   virtual: boolean;
 }
 
-/** Ett rumskort på kartan. Ett riktigt kort har samma id som kortets namn, homecontrol-<rum>. */
-export interface CardNode {
+/** Ett rumskort på kartan, riktigt eller simulerat. Ett riktigt kort har kortets namn som id. */
+export interface MapNode {
   id: string;
   name: string;
   room_id: string;
@@ -57,7 +57,7 @@ export interface Floor {
   /** 0 är entréplanet, 1 en trappa upp och -1 källaren. */
   level: number;
   rooms: Room[];
-  nodes: CardNode[];
+  nodes: MapNode[];
   lamps: Lamp[];
 }
 
@@ -96,7 +96,7 @@ export interface Person extends Target {
 export interface Simulation {
   enabled: boolean;
   speed: Speed;
-  /** Tidsfarten är låst till 1×, eftersom riktiga rumskort används. */
+  /** Tidsfarten är låst till 1×, eftersom riktiga sensorer eller lampor används. */
   speed_locked: boolean;
   /** Dagsljuset i alla rum, i lux. */
   daylight: number | null;

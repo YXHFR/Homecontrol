@@ -325,15 +325,19 @@ export function mountEditor(
     );
   };
 
+  const instructionText = (): string => {
+    if (cardToPlace !== null) {
+      return (
+        `Klicka där ${cardToPlace.name} sitter, inne i ett rum. Kärnan börjar använda kortet ` +
+        "när det är placerat. Vrid det sedan så att det tittar åt rätt håll."
+      );
+    }
+    return drawing.tool === "zone" ? zoneInstruction(zoneKind) : INSTRUCTIONS[drawing.tool];
+  };
+
   const renderInstruction = () => {
     const draft = drawing.draft;
-    instruction.textContent =
-      cardToPlace !== null
-        ? `Klicka där ${cardToPlace.name} sitter, inne i ett rum. Kärnan börjar använda kortet ` +
-          "när det är placerat. Vrid det sedan så att det tittar åt rätt håll."
-        : drawing.tool === "zone"
-          ? zoneInstruction(zoneKind)
-          : INSTRUCTIONS[drawing.tool];
+    instruction.textContent = instructionText();
     draftActions.replaceChildren();
     if (draft.kind === "polygon") {
       const done = button(drawing.tool === "zone" ? "Stäng zonen" : "Stäng rummet", () =>
@@ -695,18 +699,16 @@ export function mountEditor(
    */
   const place = (kind: ItemKind, point: Point) => {
     const floor = currentFloor();
-    const card = kind === "node" && cardToPlace !== null ? cardToPlace : null;
+    const card = kind === "node" ? (cardToPlace ?? undefined) : undefined;
     const placed =
-      shown === null || floor === null
-        ? null
-        : placeItem(shown, kind, floor.id, point, card === null ? undefined : card);
+      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point, card);
     if (placed === null || floor === null) {
       showMessage("Klicka inne i ett rum. Rumskort och lampor hör till rummet de sitter i.");
       render();
       return;
     }
     selection = { kind: "item", id: placed.id };
-    if (card !== null) {
+    if (card !== undefined) {
       cardToPlace = null;
       newCards = newCards.filter((other) => other.id !== card.id);
       drawing.setTool("select");

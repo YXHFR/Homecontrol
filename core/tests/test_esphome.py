@@ -6,11 +6,13 @@ testerna styr när kortet ansluter, vad det skickar och när det tystnar.
 Allt går genom den riktiga kärnan (sammanvägningen och regeln).
 """
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
 import pytest
 from aioesphomeapi import model
+from aioesphomeapi.core import InvalidEncryptionKeyAPIError
 from aioesphomeapi.model import UpdateState
 
 from fake_cards import CARD, SECRET, FakeLink, FakeNetwork, Recording, card_home, recording
@@ -27,10 +29,13 @@ from homecontrol.controller import Controller
 from homecontrol.esphome import (
     MAX_DISCOVERED,
     NOT_ANSWERING,
+    OTHER_KEY,
+    PROVISION_SECONDS,
     STALE_SECONDS,
     CardReader,
     Discovered,
     EsphomeSource,
+    _AioesphomeLink,
     card_key,
     part_source,
 )
@@ -349,3 +354,54 @@ def test_reader_ignores_values_it_does_not_know() -> None:
     reader.read(model.SensorState.from_dict({"key": 12345, "state": 1.0}), now=0)
 
     assert reader.observations("vardagsrum") == []
+
+
+def test_only_a_just_placed_card_gets_its_key_and_only_once() -> None:
+    # Placerat redan när kärnan startade: ingen nyckel, så att ingen som
+    # låtsas vara kortet kan locka ut den.
+    assert not Harness().link.events.may_provision()
+
+    harness = Harness(card_home(placed=False))
+    harness.controller.replace_home(card_home())
+    harness.source.use_home(card_home())
+    events = harness.link.events
+    assert events.may_provision()
+
+    events.provisioned()
+    assert not events.may_provision()
+
+
+def test_the_key_is_offered_only_for_a_while_after_placing() -> None:
+    harness = Harness(card_home(placed=False))
+    harness.source.use_home(card_home())
+
+    harness.advance(PROVISION_SECONDS + 1)
+
+    assert not harness.link.events.may_provision()
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_a_card_that_rejects_the_key_is_provisioned_only_when_allowed(allowed: bool) -> None:
+    calls: list[str] = []
+
+    class Events:
+        def may_provision(self) -> bool:
+            return allowed
+
+        def provisioned(self) -> None:
+            calls.append("provisioned")
+
+        def problem(self, text: str | None) -> None:
+            calls.append(f"problem: {text}")
+
+    async def provision() -> bool:
+        calls.append("provision")
+        return True
+
+    link = _AioesphomeLink.__new__(_AioesphomeLink)
+    link._events = Events()  # type: ignore[assignment]
+    link._provision = provision  # type: ignore[method-assign]
+
+    asyncio.run(link._on_connect_error(InvalidEncryptionKeyAPIError("fel nyckel")))
+
+    assert calls == (["provision", "provisioned"] if allowed else [f"problem: {OTHER_KEY}"])

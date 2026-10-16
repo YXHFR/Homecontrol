@@ -96,8 +96,10 @@ installeras om. Med hemligheten satt börjar simuleringsläget avslaget.
    syns i livevyn under **Rumskort** som ett nytt kort att placera.
 2. Öppna kartredigeraren och välj **Placera Homecontrol <rum>** under
    **Placera**. Klicka där kortet sitter och vrid det åt rätt håll. Först nu
-   ansluter kärnan till kortet och ger det dess nyckel. Ett kort som inte är
-   placerat används aldrig.
+   ansluter kärnan till kortet och ger det dess nyckel. Gör det snart: tills
+   kortet har fått kärnans nyckel kan vem som helst i hemnätet ge det en
+   egen. Kortet måste ha ström; kärnan erbjuder nyckeln bara under tio
+   minuter efter placeringen. Ett kort som inte är placerat används aldrig.
 3. I livevyn syns det kortets radar ser som prickar, och Wi-Fi-rörelsen och
    ljusnivån påverkar rummet.
 
@@ -112,8 +114,9 @@ hämtar då själv filen från webbinstalleraren och startar om.
 Kärnan använder datorns eget nätverk (`network_mode: host` i
 `compose.yaml`), eftersom mDNS inte når in i Dockers nät. Det fungerar på
 Linux, som Raspberry Pi. I Docker Desktop (Mac och Windows) måste
-värdnätverket slås på i inställningarna. Databasen nås då på datorns egen
-adress (`127.0.0.1`, port `DB_PORT`), och bara därifrån.
+värdnätverket slås på, se [Dockers beskrivning](https://docs.docker.com/engine/network/drivers/host/#docker-desktop).
+Kärnan lyssnar då direkt på datorn, så sätt gärna `BIND_ADDRESS` i `.env`
+till datorns adress i hemnätet, så att den bara nås därifrån.
 
 ### Om något inte fungerar
 
@@ -352,7 +355,7 @@ tar emot dem. Simuleringen
 styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
 når kärnan genom samma ingång som en riktig källa, som radarmål i varje
 rumskorts egna koordinater. Tidsfarten gäller hela kärnan och är därför
-spärrad till 1× så länge riktiga rumskort är placerade.
+spärrad till 1× så länge hemmet har riktiga rumskort.
 
 Rumskorten ansluts av källkopplingen ESPHome (`esphome.py`). Den hittar nya
 kort med mDNS, ansluter krypterat med aioesphomeapi till de kort som är
@@ -361,8 +364,9 @@ entiteterna från firmware-paketet till observationer. Radarn,
 Wi-Fi-mätningen och ljussensorn på ett kort är var sin källa, så att en del
 som tystnar ger `SourceLost` för just den delen. Kopplingen testas mot
 exempelmeddelanden i `core/tests/esphome_exempel/`, i den form aioesphomeapi
-lämnar dem. De innehåller inga nycklar, nätverksnamn eller adresser; spelas
-nya in från ett riktigt kort ska de tas bort först.
+lämnar dem. De innehåller inga nycklar, nätverksnamn eller adresser. Spelas
+nya exempel in från ett riktigt kort ska nycklar, nätverksnamn och adresser
+tas bort ur dem först.
 
 Hemmodellen finns i `home.py` och kontrolleras där. `homefile.py` gör om den
 till och från ett JSON-dokument, och `store.py` sparar samma dokument i
