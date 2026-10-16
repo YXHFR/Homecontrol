@@ -11,7 +11,10 @@ och släcks efter det.
 > rummen med musen eller fingret. Varje rumskort blir en virtuell radar som
 > ser personerna framför sig, och kärnan gör om det radarerna ser till
 > prickar på kartan och upptagna rum. Då tänds de virtuella lamporna när det
-> är mörkt och släcks när rummet har varit tomt en stund. Dagsljuset ställs med
+> är mörkt, dimras som en varning och släcks när rummet har varit tomt en
+> stund, och släcks när dagsljuset räcker. Ett klick på en lampa tänder eller
+> släcker den för hand, och under **Varför hände det?** står varför lamporna
+> gjorde som de gjorde. Dagsljuset ställs med
 > ett reglage, och tiden kan gå 10 eller 60 gånger fortare så att du slipper
 > vänta. I kartredigeraren ritar du dina egna rum ovanpå en bild av
 > planritningen, väljer vad väggarna är gjorda av och var dörröppningarna är,
@@ -105,9 +108,11 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    det eller ta bort det, och dra ett rum för att flytta det; zonerna i
    rummet följer med. En zon kan också byta sort, och ett klick till på en
    vald zon väljer rummet under den. För ett valt rum ställer du också in
-   rummets ljus: under vilken ljusnivå lamporna tänds, över vilken nivå
-   dagsljuset räcker och hur många minuter rummet ska ha varit tomt innan de
-   släcks. Där finns också Wi-Fi-rörelsens vikt (se **Närvaro** nedan).
+   rummets ljus (se **Ljusreglerna** nedan): under vilken ljusnivå lamporna
+   tänds, över vilken nivå dagsljuset räcker och hur länge, hur många minuter
+   rummet ska ha varit tomt innan de släcks, hur länge och hur mycket de dimras
+   innan dess och om rummet saknar fönster. Där finns också Wi-Fi-rörelsens
+   vikt (se **Närvaro** nedan).
 5. **Väggar och dörrar**: klicka på en vägg för att byta material, ett steg
    per klick: gips → betong → trä → glas → dörröppning och sedan gips igen.
    En vägg som två rum delar byts i båda.
@@ -169,6 +174,46 @@ Livevyn visar alltså också när någon sitter eller ligger still, i vilka
 zoner, och vilka sensorer som inte svarar. Tänk på det när du bestämmer vem
 som når livevyn (se nedan).
 
+### Ljusreglerna
+
+Reglerna gäller ett rum i taget, och alla lampor i rummet följer varandra.
+Värdena inom parentes är standard och ändras per rum i kartredigeraren.
+
+- **Tänd** när någon är i rummet och det är mörkt (under 30 lux).
+- **Varningsdimring**: när rummet har varit tomt i 2 minuter och 30
+  sekunder dimras lamporna till hälften (50 %) i 30 sekunder. Rör sig någon
+  i rummet går ljuset upp igen.
+- **Släck** när rummet har varit tomt i 3 minuter.
+- **Släck vid dagsljus** när någon är i rummet men det har varit ljust (över
+  100 lux) i 10 minuter i sträck. Blir det mörkare emellan börjar tiden om.
+- **Rum utan fönster** räknas alltid som mörka och behöver ingen ljussensor.
+- **Okänt läge**: har ett rumskort slutat svara görs ingenting med lamporna
+  i rummet; de lämnas som de är.
+
+Ljusnivån som reglerna använder är den uppmätta minus det ljus som rummets
+tända lampor själva ger vid ljussensorn (mindre när de är dimrade). Därför
+släcker en lampa aldrig sig själv för att den lyser upp rummet. Hur mycket
+varje lampa lyser upp sensorn mäts av lampkalibreringen, som kommer i ett
+senare steg; tills dess är bidraget 0. Under **Just nu** står båda värdena
+när de skiljer sig.
+
+Kärnan antar inte att lamporna är släckta när den startar. Tills en lampa
+har berättat hur den är, eller kärnan själv har styrt den, är läget okänt.
+En lampa med okänt läge tänds när rummet ska tändas, men släcks eller dimras
+aldrig på chans. De virtuella lamporna i simuleringen är släckta från början.
+
+**Manuell styrning**: klicka på en lampa på kartan, eller på lampans knapp
+under **Just nu**, så tänds eller släcks den. Automatiken i rummet pausar
+då, så att den inte går emot ditt val (till exempel när du släcker för att
+sova), tills rummet har varit tomt i hela släckfördröjningen (3 minuter).
+Rummet står som **manuellt** på kartan och under **Just nu**, och med
+**Automatik igen** tar automatiken över direkt.
+
+**Varför hände det?** listar de senaste besluten med klockslag och värden,
+till exempel "19:02 Vardagsrum: Tändes: någon är i Vardagsrum och det var
+mörkt (9 lux, under 30)." Listan finns bara i kärnans minne och töms när den
+startar om.
+
 ### Hemmet: spara, flytta och läsa in
 
 Hemmet (våningar, rum, väggar, dörröppningar, zoner, rumskort, routrar och
@@ -205,9 +250,14 @@ Så läser du filen:
   `gips`, `betong`, `trä`, `glas` eller `dörröppning`. Två rum som delar en
   vägg måste ange samma sort. Byter väggen sort på vägen läggs ett extra
   hörn där.
-- `settings` per rum: under `dark_below_lux` räknas rummet som mörkt, över
-  `bright_above_lux` som ljust av dagsljus, och lamporna släcks när rummet har
-  varit tomt i `off_after_empty_seconds` sekunder.
+- `settings` per rum (se **Ljusreglerna**): under `dark_below_lux` räknas
+  rummet som mörkt och över `bright_above_lux` som ljust av dagsljus; efter
+  `daylight_off_after_seconds` sekunder av dagsljus i sträck släcks lamporna.
+  De släcks också när rummet har varit tomt i `off_after_empty_seconds`
+  sekunder, efter att ha dimrats till `dim_percent` procent i
+  `dim_before_off_seconds` sekunder (0 = ingen dimring). `windowless: true`
+  betyder att rummet saknar fönster och alltid är mörkt. Saknas ett värde i
+  filen gäller standardvärdet.
 - `zones` är delar av ett rum: `vanlig`, `stillhet` (soffa, säng),
   `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr). En zon
   ska ligga i sitt rum och får inte gå ut genom någon vägg (längs väggen går
@@ -223,17 +273,38 @@ Så läser du filen:
   (`meters_per_pixel`). Bilden själv finns bara i databasen.
 - `lamps` har en plats, kan höra till en zon (`zone_id`) och har en
   `profile` som säger hur lampan styrs (`generisk` eller `ikea-tradfri`).
+  `lux_contribution` är hur många lux lampan ger vid rummets ljussensor på
+  full styrka (0 om inget anges, se **Ljusreglerna**).
 
 - `wifi_weight` i `settings` är hur mycket Wi-Fi-rörelse väger mot radarn,
   från 0 till 1 (0,5 om inget anges, se **Närvaro**).
 
-Lampornas zon och profil och `bright_above_lux` sparas redan men används
-först i kommande versioner.
+Lampornas zon och profil sparas redan men används först i kommande versioner.
 
-Livevyn och kartredigeraren kräver ingen inloggning än, så alla i
-hemnätverket som når Homecontrol kan se och ändra planlösningen och bilden av
-planritningen. Vill du att bara den här datorn ska nå den
-sätter du `BIND_ADDRESS=127.0.0.1` i `.env`.
+### Vem som når Homecontrol
+
+Homecontrol har inga konton och ingen inloggning: alla i hushållet har samma
+åtkomst. Den som når livevyn kan alltså se var någon är, tända och släcka
+lamporna och ändra planlösningen och bilden av planritningen.
+
+- Som standard (`BIND_ADDRESS=0.0.0.0`) nås Homecontrol från alla nätverk
+  som datorn är ansluten till: hemnätverket, och Tailscale om det är
+  installerat. Med `BIND_ADDRESS=127.0.0.1` i `.env` nås den bara från den
+  här datorn.
+- Utanför hemmet når du livevyn med [Tailscale](https://tailscale.com/):
+  installera det på datorn som kör Homecontrol och på din telefon, och surfa
+  till datorns Tailscale-adress (100.x.y.z) och port 8000. Använder du
+  datorns Tailscale-namn (MagicDNS), skriv in namnet i `ALLOWED_HOSTS`.
+- Öppna aldrig port 8000 (eller någon annan av portarna) mot internet i
+  routern.
+- Släpper du in gäster på hemnätverket kan de nå Homecontrol. Ett gästnätverk
+  i routern, skilt från hemnätverket, hindrar det.
+
+Kärnan svarar bara på anrop till de adresser och namn den känner till
+(`localhost`, IP-adresser och `ALLOWED_HOSTS`), och bara från sina egna
+sidor. Det gäller även lampstyrningen. Det hindrar att en främmande webbsida
+som någon i hemmet besöker styr lamporna eller läser kartan genom
+webbläsaren.
 
 ### Stoppa och uppdatera
 
@@ -304,7 +375,12 @@ Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
 sammanvägningen (`fusion.py`) gör om dem till spår och avgör vilka rum som
 är upptagna, regelmotorn (`rules.evaluate`, en ren funktion) ger
 lampkommandon med förklaringar och lamputgångar (`connectors.LampOutput`)
-tar emot dem. Simuleringen
+tar emot dem. Lamputgångarna berättar hur lamporna är med
+`LampStateReported` genom samma ingång som källorna. Varje regel i
+regelmotorn är en egen klass med metoden `decide`; en ny sorts regel läggs
+till i listan `rules.DEFAULT_RULES` utan att de andra ändras (se
+`core/src/homecontrol/rules.py`). Manuell styrning från livevyn går till
+`Controller.set_lamp`. Simuleringen
 (`simulation.py`) är både en källa och en utgång. Simuleringsläget i livevyn
 styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
 når kärnan genom samma ingång som en riktig källa, som radarmål i varje
