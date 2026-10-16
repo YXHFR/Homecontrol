@@ -4,10 +4,27 @@
  * så den går att testa utan webbläsare.
  */
 import { distance, rectangleCorners } from "./editing";
+import type { ItemKind } from "./placing";
 import type { Point } from "./protocol";
 
-/** Med "zone" ritas en zon med fri form, av den sort som kartredigeraren har valt. */
-export type ToolName = "select" | "polygon" | "rectangle" | "scale" | "zone";
+/**
+ * Verktygen som placerar ut något med ett klick heter som det de placerar.
+ * Med "zone" ritas en zon med fri form, av den sort som kartredigeraren har valt.
+ */
+export type ToolName = "select" | "polygon" | "rectangle" | "scale" | "walls" | "zone" | ItemKind;
+
+/**
+ * Om kartan själv tar hand om klicken med verktyget (väljer, drar eller byter
+ * väggmaterial), så att redigeraren inte ska rita om mitt i klicket.
+ */
+export function mapHandlesClicks(tool: ToolName): boolean {
+  return tool === "select" || tool === "walls";
+}
+
+/** Om verktyget placerar ut ett rumskort, en router eller en lampa. */
+export function isPlacingTool(tool: ToolName): tool is ItemKind {
+  return tool === "node" || tool === "router" || tool === "lamp";
+}
 
 /** Det som håller på att ritas och ska visas på kartan. Zoner ritas som en polygon. */
 export type Draft =
@@ -21,11 +38,13 @@ export type Outcome =
   | { kind: "room"; corners: Point[] }
   | { kind: "zone"; corners: Point[] }
   | { kind: "scale"; a: Point; b: Point }
+  | { kind: "place"; item: ItemKind; point: Point }
   | null;
 
 export const INSTRUCTIONS: Record<ToolName, string> = {
   select:
-    "Klicka på ett rum eller en zon för att välja det. Dra ett valt rum för att flytta det. " +
+    "Klicka på ett rum, en zon, ett rumskort, en router eller en lampa för att välja det. " +
+    "Dra ett valt rum, eller något som är placerat, för att flytta det. " +
     "Dra i en tom del av kartan för att se en annan del.",
   polygon:
     "Klicka där rummets hörn är, ett i taget runt rummet. " +
@@ -37,6 +56,14 @@ export const INSTRUCTIONS: Record<ToolName, string> = {
   scale:
     "Klicka på två punkter på bilden som du vet avståndet mellan, till exempel båda ändarna " +
     "av en vägg. Skriv sedan in avståndet.",
+  walls:
+    "Klicka på en vägg för att byta material: gips → betong → trä → glas → dörröppning " +
+    "och sedan gips igen. En vägg som två rum delar byts i båda.",
+  node:
+    "Klicka där rumskortet sitter, inne i ett rum. Vrid det sedan med ringen eller " +
+    "knapparna så att det tittar åt rätt håll. Den ljusa tårtbiten är vad radarn ser.",
+  router: "Klicka där routern står. Den behöver inte stå i ett rum.",
+  lamp: "Klicka där lampan sitter, inne i ett rum. Lampan styrs av det rummet.",
 };
 
 export class Drawing {
@@ -102,7 +129,12 @@ export class Drawing {
         this.current = { kind: "scale", points: next, pointer: null };
         return next.length === 2 ? { kind: "scale", a: next[0], b: next[1] } : null;
       }
+      case "node":
+      case "router":
+      case "lamp":
+        return { kind: "place", item: this.toolName, point };
       case "select":
+      case "walls":
         return null;
     }
   }

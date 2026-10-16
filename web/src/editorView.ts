@@ -5,13 +5,17 @@
  */
 import Konva from "konva";
 import { toPoint } from "./editing";
+import { drawItems, drawWalls, type ItemCallbacks } from "./editorItems";
 import type { FloorModel, PlanImage, RoomModel } from "./homefile";
 import type { Point } from "./protocol";
 import type { Draft, ToolName } from "./tools";
 import { ZONE_STYLES } from "./zoneStyles";
 
-/** Det som är valt med verktyget Välj, eller null. */
-export type Selection = { kind: "room" | "zone"; id: string } | null;
+/**
+ * Det som är valt med verktyget Välj, eller null. "item" är ett rumskort, en
+ * router eller en lampa (se editorItems.ts).
+ */
+export type Selection = { kind: "room" | "zone" | "item"; id: string } | null;
 
 /** Det kartredigeraren vill visa på kartan. */
 export interface EditorScene {
@@ -25,12 +29,15 @@ export interface EditorScene {
   draft: Draft;
 }
 
-export interface EditorViewCallbacks {
+export interface EditorViewCallbacks extends ItemCallbacks {
   /** Tryck, rörelse och släpp på kartan, i hemmets meter. */
   onPointerDown(point: Point): void;
   onPointerMove(point: Point): void;
   onPointerUp(point: Point): void;
-  /** Ett rum, en zon eller inget (vid klick bredvid) har valts med verktyget Välj. */
+  /**
+   * Ett rum, en zon eller inget (vid klick bredvid) har valts med verktyget
+   * Välj. Rumskort, routrar och lampor väljs med onSelectItem.
+   */
   onSelect(selection: Selection): void;
   /** Det valda rummet har dragits så här många meter. */
   onMoveRoom(roomId: string, dx: number, dy: number): void;
@@ -89,8 +96,10 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
   const gridLayer = new Konva.Layer({ listening: false });
   const imageLayer = new Konva.Layer({ listening: false });
   const roomLayer = new Konva.Layer();
+  const wallLayer = new Konva.Layer();
+  const itemLayer = new Konva.Layer();
   const draftLayer = new Konva.Layer({ listening: false });
-  stage.add(gridLayer, imageLayer, roomLayer, draftLayer);
+  stage.add(gridLayer, imageLayer, roomLayer, wallLayer, itemLayer, draftLayer);
 
   const images = new Map<string, HTMLImageElement>();
   let scene: EditorScene | null = null;
@@ -388,6 +397,12 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     drawGrid();
     drawImage(scene);
     drawRooms(scene);
+    const itemScene = {
+      ...scene,
+      selectedItemId: scene.selection?.kind === "item" ? scene.selection.id : null,
+    };
+    drawWalls(wallLayer, itemScene, callbacks, container);
+    drawItems(itemLayer, itemScene, callbacks, container, stage);
     drawDraft(scene);
   };
 

@@ -191,7 +191,7 @@ function nextRoomName(document: HomeDocument): string {
   return `Rum ${n}`;
 }
 
-function updateFloors(
+export function updateFloors(
   document: HomeDocument,
   update: (floor: FloorModel) => FloorModel,
 ): HomeDocument {

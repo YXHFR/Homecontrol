@@ -12,7 +12,9 @@ och släcks efter det.
 > mörkt och släcks när rummet har varit tomt en stund. Dagsljuset ställs med
 > ett reglage, och tiden kan gå 10 eller 60 gånger fortare så att du slipper
 > vänta. I kartredigeraren ritar du dina egna rum ovanpå en bild av
-> planritningen. Riktiga sensorer och lampor kopplas in i senare steg.
+> planritningen, väljer vad väggarna är gjorda av och var dörröppningarna är,
+> och placerar rumskort, routrar och lampor. Varje rum kan få egna ljusgränser
+> och en egen fördröjning. Riktiga sensorer och lampor kopplas in i senare steg.
 
 ## Snabbstart
 
@@ -97,7 +99,17 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    rummet genom att klicka på det första hörnet igen (passar L-formade rum).
    **Rum, rektangel**: dra från ett hörn till hörnet snett emot. Ett klick
    nära ett hörn som redan finns hamnar exakt på det, så att rummen möts.
-4. **Zoner**: välj sort under **Zoner** bland verktygen och klicka ut hörnen
+4. **Välj och flytta**: klicka på ett rum eller en zon för att byta namn på
+   det eller ta bort det, och dra ett rum för att flytta det; zonerna i
+   rummet följer med. En zon kan också byta sort, och ett klick till på en
+   vald zon väljer rummet under den. För ett valt rum ställer du också in
+   rummets ljus: under vilken ljusnivå lamporna tänds, över vilken nivå
+   dagsljuset räcker och hur många minuter rummet ska ha varit tomt innan de
+   släcks.
+5. **Väggar och dörrar**: klicka på en vägg för att byta material, ett steg
+   per klick: gips → betong → trä → glas → dörröppning och sedan gips igen.
+   En vägg som två rum delar byts i båda.
+6. **Zoner**: välj sort under **Zoner** bland verktygen och klicka ut hörnen
    inne i ett rum, på samma sätt som ett rum med fri form. Varje sorts zon
    har en egen färg:
    - **Vanlig zon**: en plats som systemet ska känna till, till exempel
@@ -111,10 +123,13 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    Zonen ska ligga i ett rum; ett hörn nära en vägg hamnar på väggen. Zonerna
    syns i livevyn, men närvaron tar hänsyn till dem först i en kommande
    version.
-5. **Välj och flytta**: klicka på ett rum eller en zon för att byta namn på
-   det eller ta bort det. En zon kan också byta sort. Klicka en gång till på
-   en vald zon för att välja rummet under den. Dra ett rum för att flytta
-   det; zonerna i rummet följer med.
+7. **Placera** rumskort, routrar och lampor genom att välja verktyget och
+   klicka på kartan. Rumskort och lampor placeras inne i ett rum och hör till
+   det rummet. Den ljusa tårtbiten framför ett rumskort är vad radarn ser
+   (6 meter, 60° åt vardera hållet). Välj kortet med **Välj och flytta** och
+   vrid det med ringen runt kortet eller med knapparna, och ange höjden och om
+   det sitter spegelvänt. En lampa som dras in i ett annat rum styrs sedan av
+   det rummet; du kan också byta rum i listan.
 
 Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
 Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
@@ -124,8 +139,7 @@ Allt sparas direkt, och livevyn visar ändringen utan omstart. Har du
 redigeraren öppen i två fönster och ändrar i båda, visar det ena fönstret
 det andras ändring i stället för att skriva över den. Under
 **Hemmet** står hur många rum, zoner, rumskort, routrar och lampor hemmet
-har. Väggarnas material, rumskort, routrar och lampor ritas i kommande
-versioner; tills dess får nya rum gipsväggar.
+har.
 
 ### Hemmet: spara, flytta och läsa in
 
@@ -163,9 +177,9 @@ Så läser du filen:
   `gips`, `betong`, `trä`, `glas` eller `dörröppning`. Två rum som delar en
   vägg måste ange samma sort. Byter väggen sort på vägen läggs ett extra
   hörn där.
-- `settings` per rum: under `dark_below_lux` räknas rummet som mörkt, och
-  lamporna släcks när rummet har varit tomt i `off_after_empty_seconds`
-  sekunder.
+- `settings` per rum: under `dark_below_lux` räknas rummet som mörkt, över
+  `bright_above_lux` som ljust av dagsljus, och lamporna släcks när rummet har
+  varit tomt i `off_after_empty_seconds` sekunder.
 - `zones` är delar av ett rum: `vanlig`, `stillhet` (soffa, säng),
   `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr). En zon
   ska ligga i sitt rum och får inte gå ut genom någon vägg (längs väggen går

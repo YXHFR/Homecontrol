@@ -60,7 +60,7 @@ test("en zon ritas i ett rum, byter namn och sort, visas i livevyn och tas bort"
   const zone = await zoneOf();
   expect(zone).toMatchObject({ kind: "ignorera" });
   expect(zone?.polygon).toHaveLength(4);
-  await expect(page.locator(".properties")).toContainText("Vald zon");
+  await expect(page.getByRole("button", { name: "Ta bort zonen" })).toBeVisible();
 
   const name = page.getByRole("textbox", { name: "Namn" });
   await name.fill("Fläkt");

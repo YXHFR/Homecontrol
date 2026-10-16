@@ -11,6 +11,14 @@ export interface HomeDocument {
         name: string;
         polygon: [number, number][];
         zones?: { id: string; name: string; kind: string; polygon: [number, number][] }[];
+        nodes?: {
+          id: string;
+          name: string;
+          position: [number, number];
+          height: number;
+          rotation: number;
+          mirrored: boolean;
+        }[];
       }[];
       plan_image?: { position: [number, number]; meters_per_pixel: number } | null;
     }[];
@@ -51,17 +59,56 @@ export async function waitUntilSaved(page: Page): Promise<void> {
   savesSeen.set(page, next);
 }
 
-/** En punkt på kartan, som andel av kartans bredd och höjd (0–1). */
+/**
+ * En punkt på kartan, som andel av kartans bredd och höjd (0–1). Kartan rullas
+ * först till mitten av fönstret, eftersom verktygslådan bredvid är högre än
+ * fönstret och ett klick på en knapp längre ned annars lämnar kartans överkant
+ * utanför.
+ */
 export async function onMap(
   map: Locator,
   fx: number,
   fy: number,
 ): Promise<{ x: number; y: number }> {
+  await map.evaluate((node) => node.scrollIntoView({ block: "center" }));
   const box = await map.boundingBox();
   if (box === null) {
     throw new Error("Kartan syns inte");
   }
   return { x: box.x + box.width * fx, y: box.y + box.height * fy };
+}
+
+/**
+ * Var en punkt i hemmets meter syns på kartan, när redigeraren visar hela
+ * våningen som när den öppnas (samma uträkning som `fit` i editorView.ts).
+ */
+export async function atMeters(
+  map: Locator,
+  floor: HomeDocument["home"]["floors"][number],
+  point: { x: number; y: number },
+): Promise<{ x: number; y: number }> {
+  const box = await map.boundingBox();
+  if (box === null) {
+    throw new Error("Kartan syns inte");
+  }
+  const corners = floor.rooms.flatMap((room) => room.polygon);
+  const xs = corners.map(([x]) => x);
+  const ys = corners.map(([, y]) => y);
+  const [minX, maxX, minY, maxY] = [
+    Math.min(...xs),
+    Math.max(...xs),
+    Math.min(...ys),
+    Math.max(...ys),
+  ];
+  const margin = 1;
+  const perMeter = Math.min(
+    box.width / (maxX - minX + 2 * margin),
+    box.height / (maxY - minY + 2 * margin),
+  );
+  return {
+    x: box.x + (box.width - (maxX + minX) * perMeter) / 2 + point.x * perMeter,
+    y: box.y + (box.height - (maxY + minY) * perMeter) / 2 + point.y * perMeter,
+  };
 }
 
 /** En enfärgad PNG-bild, width × height bildpunkter. */

@@ -26,7 +26,7 @@ ignoreras kommandona, men läget strömmas ändå.
 import asyncio
 import contextlib
 import logging
-from collections.abc import Set
+from collections.abc import Callable, Set
 from typing import Annotated, Any, Literal
 
 import anyio
@@ -187,11 +187,12 @@ def create_live_router(
     controller: Controller,
     simulation: Simulation | None,
     allowed_hosts: Set[str] = frozenset(),
-    virtual_lamps: Set[str] = frozenset(),
+    virtual_lamps: Callable[[Home], Set[str]] = lambda _: frozenset(),
 ) -> APIRouter:
     """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som livevyn får nås på.
 
-    `virtual_lamps` är lamporna som bara finns i simuleringen, utan någon riktig lampa.
+    `virtual_lamps` ger lamporna i ett hem som bara finns i simuleringen, utan
+    någon riktig lampa. Den anropas varje gång hemmet har bytts.
     """
     router = APIRouter()
 
@@ -217,7 +218,7 @@ def create_live_router(
                 changed.clear()
                 if controller.home is not sent_home:
                     sent_home = controller.home
-                    await websocket.send_json(home_message(sent_home, virtual_lamps))
+                    await websocket.send_json(home_message(sent_home, virtual_lamps(sent_home)))
                 view = None if simulation is None else simulation.view()
                 await websocket.send_json(state_message(controller.snapshot(), view))
 

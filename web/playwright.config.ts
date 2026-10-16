@@ -25,7 +25,13 @@ export default defineConfig({
     },
   },
   projects: [
-    { name: "dator", use: { ...devices["Desktop Chrome"] }, testIgnore: /mobil/ },
+    {
+      name: "dator",
+      // Verktygslådan i kartredigeraren är högre än standardfönstret (720
+      // punkter); i ett högre fönster behöver testerna inte rulla sidan.
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 1000 } },
+      testIgnore: /mobil/,
+    },
     { name: "mobil", use: { ...devices["Pixel 7"] }, testMatch: /mobil/ },
   ],
   webServer: {

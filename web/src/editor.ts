@@ -1,7 +1,9 @@
 /**
  * Kartredigeraren: verktygen till vänster, kartan i mitten och egenskaperna
- * till höger (se #34). På en smal skärm staplas de. Zonerna (#36) har sina
- * delar i zones.ts och zonePanel.ts.
+ * till höger (se #34). På en smal skärm staplas de. Väggar, rumskort,
+ * routrar och lampor ändras med placing.ts och visas med editorItems.ts och
+ * itemPanel.ts (se #35). Zonerna (#36) har sina delar i zones.ts och
+ * zonePanel.ts.
  *
  * Varje ändring sparas direkt i kärnan, som kontrollerar hemmet och visar det
  * i livevyn. Säger kärnan nej visas varför, och kartan läses om från kärnan,
@@ -31,8 +33,26 @@ import { button, element } from "./dom";
 import { createKonvaEditorView, type EditorViewFactory, type Selection } from "./editorView";
 import { coreApi, CoreError, type HomeApi } from "./homeApi";
 import type { FloorModel, HomeDocument } from "./homefile";
+import { itemProperties, type PanelActions, roomSettingsForm } from "./itemPanel";
+import {
+  cycleWall,
+  findItem,
+  ITEM_LABELS,
+  type ItemKind,
+  moveItem,
+  normalizeRotation,
+  placeItem,
+  updateItem,
+} from "./placing";
 import type { Point, ZoneKind } from "./protocol";
-import { Drawing, INSTRUCTIONS, type Outcome, type ToolName } from "./tools";
+import {
+  Drawing,
+  INSTRUCTIONS,
+  isPlacingTool,
+  mapHandlesClicks,
+  type Outcome,
+  type ToolName,
+} from "./tools";
 import { zoneInstruction, zoneProperties, zoneTools } from "./zonePanel";
 import { findZone, nearestOnWall, planZone } from "./zones";
 import { ZONE_STYLES } from "./zoneStyles";
@@ -97,7 +117,11 @@ const TOOL_LABELS: Record<ToolName, string> = {
   polygon: "Rum, fri form",
   rectangle: "Rum, rektangel",
   scale: "Skala bilden",
+  walls: "Väggar och dörrar",
   zone: "Zon", // visas inte: zonerna har en knapp per sort (zonePanel.ts)
+  node: `${ITEM_LABELS.node} (ESP32)`,
+  router: ITEM_LABELS.router,
+  lamp: ITEM_LABELS.lamp,
 };
 
 function errorText(error: unknown): string {
@@ -118,6 +142,8 @@ function stillThere(document: HomeDocument, selection: Selection): boolean {
       return findRoom(document, selection.id) !== null;
     case "zone":
       return findZone(document, selection.id) !== null;
+    case "item":
+      return findItem(document, selection.id) !== null;
     default: {
       const unknown: never = selection.kind;
       throw new Error(`Okänd sort att välja: ${String(unknown)}`);
@@ -138,6 +164,7 @@ export function mountEditor(
   /** Det som visas: det sparade med de väntande ändringarna ovanpå. */
   let shown: HomeDocument | null = null;
   let floorId: string | null = null;
+  /** Det valda rummet, zonen, rumskortet, routern eller lampan. Bara en sak väljs åt gången. */
   let selection: Selection = null;
   /** Sorten av zon som ritas med verktyget Zon. */
   let zoneKind: ZoneKind = "vanlig";
@@ -177,7 +204,12 @@ export function mountEditor(
     toolButton("select"),
     toolButton("polygon"),
     toolButton("rectangle"),
+    toolButton("walls"),
     ...zoneToolbox.nodes,
+    element("h2", {}, "Placera"),
+    toolButton("node"),
+    toolButton("router"),
+    toolButton("lamp"),
     element("h2", {}, "Kartan"),
     element(
       "div",
@@ -209,14 +241,13 @@ export function mountEditor(
   // --- Egenskaperna ---
   const instruction = element("p", { className: "instruction" });
   const draftActions = element("div", { className: "actions" });
-  const selectionHeading = element("h2", {}, "Valt rum");
   const selectionPanel = element("div", { className: "selection" });
   const summary = element("dl", { className: "summary" });
   const properties = element(
     "aside",
     { className: "properties" },
     element("section", {}, element("h2", {}, "Instruktion"), instruction, draftActions),
-    element("section", {}, selectionHeading, selectionPanel),
+    element("section", {}, element("h2", {}, "Valt på kartan"), selectionPanel),
     element("section", {}, element("h2", {}, "Hemmet"), summary),
   );
 
@@ -303,6 +334,14 @@ export function mountEditor(
     }
   };
 
+  const panelActions: PanelActions = {
+    commit: (edit) => commit(edit),
+    showMessage: (text) => showMessage(text),
+    deselect: () => {
+      selection = null;
+    },
+  };
+
   const renderSelection = () => {
     const zone =
       selection?.kind === "zone" && shown !== null
@@ -312,16 +351,25 @@ export function mountEditor(
             showMessage,
           })
         : null;
-    selectionHeading.textContent = zone === null ? "Valt rum" : "Vald zon";
     if (zone !== null) {
       selectionPanel.replaceChildren(...zone);
+      return;
+    }
+    const item =
+      selection?.kind === "item" && shown !== null ? findItem(shown, selection.id) : null;
+    if (item !== null) {
+      selectionPanel.replaceChildren(...itemProperties(item, panelActions));
       return;
     }
     const room =
       selection?.kind === "room" && shown !== null ? findRoom(shown, selection.id) : null;
     if (room === null) {
       selectionPanel.replaceChildren(
-        element("p", { className: "muted" }, "Inget valt. Välj ett rum eller en zon på kartan."),
+        element(
+          "p",
+          { className: "muted" },
+          "Inget valt. Välj ett rum, en zon, ett rumskort, en router eller en lampa på kartan.",
+        ),
       );
       return;
     }
@@ -347,6 +395,7 @@ export function mountEditor(
         { className: "muted" },
         `${formatNumber(polygonArea(room.polygon.map(toPoint)))} m², ${room.polygon.length} hörn`,
       ),
+      roomSettingsForm(room, panelActions),
       button(
         "Ta bort rummet",
         () => {
@@ -429,7 +478,7 @@ export function mountEditor(
     root.dataset.busy = String(busy);
   };
 
-  /** Räknar fram det som visas och glömmer ett valt rum eller en vald zon som inte längre finns. */
+  /** Räknar fram det som visas och glömmer det valda om det inte längre finns. */
   const refreshShown = () => {
     shown = saved;
     for (const change of waiting) {
@@ -584,9 +633,29 @@ export function mountEditor(
       }
     } else if (outcome?.kind === "scale") {
       scalePoints = outcome;
+    } else if (outcome?.kind === "place") {
+      place(outcome.item, outcome.point);
+      return;
     }
     render();
   }
+
+  /** Placerar ett rumskort, en router eller en lampa och väljer den. */
+  const place = (kind: ItemKind, point: Point) => {
+    const floor = currentFloor();
+    const placed =
+      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point);
+    if (placed === null || floor === null) {
+      showMessage("Klicka inne i ett rum. Rumskort och lampor hör till rummet de sitter i.");
+      render();
+      return;
+    }
+    selection = { kind: "item", id: placed.id };
+    // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
+    // gör att den nya saken förblir vald.
+    const given = { id: placed.id, name: placed.name };
+    commit((document) => placeItem(document, kind, floor.id, point, given)?.document ?? document);
+  };
 
   const applyScale = (a: Point, b: Point, meters: number) => {
     const floor = currentFloor();
@@ -669,9 +738,10 @@ export function mountEditor(
 
   const view = deps.createView(stageContainer, {
     onPointerDown: (point) => {
-      // Med Välj sköter kartan klicket själv. Att rita om nu skulle byta ut
-      // rummet under pekaren mitt i klicket, och då kommer klicket aldrig fram.
-      if (drawing.tool === "select") {
+      // Med Välj och väggverktyget sköter kartan klicket själv. Att rita om nu
+      // skulle byta ut det som är under pekaren mitt i klicket, och då kommer
+      // klicket aldrig fram.
+      if (mapHandlesClicks(drawing.tool)) {
         return;
       }
       if (drawing.tool === "scale" && currentFloor()?.plan_image == null) {
@@ -680,7 +750,8 @@ export function mountEditor(
       if (drawing.tool === "scale") {
         scalePoints = null; // ett nytt klick börjar om med två nya punkter
       }
-      const snapped = drawing.tool === "scale" ? point : snap(point);
+      // Hörnen dras till befintliga hörn; det som placeras ut hamnar där man klickar.
+      const snapped = drawing.tool === "scale" || isPlacingTool(drawing.tool) ? point : snap(point);
       handle(drawing.pointerDown(snapped, SNAP_PIXELS * view.metersPerPixel()));
     },
     onPointerMove: (point) => {
@@ -697,6 +768,20 @@ export function mountEditor(
     onSelect: (next) => {
       selection = next;
       render();
+    },
+    onSelectItem: (itemId) => {
+      selection = { kind: "item", id: itemId };
+      render();
+    },
+    onMoveItem: (itemId, point) => {
+      selection = { kind: "item", id: itemId };
+      commit((document) => moveItem(document, itemId, point));
+    },
+    onRotateNode: (nodeId, rotation) => {
+      commit((document) => updateItem(document, nodeId, { rotation: normalizeRotation(rotation) }));
+    },
+    onClickWall: (roomId, index) => {
+      commit((document) => cycleWall(document, roomId, index));
     },
     onMoveRoom: (roomId, dx, dy) => {
       if (shown !== null && (dx !== 0 || dy !== 0)) {

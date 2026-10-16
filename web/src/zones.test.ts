@@ -39,7 +39,7 @@ function home(): HomeDocument {
                 [0, 4],
               ],
               walls: ["gips", "gips", "gips", "gips", "gips", "gips"],
-              lamps: [{ position: [1, 1], zone_id: null }],
+              lamps: [{ id: "taklampa", name: "Taklampa", position: [1, 1], zone_id: null }],
             },
           ],
         },
