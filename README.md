@@ -275,7 +275,7 @@ webben än; det kommer senare. Tills dess hämtar du den och öppnar den på
 din egen dator:
 
 1. Logga in på GitHub och öppna
-   [Firmware-körningarna på main](https://github.com/YXHFR/Homecontrol/actions/workflows/firmware.yml?query=branch%3Amain+is%3Asuccess).
+   [Firmware-körningarna på main](https://github.com/YXHFR/Homecontrol/actions/workflows/firmware.yml?query=branch%3Amain+event%3Apush+is%3Asuccess).
    Välj den översta och ladda ner **webbinstallerare** under
    **Artifacts**. Packa upp zip-filen till en egen mapp.
 2. Öppna ett terminalfönster i den mappen och starta en liten webbserver
