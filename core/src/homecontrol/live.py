@@ -8,10 +8,22 @@ Protokollet är JSON. Kärnan skickar:
   En lampa som ingen riktig lamputgång styr är ``"virtual": true``.
 * ``{"type": "state", ...}`` vid anslutning och efter varje ändring: spåren
   (``held`` är ett spår som radarn har tappat men som hålls kvar), läget i
-  varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), lamporna
-  och simuleringen. Fältet ``simulation`` visar simuleringsläget, eller är
-  null om det inte finns. Fältet ``cards`` visar de riktiga rumskorten (se
-  `cards.cards_message`), eller är null om inga kort kan anslutas.
+  varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), om rummet
+  är i manuellt läge och varför lamporna är som de är, lamporna (``on`` är
+  null när läget är okänt), de senaste händelserna för "Varför hände det?"
+  (``at`` är Unix-tid i sekunder) och simuleringen. Fältet ``simulation``
+  visar simuleringsläget, eller är null om det inte finns. Fältet ``cards``
+  visar de riktiga rumskorten (se `cards.cards_message`), eller är null om
+  inga kort kan anslutas.
+
+Livevyn styr lamporna för hand:
+
+* ``{"type": "set_lamp", "lamp_id": "taklampa", "on": true}``
+* ``{"type": "resume_automation", "room_id": "vardagsrum"}``
+
+Styrningen går genom samma ström som allt annat och omfattas av samma
+kontroll av adress och avsändare (se trust.py). Det finns inga konton: alla
+som når livevyn kan styra lamporna.
 
 Livevyn kan be om en uppdatering av ett korts firmware, som användaren har
 godkänt genom att trycka på knappen:
@@ -63,6 +75,17 @@ PersonId = Annotated[str, Field(max_length=64)]
 FloorId = Annotated[str, Field(max_length=64)]
 
 
+class SetLamp(BaseModel):
+    type: Literal["set_lamp"]
+    lamp_id: Annotated[str, Field(max_length=64)]
+    on: bool
+
+
+class ResumeAutomation(BaseModel):
+    type: Literal["resume_automation"]
+    room_id: Annotated[str, Field(max_length=64)]
+
+
 class SetSimulation(BaseModel):
     type: Literal["set_simulation"]
     enabled: bool
@@ -112,9 +135,16 @@ class InstallUpdate(BaseModel):
 
 
 ClientMessage = (
-    SetSimulation | AddPerson | MovePerson | RemovePerson | SetDaylight | SetSpeed | InstallUpdate
+    SetLamp
+    | ResumeAutomation
+    | SetSimulation
+    | AddPerson
+    | MovePerson
+    | RemovePerson
+    | SetDaylight
+    | SetSpeed
+    | InstallUpdate
 )
-
 
 _client_message: TypeAdapter[ClientMessage] = TypeAdapter(
     Annotated[ClientMessage, Field(discriminator="type")]
@@ -194,13 +224,29 @@ def state_message(
             for track in snapshot.tracks
         ],
         "rooms": [
-            {"id": room.room_id, "status": room.status.value, "lux": room.lux}
+            {
+                "id": room.room_id,
+                "status": room.status.value,
+                "lux": room.lux,
+                "adjusted_lux": room.adjusted_lux,
+                "manual": room.manual,
+                "explanation": room.explanation,
+            }
             for room in snapshot.rooms
         ],
         "zones": [{"id": zone.zone_id, "status": zone.status.value} for zone in snapshot.zones],
         "lamps": [
-            {"id": lamp.lamp_id, "on": lamp.on, "explanation": lamp.explanation}
+            {
+                "id": lamp.lamp_id,
+                "on": lamp.on,
+                "brightness": lamp.brightness,
+                "explanation": lamp.explanation,
+            }
             for lamp in snapshot.lamps
+        ],
+        "events": [
+            {"number": event.number, "at": event.at, "room_id": event.room_id, "text": event.text}
+            for event in snapshot.events
         ],
         "simulation": None if simulation is None else simulation_message(simulation),
         "cards": None if cards is None else cards_message(cards),
@@ -272,7 +318,7 @@ def create_live_router(
         async def receive_commands(group: anyio.abc.TaskGroup) -> None:
             try:
                 while True:
-                    _handle(simulation, cards, await websocket.receive_text())
+                    _handle(controller, simulation, cards, await websocket.receive_text())
             except WebSocketDisconnect:
                 # Att klienten går är det normala slutet; då behövs inga fler lägen.
                 group.cancel_scope.cancel()
@@ -292,7 +338,9 @@ def create_live_router(
     return router
 
 
-def _handle(simulation: Simulation | None, cards: Cards | None, text: str) -> None:
+def _handle(
+    controller: Controller, simulation: Simulation | None, cards: Cards | None, text: str
+) -> None:
     try:
         message = _client_message.validate_json(text)
     except ValidationError:
@@ -302,6 +350,14 @@ def _handle(simulation: Simulation | None, cards: Cards | None, text: str) -> No
         if cards is None or not cards.install_update(message.card):
             logger.info("Kortet %s kan inte uppdateras just nu", message.card[:64])
         return
+    match message:
+        case SetLamp(lamp_id=lamp_id, on=on):
+            controller.set_lamp(lamp_id, on)
+            return
+        case ResumeAutomation(room_id=room_id):
+            controller.resume_automation(room_id)
+            return
+    # Lamporna styrs även utan simulering; resten gäller bara simuleringen.
     if simulation is None:
         return
     match message:

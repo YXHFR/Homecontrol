@@ -37,6 +37,10 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   bright_above_lux: 100,
   off_after_empty_seconds: 180,
   wifi_weight: 0.5,
+  dim_before_off_seconds: 30,
+  dim_percent: 50,
+  daylight_off_after_seconds: 600,
+  windowless: false,
 };
 
 /** Det som placeras ut med ett klick: ett rumskort, en router eller en lampa. */
@@ -183,7 +187,9 @@ export function settingsProblem(settings: RoomSettings): string | null {
   const { dark_below_lux: dark, bright_above_lux: bright } = settings;
   const delay = settings.off_after_empty_seconds;
   const wifi = settings.wifi_weight;
-  if (![dark, bright, delay, wifi].every(Number.isFinite)) {
+  const { dim_before_off_seconds: dim, dim_percent: dimPercent } = settings;
+  const daylight = settings.daylight_off_after_seconds;
+  if (![dark, bright, delay, wifi, dim, dimPercent, daylight].every(Number.isFinite)) {
     return "Fyll i alla värdena.";
   }
   if (dark < 0 || bright > MAX_LUX) {
@@ -197,6 +203,15 @@ export function settingsProblem(settings: RoomSettings): string | null {
   }
   if (wifi < 0 || wifi > 1) {
     return "Wi-Fi-vikten ska vara mellan 0 och 1.";
+  }
+  if (dim < 0 || dim > MAX_DELAY_SECONDS) {
+    return "Varningsdimringen ska vara mellan 0 sekunder och ett dygn.";
+  }
+  if (!Number.isInteger(dimPercent) || dimPercent < 1 || dimPercent > 100) {
+    return "Ljusstyrkan under dimringen ska vara ett heltal från 1 till 100 %.";
+  }
+  if (daylight <= 0 || daylight > MAX_DELAY_SECONDS) {
+    return "Tiden med dagsljus i sträck innan lamporna släcks ska vara mer än 0 och högst ett dygn.";
   }
   return null;
 }

@@ -54,6 +54,7 @@ def create_app(
     # Lamporna är än så länge virtuella. Riktiga lamputgångar läggs till här.
     lamps = SimulatedLampOutput()
     controller = Controller(home, clock, [lamps])
+    lamps.report_new_lamps(home, controller.observe)
     cards = (
         None
         if esphome_secret is None
@@ -82,6 +83,7 @@ def create_app(
 
     def use_home(changed: Home) -> None:
         simulation.use_home(changed)
+        lamps.report_new_lamps(changed, controller.observe)
         if cards is not None:
             cards.use_home(changed)
 

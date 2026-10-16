@@ -96,6 +96,7 @@ describe("parseServerMessage", () => {
       rooms: [],
       zones: [],
       lamps: [],
+      events: [],
       simulation: null,
       cards: null,
     };

@@ -3,8 +3,8 @@ import math
 import pytest
 
 from homecontrol.clock import ManualClock
-from homecontrol.connectors import LampCommand, LightLevelObserved, SourceLost
-from homecontrol.controller import Controller
+from homecontrol.connectors import LampCommand, LampStateReported, LightLevelObserved, SourceLost
+from homecontrol.controller import MAX_EVENTS, Controller
 from homecontrol.fusion import Occupancy
 from homecontrol.simulation import SimulatedLampOutput
 from homes import one_room_home, radar_sees, room
@@ -172,7 +172,7 @@ def test_replaced_home_keeps_what_still_applies() -> None:
     ]
     assert [(lamp.lamp_id, lamp.on) for lamp in snapshot.lamps] == [
         ("taklampa", True),
-        ("hallampa", False),
+        ("hallampa", None),  # ingen har sagt hur hallens lampa är än
     ]
     # Lampan var redan tänd, så inget nytt kommando behövdes.
     assert len(lamps.history) == 1
@@ -205,3 +205,41 @@ def test_lamp_of_a_removed_room_is_turned_off() -> None:
 
     assert lamps.states == {"taklampa": False}
     assert controller.snapshot().lamps == ()
+
+
+def test_lamps_are_unknown_until_they_report_and_the_report_is_used() -> None:
+    controller, _, lamps = make()
+    assert controller.snapshot().lamps[0].on is None
+
+    controller.observe(LampStateReported("taklampa", on=True, brightness=40))
+    controller.observe(LampStateReported("finns-inte", on=True))
+    controller.observe(LampStateReported("taklampa", on=True, brightness=0))  # ogiltig
+
+    [lamp] = controller.snapshot().lamps
+    assert (lamp.on, lamp.brightness) == (True, 40)
+    controller.observe(LampStateReported("taklampa", on=False, brightness=0))  # släckt: går bra
+    assert controller.snapshot().lamps[0].on is False
+    assert not lamps.history
+
+
+def test_lamp_reported_lit_in_an_empty_room_is_switched_off_after_the_delay() -> None:
+    controller, clock, lamps = make()
+    controller.observe(radar_sees())
+    controller.observe(LampStateReported("taklampa", on=True))
+
+    clock.advance_to(10_000)
+    controller.tick()
+
+    assert [c.on for c in lamps.history] == [False]
+
+
+def test_events_are_kept_with_their_clock_time_and_only_the_latest_ones() -> None:
+    clock = ManualClock()
+    controller = Controller(one_room_home(), clock, [], wall_clock=lambda: 1_700_000_000)
+    for i in range(MAX_EVENTS + 5):
+        controller.set_lamp("taklampa", on=i % 2 == 0)
+
+    events = controller.snapshot().events
+    assert len(events) == MAX_EVENTS
+    assert {event.at for event in events} == {1_700_000_000}
+    assert events[-1].text.startswith("Taklampa tändes för hand")

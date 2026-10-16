@@ -209,6 +209,65 @@ def test_without_simulation_commands_are_ignored_but_state_streams() -> None:
         assert (track["x"], track["y"]) == (pytest.approx(1), pytest.approx(1))
 
 
+def test_clicking_a_lamp_switches_it_by_hand_and_pauses_the_automation() -> None:
+    application = app()
+    with TestClient(application) as client, client.websocket_connect("/api/live") as ws:
+        ws.receive_json()
+        state = ws.receive_json()
+        assert state["rooms"][0]["manual"] is False
+        assert state["lamps"][0]["on"] is False  # den virtuella lampan har rapporterat sitt läge
+
+        ws.send_json({"type": "set_lamp", "lamp_id": "taklampa", "on": True})
+        state = receive_until(ws, lamp_on)
+        assert state["rooms"][0]["manual"] is True
+        assert state["lamps"][0]["brightness"] == 100
+        [event] = state["events"]
+        assert event["room_id"] == "vardagsrum"
+        assert event["text"].startswith("Taklampa tändes för hand.")
+        assert event["at"] == pytest.approx(time.time(), abs=60)
+
+        ws.send_json({"type": "resume_automation", "room_id": "vardagsrum"})
+        state = receive_until(ws, lambda s: not s["rooms"][0]["manual"])
+        assert "slogs på igen för hand" in state["events"][-1]["text"]
+
+
+def test_lamps_can_be_controlled_without_simulation() -> None:
+    lamps = SimulatedLampOutput()
+    controller = Controller(one_room_home(), OffsetClock(), [lamps])
+    application = FastAPI()
+    application.include_router(create_live_router(controller, None, {"testserver"}))
+    with TestClient(application) as client, client.websocket_connect("/api/live") as ws:
+        ws.receive_json()
+        ws.receive_json()
+        ws.send_json({"type": "set_lamp", "lamp_id": "taklampa", "on": True})
+        receive_until(ws, lamp_on)
+        ws.send_json({"type": "set_lamp", "lamp_id": "finns-inte", "on": True})
+        ws.send_json({"type": "set_lamp", "lamp_id": "taklampa", "on": "ja"})
+        ws.send_json({"type": "resume_automation", "room_id": "finns-inte"})
+        ws.send_json({"type": "set_lamp", "lamp_id": "taklampa", "on": False})
+        receive_until(ws, lambda s: not lamp_on(s))
+    assert [(c.lamp_id, c.on) for c in lamps.history] == [("taklampa", True), ("taklampa", False)]
+
+
+def test_other_origins_cannot_switch_lamps() -> None:
+    """Lampstyrningen går genom samma kontroll av adress och avsändare som resten av strömmen."""
+    lamps = SimulatedLampOutput()
+    controller = Controller(one_room_home(), OffsetClock(), [lamps])
+    application = FastAPI()
+    application.include_router(create_live_router(controller, None, {"testserver"}))
+    for host, origin in [("testserver", "http://elak.example"), ("elak.example", None)]:
+        headers = {} if origin is None else {"origin": origin}
+        with (
+            TestClient(application) as client,
+            pytest.raises((WebSocketDisconnect, WebSocketDenialResponse)),
+            client.websocket_connect(f"ws://{host}/api/live", headers=headers) as ws,
+        ):
+            ws.send_json({"type": "set_lamp", "lamp_id": "taklampa", "on": True})
+            ws.receive_json()
+    assert not lamps.history
+    assert controller.snapshot().rooms[0].manual is False
+
+
 def test_client_that_leaves_stops_listening() -> None:
     controller = Controller(one_room_home(), OffsetClock(), [])
     listening = 0

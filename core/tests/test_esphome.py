@@ -113,7 +113,8 @@ class Harness:
     def lux(self) -> float | None:
         return self.controller.snapshot().rooms[0].lux
 
-    def lamp_on(self) -> bool:
+    def lamp_on(self) -> bool | None:
+        """None när lampans läge är okänt."""
         return self.controller.snapshot().lamps[0].on
 
     def card(self) -> Any:

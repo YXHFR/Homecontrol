@@ -62,11 +62,20 @@ describe("LiveConnection", () => {
 
     sockets[0].receive("inte json");
     sockets[0].receive(
-      '{"type":"state","tracks":[],"rooms":[],"zones":[],"lamps":[],"simulation":null,"cards":null}',
+      '{"type":"state","tracks":[],"rooms":[],"zones":[],"lamps":[],"events":[],"simulation":null,"cards":null}',
     );
 
     expect(messages).toEqual([
-      { type: "state", tracks: [], rooms: [], zones: [], lamps: [], simulation: null, cards: null },
+      {
+        type: "state",
+        tracks: [],
+        rooms: [],
+        zones: [],
+        lamps: [],
+        events: [],
+        simulation: null,
+        cards: null,
+      },
     ]);
   });
 

@@ -67,9 +67,19 @@ function state(
   return {
     type: "state",
     tracks: on ? [{ floor_id: "plan", x: 2.5, y: 2, held: false }] : [],
-    rooms: [{ id: "vardagsrum", status: on ? "upptaget" : "tomt", lux }],
+    rooms: [
+      {
+        id: "vardagsrum",
+        status: on ? "upptaget" : "tomt",
+        lux,
+        adjusted_lux: lux,
+        manual: false,
+        explanation: on ? "Någon är i Vardagsrum." : "Vardagsrum är tomt.",
+      },
+    ],
     zones: [],
-    lamps: [{ id: "taklampa", on, explanation: on ? "Tänd: någon är här." : "Släckt: tomt." }],
+    lamps: [{ id: "taklampa", on, brightness: 100, explanation: "" }],
+    events: [],
     simulation,
     cards: null,
   };
@@ -138,14 +148,14 @@ describe("mountApp", () => {
     expect(root.querySelector(".status")?.textContent).toBe("Ansluten");
   });
 
-  it("skickar våningen och läget vidare till ritytan och visar förklaringarna", () => {
+  it("skickar våningen och läget vidare till ritytan och visar förklaringen", () => {
     const { root, shown, handlers } = setup();
 
     handlers.onMessage(home);
     handlers.onMessage(state(10, true));
 
     expect(shown).toEqual([groundFloor, state(10, true)]);
-    expect(root.querySelector(".explanations")?.textContent).toBe("Taklampa: Tänd: någon är här.");
+    expect(root.querySelector(".rooms-now .explanation")?.textContent).toBe("Någon är i Vardagsrum.");
   });
 
   it("visar läget och ljusnivån i varje rum, även när läget är okänt", () => {
@@ -153,12 +163,105 @@ describe("mountApp", () => {
     handlers.onMessage(home);
 
     handlers.onMessage(state(10, true));
-    expect(root.querySelector(".rooms-now")?.textContent).toBe("Vardagsrum: upptaget, 10 lux");
+    expect(root.querySelector(".rooms-now .room-summary")?.textContent).toBe("Vardagsrum: upptaget, 10 lux");
 
-    handlers.onMessage({ ...state(null, false), rooms: [{ id: "vardagsrum", status: "okänt", lux: null }] });
+    const unknown = state(null, false);
+    handlers.onMessage({ ...unknown, rooms: [{ ...unknown.rooms[0], status: "okänt" }] });
     const item = find<HTMLLIElement>(root, ".rooms-now li");
-    expect(item.textContent).toBe("Vardagsrum: okänt – en sensor svarar inte, ljusnivån okänd");
+    expect(find(item, ".room-summary").textContent).toBe(
+      "Vardagsrum: okänt – en sensor svarar inte, ljusnivån okänd",
+    );
     expect(item.dataset.status).toBe("okänt");
+  });
+
+  it("visar ljusnivån utan lampornas eget ljus när de lyser upp sensorn", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    const lit = state(160, true);
+
+    handlers.onMessage({ ...lit, rooms: [{ ...lit.rooms[0], adjusted_lux: 10 }] });
+
+    expect(root.querySelector(".rooms-now .room-summary")?.textContent).toBe(
+      "Vardagsrum: upptaget, 160 lux (10 utan lampornas eget ljus)",
+    );
+  });
+
+  it("tänder och släcker en lampa för hand med ett klick på kartan eller i panelen", () => {
+    const { root, sent, handlers, callbacks } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false));
+
+    callbacks.onToggleLamp("taklampa");
+    const toggle = find<HTMLButtonElement>(root, ".lamp-toggle");
+    expect(toggle.textContent).toBe("Taklampa: släckt");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+    handlers.onMessage(state(10, true));
+    find<HTMLButtonElement>(root, ".lamp-toggle").click();
+
+    expect(sent).toEqual([
+      { type: "set_lamp", lamp_id: "taklampa", on: true },
+      { type: "set_lamp", lamp_id: "taklampa", on: false },
+    ]);
+  });
+
+  it("bygger inte om panelen när inget den visar har ändrats, så att ett klick inte tappas", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, true));
+    const toggle = find<HTMLButtonElement>(root, ".lamp-toggle");
+
+    // Ett nytt läge med ett flyttat spår men samma rum och lampor.
+    handlers.onMessage({ ...state(10, true), tracks: [{ floor_id: "plan", x: 3, y: 2, held: false }] });
+
+    expect(find<HTMLButtonElement>(root, ".lamp-toggle")).toBe(toggle);
+  });
+
+  it("tänder en lampa vars läge är okänt", () => {
+    const { root, sent, handlers } = setup();
+    handlers.onMessage(home);
+    const unknown = state(10, false);
+    handlers.onMessage({ ...unknown, lamps: [{ ...unknown.lamps[0], on: null }] });
+
+    const toggle = find<HTMLButtonElement>(root, ".lamp-toggle");
+    expect(toggle.textContent).toBe("Taklampa: okänt läge");
+    toggle.click();
+
+    expect(sent).toEqual([{ type: "set_lamp", lamp_id: "taklampa", on: true }]);
+  });
+
+  it("visar manuellt läge per rum och kan lämna tillbaka rummet till automatiken", () => {
+    const { root, sent, handlers } = setup();
+    handlers.onMessage(home);
+    const manual = state(10, true);
+
+    handlers.onMessage({ ...manual, rooms: [{ ...manual.rooms[0], manual: true }] });
+    const item = find<HTMLLIElement>(root, ".rooms-now li");
+    expect(item.dataset.manual).toBe("true");
+    expect(find(item, ".badge").textContent).toBe("Manuellt läge");
+    find<HTMLButtonElement>(item, "button.resume").click();
+
+    expect(sent).toEqual([{ type: "resume_automation", room_id: "vardagsrum" }]);
+  });
+
+  it("listar vad som hänt på våningen, senaste först och med klockslag", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(twoFloors);
+    const at = new Date(2026, 9, 16, 19, 2).getTime() / 1000;
+
+    handlers.onMessage({
+      ...state(10, true),
+      events: [
+        { number: 1, at, room_id: "vardagsrum", text: "Tändes: någon är i Vardagsrum och det var mörkt (9 lux, under 30)." },
+        { number: 2, at: at + 60, room_id: "sovrum", text: "Sovrumslampa tändes för hand." },
+        { number: 3, at: at + 120, room_id: "vardagsrum", text: "Dimrades till 50 %: Vardagsrum är tomt." },
+      ],
+    });
+
+    expect([...root.querySelectorAll(".events li")].map((li) => li.textContent)).toEqual([
+      "19:04 Dimrades till 50 %: Vardagsrum är tomt.",
+      "19:02 Tändes: någon är i Vardagsrum och det var mörkt (9 lux, under 30).",
+    ]);
   });
 
   it("visar inte våningsväljaren när hemmet bara har en våning", () => {

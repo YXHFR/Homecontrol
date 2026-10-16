@@ -23,6 +23,7 @@ describe("spåren i livevyn", () => {
       ],
       rooms: [],
       zones: [],
+      events: [],
       lamps: [],
       simulation: null,
       cards: null,
