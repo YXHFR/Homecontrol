@@ -8,6 +8,8 @@ Regeln just nu, med gränserna från rummets inställningar:
 
 * Tänd när någon är i rummet och det är mörkt (som standard under 30 lux).
 * Släck när rummet har varit tomt en stund (som standard 3 minuter).
+* Låt lamporna vara när läget i rummet är okänt, till exempel när en sensor
+  har slutat svara, så att ingen blir lämnad i mörker på grund av ett fel.
 
 En tänd lampa släcks inte för att det blir ljust, eftersom lampan själv gör
 rummet ljusare.
@@ -17,13 +19,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from homecontrol.connectors import LampCommand
+from homecontrol.fusion import Occupancy, Presence
 from homecontrol.home import Home, Room
-from homecontrol.presence import RoomPresence
 
 
 @dataclass(frozen=True)
 class RoomState:
-    presence: RoomPresence
+    presence: Presence
     lux: float | None
     """Senast uppmätta ljusnivå, eller None om ingen källa har mätt den än."""
 
@@ -51,11 +53,13 @@ def evaluate(
         state = rooms[room.id]
         for lamp in room.lamps:
             is_on = lamps_on.get(lamp.id, False)
-            vacant_since = state.presence.vacant_since
-            if vacant_since is None:
+            presence = state.presence
+            if presence.status is Occupancy.UNKNOWN:
+                decision = _unknown_room(room, is_on)
+            elif presence.status is Occupancy.OCCUPIED:
                 decision = _occupied_room(room, state.lux, is_on)
             else:
-                decision = _vacant_room(room, vacant_since, is_on, now)
+                decision = _vacant_room(room, presence.since, is_on, now)
 
             explanations[lamp.id] = decision.explanation
             if decision.switch_on is not None:
@@ -91,6 +95,14 @@ def _occupied_room(room: Room, lux: float | None, is_on: bool) -> _Decision:
             switch_on=True,
         )
     return _Decision(f"Släckt: någon är i {name} men det är ljust nog ({lux:g} lux).")
+
+
+def _unknown_room(room: Room, is_on: bool) -> _Decision:
+    state = "Tänd" if is_on else "Släckt"
+    return _Decision(
+        f"{state}: läget i {room.name} är okänt eftersom en sensor inte svarar, "
+        "så lampan lämnas som den är."
+    )
 
 
 def _vacant_room(room: Room, vacant_since: float, is_on: bool, now: float) -> _Decision:

@@ -1,7 +1,9 @@
+import pytest
+
 from homecontrol.connectors import LampCommand
+from homecontrol.fusion import Occupancy, Presence
 from homecontrol.home import DEFAULT_OFF_AFTER_EMPTY_SECONDS as OFF_AFTER_EMPTY_SECONDS
 from homecontrol.home import RoomSettings
-from homecontrol.presence import RoomPresence
 from homecontrol.rules import RoomState, evaluate
 from homes import home_with_settings, one_room_home
 
@@ -11,7 +13,9 @@ LAMP = HOME.lamps[0].id
 
 
 def rooms(*, vacant_since: float | None, lux: float | None = 10) -> dict[str, RoomState]:
-    return {ROOM: RoomState(RoomPresence(vacant_since=vacant_since), lux)}
+    if vacant_since is None:
+        return {ROOM: RoomState(Presence(Occupancy.OCCUPIED, 0), lux)}
+    return {ROOM: RoomState(Presence(Occupancy.VACANT, vacant_since), lux)}
 
 
 def test_is_pure_same_input_gives_same_output() -> None:
@@ -60,3 +64,14 @@ def test_short_delays_are_explained_in_seconds() -> None:
     result = evaluate(home, rooms(vacant_since=100), {LAMP: True}, now=105)
 
     assert "släcks när det varit tomt i 10 sekunder" in result.explanations[LAMP]
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_unknown_room_leaves_the_lamp_as_it_is(on: bool) -> None:
+    unknown = {ROOM: RoomState(Presence(Occupancy.UNKNOWN, 0), lux=5)}
+
+    result = evaluate(HOME, unknown, {LAMP: on}, now=24 * 60 * 60)
+
+    assert result.commands == ()
+    assert result.wake_at is None
+    assert "okänt" in result.explanations[LAMP]

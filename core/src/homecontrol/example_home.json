@@ -22,7 +22,8 @@
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
-              "off_after_empty_seconds": 180.0
+              "off_after_empty_seconds": 180.0,
+              "wifi_weight": 0.5
             },
             "zones": [
               {
@@ -73,7 +74,8 @@
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
-              "off_after_empty_seconds": 180.0
+              "off_after_empty_seconds": 180.0,
+              "wifi_weight": 0.5
             },
             "zones": [
               {
@@ -131,7 +133,8 @@
             "settings": {
               "dark_below_lux": 50.0,
               "bright_above_lux": 100.0,
-              "off_after_empty_seconds": 180.0
+              "off_after_empty_seconds": 180.0,
+              "wifi_weight": 0.5
             },
             "zones": [
               {
@@ -203,7 +206,8 @@
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
-              "off_after_empty_seconds": 180.0
+              "off_after_empty_seconds": 180.0,
+              "wifi_weight": 0.5
             },
             "zones": [
               {
@@ -252,7 +256,8 @@
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
-              "off_after_empty_seconds": 300.0
+              "off_after_empty_seconds": 300.0,
+              "wifi_weight": 0.5
             },
             "zones": [],
             "nodes": [
@@ -290,7 +295,8 @@
             "settings": {
               "dark_below_lux": 30.0,
               "bright_above_lux": 100.0,
-              "off_after_empty_seconds": 180.0
+              "off_after_empty_seconds": 180.0,
+              "wifi_weight": 0.5
             },
             "zones": [],
             "nodes": [

@@ -186,7 +186,7 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
   return parts;
 }
 
-/** Ljusgränserna och fördröjningen för ett valt rum. */
+/** Ljusgränserna, fördröjningen och Wi-Fi-vikten för ett valt rum. */
 export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLElement {
   const current = roomSettings(room);
   const inputs = {
@@ -211,12 +211,21 @@ export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLEl
       value: format(current.off_after_empty_seconds / 60),
       name: "off_after_empty_minutes",
     }),
+    wifi: element("input", {
+      type: "number",
+      min: "0",
+      max: "1",
+      step: "0.1",
+      value: format(current.wifi_weight),
+      name: "wifi_weight",
+    }),
   };
   const save = () => {
     const next: RoomSettings = {
       dark_below_lux: inputs.dark.valueAsNumber,
       bright_above_lux: inputs.bright.valueAsNumber,
       off_after_empty_seconds: Math.round(inputs.minutes.valueAsNumber * 60),
+      wifi_weight: inputs.wifi.valueAsNumber,
     };
     const problem = settingsProblem(next);
     if (problem !== null) {
@@ -224,6 +233,7 @@ export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLEl
       inputs.dark.value = format(current.dark_below_lux);
       inputs.bright.value = format(current.bright_above_lux);
       inputs.minutes.value = format(current.off_after_empty_seconds / 60);
+      inputs.wifi.value = format(current.wifi_weight);
       return;
     }
     if (JSON.stringify(next) !== JSON.stringify(current)) {
@@ -240,6 +250,13 @@ export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLEl
     element("label", {}, "Tänd när det är mörkare än (lux) ", inputs.dark),
     element("label", {}, "Släck när dagsljuset är över (lux) ", inputs.bright),
     element("label", {}, "Släck när rummet varit tomt i (minuter) ", inputs.minutes),
+    element("label", {}, "Wi-Fi-rörelsens vikt (0–1) ", inputs.wifi),
+    element(
+      "p",
+      { className: "muted" },
+      "Wi-Fi-rörelse håller kvar den som sitter still i en stillhetszon. Vid 0 används " +
+        "inte Wi-Fi, och först vid 1 räcker rörelsen ensam för att rummet ska räknas som upptaget.",
+    ),
     element("p", { className: "muted" }, "Dagsljusgränsen används när dagsljusregeln kommer."),
   );
 }

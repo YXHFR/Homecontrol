@@ -49,6 +49,11 @@ export interface RoomSettings {
   bright_above_lux: number;
   /** Så länge rummet ska ha varit tomt innan lamporna släcks, i sekunder. */
   off_after_empty_seconds: number;
+  /**
+   * Hur mycket Wi-Fi-rörelse väger mot radarn, från 0 till 1 (se RoomSettings i
+   * core/src/homecontrol/home.py). Under 1 startar Wi-Fi aldrig närvaro ensam.
+   */
+  wifi_weight: number;
 }
 
 export interface RoomModel {

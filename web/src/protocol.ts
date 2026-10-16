@@ -57,10 +57,19 @@ export interface HomeMessage {
   floors: Floor[];
 }
 
-/** En person som någon källa ser, på en viss våning. */
+/** En punkt på en viss våning. */
 export interface Target extends Point {
   floor_id: string;
 }
+
+/** Ett anonymt spår av en person, som kärnans sammanvägning har byggt av det radarerna ser. */
+export interface Track extends Target {
+  /** Radarn har tappat spåret, men kärnan håller det kvar en stund. */
+  held: boolean;
+}
+
+/** Läget i ett rum eller en zon. Okänt när en sensor där har slutat svara. */
+export type Occupancy = "upptaget" | "tomt" | "okänt";
 
 /** Tidsfarterna som simuleringen kan köra i. Vid 60× går en minut på en sekund. */
 export const SPEEDS = [1, 10, 60] as const;
@@ -84,9 +93,10 @@ export interface Simulation {
 
 export interface StateMessage {
   type: "state";
-  /** Allt som kärnan ser, från alla källor, även låtsaspersonerna. */
-  targets: Target[];
-  rooms: { id: string; occupied: boolean; lux: number | null }[];
+  /** Spåren från alla källor, även de som låtsaspersonerna ger. */
+  tracks: Track[];
+  rooms: { id: string; status: Occupancy; lux: number | null }[];
+  zones: { id: string; status: Occupancy }[];
   lamps: { id: string; on: boolean; explanation: string }[];
   /** Simuleringsläget, eller null om kärnan inte har någon simulering. */
   simulation: Simulation | null;
@@ -118,7 +128,8 @@ export function parseServerMessage(text: string): ServerMessage | null {
     floors?: unknown;
     rooms?: unknown;
     lamps?: unknown;
-    targets?: unknown;
+    tracks?: unknown;
+    zones?: unknown;
     simulation?: unknown;
   };
   if (message.type === "home" && Array.isArray(message.floors) && message.floors.length > 0) {
@@ -126,8 +137,9 @@ export function parseServerMessage(text: string): ServerMessage | null {
   }
   if (
     message.type === "state" &&
-    Array.isArray(message.targets) &&
+    Array.isArray(message.tracks) &&
     Array.isArray(message.rooms) &&
+    Array.isArray(message.zones) &&
     Array.isArray(message.lamps) &&
     (message.simulation === null || isSimulation(message.simulation))
   ) {

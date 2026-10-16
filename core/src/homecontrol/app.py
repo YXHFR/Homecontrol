@@ -45,7 +45,7 @@ def create_app(
     # och tidsfarten spärras så länge riktiga lampor styrs (se Simulation).
     lamps = SimulatedLampOutput()
     controller = Controller(home, clock, [lamps])
-    source = SimulatedSource(room_ids=(room.id for room in home.rooms))
+    source = SimulatedSource(home)
     simulation = Simulation(
         source, controller.observe, clock, floor_ids=(floor.id for floor in home.floors)
     )

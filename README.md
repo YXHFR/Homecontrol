@@ -8,8 +8,10 @@ och släcks efter det.
 > Zigbee2MQTT) och det finns en första livevy som ritar hemmet från
 > databasen, en våning i taget. Första gången visas ett påhittat exempelhem.
 > Livevyn har ett simuleringsläge: lägg till låtsaspersoner och dra in dem i
-> rummen med musen eller fingret, så tänds de virtuella lamporna när det är
-> mörkt och släcks när rummet har varit tomt en stund. Dagsljuset ställs med
+> rummen med musen eller fingret. Varje rumskort blir en virtuell radar som
+> ser personerna framför sig, och kärnan gör om det radarerna ser till
+> prickar på kartan och upptagna rum. Då tänds de virtuella lamporna när det
+> är mörkt och släcks när rummet har varit tomt en stund. Dagsljuset ställs med
 > ett reglage, och tiden kan gå 10 eller 60 gånger fortare så att du slipper
 > vänta. I kartredigeraren ritar du dina egna rum ovanpå en bild av
 > planritningen, väljer vad väggarna är gjorda av och var dörröppningarna är,
@@ -105,7 +107,7 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    vald zon väljer rummet under den. För ett valt rum ställer du också in
    rummets ljus: under vilken ljusnivå lamporna tänds, över vilken nivå
    dagsljuset räcker och hur många minuter rummet ska ha varit tomt innan de
-   släcks.
+   släcks. Där finns också Wi-Fi-rörelsens vikt (se **Närvaro** nedan).
 5. **Väggar och dörrar**: klicka på en vägg för att byta material, ett steg
    per klick: gips → betong → trä → glas → dörröppning och sedan gips igen.
    En vägg som två rum delar byts i båda.
@@ -115,14 +117,12 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    - **Vanlig zon**: en plats som systemet ska känna till, till exempel
      skrivbordet.
    - **Stillhetszon**: där man sitter eller ligger still, till exempel
-     soffan och sängen. Där ska närvaron hållas kvar även när radarn tappar
-     personen.
+     soffan och sängen. Där hålls närvaron kvar när radarn tappar personen,
+     så länge Wi-Fi känner rörelse i rummet (högst 30 minuter).
    - **Ignorera-zon**: störkällor som en fläkt, en gardin eller en växt.
    - **Entrézon**: vid en dörr, där den som försvinner ur sikte har gått ut.
 
-   Zonen ska ligga i ett rum; ett hörn nära en vägg hamnar på väggen. Zonerna
-   syns i livevyn, men närvaron tar hänsyn till dem först i en kommande
-   version.
+   Zonen ska ligga i ett rum; ett hörn nära en vägg hamnar på väggen.
 7. **Placera** rumskort, routrar och lampor genom att välja verktyget och
    klicka på kartan. Rumskort och lampor placeras inne i ett rum och hör till
    det rummet. Den ljusa tårtbiten framför ett rumskort är vad radarn ser
@@ -140,6 +140,34 @@ redigeraren öppen i två fönster och ändrar i båda, visar det ena fönstret
 det andras ändring i stället för att skriva över den. Under
 **Hemmet** står hur många rum, zoner, rumskort, routrar och lampor hemmet
 har.
+
+### Närvaro
+
+Varje rumskort ser personer med radarn. Kärnan räknar om det radarn ser
+utifrån var kortet sitter, hur högt, åt vilket håll det tittar och om det är
+spegelvänt. Det radarn ser utanför kortets eget rum (genom en vägg) och i
+ignorera-zoner räknas inte med. Kvar blir anonyma spår, prickar på kartan.
+
+Tappar radarn någon räknas personen som kvar en stund, beroende på var:
+
+- i en entrézon: inte alls, personen har gått ut
+- i en stillhetszon: så länge Wi-Fi känner rörelse i rummet, högst 30 minuter
+- annars i rummet: cirka 10 sekunder
+
+En person som hålls kvar visas som en streckad ring i livevyn. Under
+**Just nu** står om varje rum är upptaget, tomt eller okänt. Okänt betyder att
+ett rumskort i rummet har slutat svara; då lämnas lamporna som de är.
+
+Wi-Fi-rörelsens vikt ställs per rum, från 0 till 1. Vikten gånger hur säker
+mätningen är (också 0–1) avgör vad rörelsen räcker till. Från en fjärdedel
+förlänger den närvaron i stillhetszoner, och vid 1 räcker Wi-Fi-rörelse
+ensam för att rummet ska räknas som upptaget. Med 0 används inte Wi-Fi alls,
+och med standardvärdet 0,5 förlänger tydlig rörelse närvaron men startar
+den aldrig.
+
+Livevyn visar alltså också när någon sitter eller ligger still, i vilka
+zoner, och vilka sensorer som inte svarar. Tänk på det när du bestämmer vem
+som når livevyn (se nedan).
 
 ### Hemmet: spara, flytta och läsa in
 
@@ -196,8 +224,11 @@ Så läser du filen:
 - `lamps` har en plats, kan höra till en zon (`zone_id`) och har en
   `profile` som säger hur lampan styrs (`generisk` eller `ikea-tradfri`).
 
-Zonerna, lampornas zon och profil, `bright_above_lux` och rumskortens
-placering sparas redan men används först i kommande versioner.
+- `wifi_weight` i `settings` är hur mycket Wi-Fi-rörelse väger mot radarn,
+  från 0 till 1 (0,5 om inget anges, se **Närvaro**).
+
+Lampornas zon och profil och `bright_above_lux` sparas redan men används
+först i kommande versioner.
 
 Livevyn och kartredigeraren kräver ingen inloggning än, så alla i
 hemnätverket som når Homecontrol kan se och ändra planlösningen och bilden av
@@ -270,12 +301,14 @@ revision (`If-Match`) nekas. Ett sparat hem går till kärnan med
 `Controller.replace_home`, så livevyn får det direkt.
 
 Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
-närvarobedömningen avgör vilka rum som är upptagna, regelmotorn
-(`rules.evaluate`, en ren funktion) ger lampkommandon med förklaringar och
-lamputgångar (`connectors.LampOutput`) tar emot dem. Simuleringen
+sammanvägningen (`fusion.py`) gör om dem till spår och avgör vilka rum som
+är upptagna, regelmotorn (`rules.evaluate`, en ren funktion) ger
+lampkommandon med förklaringar och lamputgångar (`connectors.LampOutput`)
+tar emot dem. Simuleringen
 (`simulation.py`) är både en källa och en utgång. Simuleringsläget i livevyn
 styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
-når kärnan genom samma ingång som en riktig källa.
+når kärnan genom samma ingång som en riktig källa, som radarmål i varje
+rumskorts egna koordinater.
 
 Hemmodellen finns i `home.py` och kontrolleras där. `homefile.py` gör om den
 till och från ett JSON-dokument, och `store.py` sparar samma dokument i

@@ -222,15 +222,27 @@ describe("att ändra det som är placerat", () => {
 
 describe("rummens inställningar", () => {
   it("sparas i rummet", () => {
-    const settings = { dark_below_lux: 20, bright_above_lux: 150, off_after_empty_seconds: 300 };
+    const settings = {
+      dark_below_lux: 20,
+      bright_above_lux: 150,
+      off_after_empty_seconds: 300,
+      wifi_weight: 0.5,
+    };
     expect(rooms(setRoomSettings(home(), "hall", settings))[1].settings).toEqual(settings);
   });
 
-  it("mörkergränsen måste vara lägre än ljusgränsen och fördröjningen mer än noll", () => {
-    const ok = { dark_below_lux: 30, bright_above_lux: 100, off_after_empty_seconds: 180 };
+  it("mörkergränsen måste vara lägre än ljusgränsen, fördröjningen mer än noll och Wi-Fi-vikten 0–1", () => {
+    const ok = {
+      dark_below_lux: 30,
+      bright_above_lux: 100,
+      off_after_empty_seconds: 180,
+      wifi_weight: 0.5,
+    };
     expect(settingsProblem(ok)).toBeNull();
     expect(settingsProblem({ ...ok, dark_below_lux: 100 })).toMatch(/lägre än ljusgränsen/);
     expect(settingsProblem({ ...ok, off_after_empty_seconds: 0 })).toMatch(/Fördröjningen/);
-    expect(settingsProblem({ ...ok, bright_above_lux: NaN })).toMatch(/alla tre/);
+    expect(settingsProblem({ ...ok, bright_above_lux: NaN })).toMatch(/alla värdena/);
+    expect(settingsProblem({ ...ok, wifi_weight: 1.5 })).toMatch(/Wi-Fi-vikten/);
+    expect(settingsProblem({ ...ok, wifi_weight: 1 })).toBeNull();
   });
 });

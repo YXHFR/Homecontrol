@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   dark_below_lux: 30,
   bright_above_lux: 100,
   off_after_empty_seconds: 180,
+  wifi_weight: 0.5,
 };
 
 /** Det som placeras ut med ett klick: ett rumskort, en router eller en lampa. */
@@ -173,15 +174,17 @@ export function roomAt(floor: FloorModel, point: Point): RoomModel | null {
 }
 
 export function roomSettings(room: RoomModel): RoomSettings {
-  return room.settings ?? DEFAULT_SETTINGS;
+  // Ett hem från en äldre kärna kan sakna de senast tillagda inställningarna.
+  return { ...DEFAULT_SETTINGS, ...room.settings };
 }
 
 /** Varför inställningarna inte går att spara, eller null om de går. */
 export function settingsProblem(settings: RoomSettings): string | null {
   const { dark_below_lux: dark, bright_above_lux: bright } = settings;
   const delay = settings.off_after_empty_seconds;
-  if (![dark, bright, delay].every(Number.isFinite)) {
-    return "Fyll i alla tre värdena.";
+  const wifi = settings.wifi_weight;
+  if (![dark, bright, delay, wifi].every(Number.isFinite)) {
+    return "Fyll i alla värdena.";
   }
   if (dark < 0 || bright > MAX_LUX) {
     return `Ljusgränserna ska vara mellan 0 och ${MAX_LUX.toLocaleString("sv-SE")} lux.`;
@@ -191,6 +194,9 @@ export function settingsProblem(settings: RoomSettings): string | null {
   }
   if (delay <= 0 || delay > MAX_DELAY_SECONDS) {
     return "Fördröjningen ska vara mer än 0 och högst ett dygn.";
+  }
+  if (wifi < 0 || wifi > 1) {
+    return "Wi-Fi-vikten ska vara mellan 0 och 1.";
   }
   return null;
 }

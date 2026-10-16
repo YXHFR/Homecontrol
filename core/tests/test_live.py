@@ -11,13 +11,14 @@ from starlette.websockets import WebSocketDisconnect
 
 from homecontrol.app import create_app
 from homecontrol.clock import SystemClock
-from homecontrol.connectors import LightLevelObserved, TargetsObserved
+from homecontrol.connectors import LightLevelObserved
 from homecontrol.controller import Controller
+from homecontrol.fusion import HOLD_SECONDS
 from homecontrol.home import DEFAULT_OFF_AFTER_EMPTY_SECONDS as OFF_AFTER_EMPTY_SECONDS
 from homecontrol.home import Floor, Home, Zone, ZoneKind, rectangle
 from homecontrol.live import create_live_router, home_message, run_timer
 from homecontrol.simulation import DEFAULT_DAYLIGHT_LUX, SimulatedLampOutput
-from homes import FLOOR, at, one_room_home, room
+from homes import FLOOR, one_room_home, radar_sees, room
 
 
 def app() -> FastAPI:
@@ -68,13 +69,21 @@ def test_streams_home_and_state_and_lights_the_lamp() -> None:
 
         ws.send_json({"type": "move_person", "person_id": "1", "floor_id": FLOOR, "x": 2.5, "y": 2})
         state = receive_until(ws, lamp_on)
-        assert state["targets"] == [{"floor_id": FLOOR, "x": 2.5, "y": 2.0}]
+        [track] = state["tracks"]
+        assert track == {
+            "floor_id": FLOOR,
+            "x": pytest.approx(2.5),
+            "y": pytest.approx(2),
+            "held": False,
+        }
+        assert state["rooms"][0]["status"] == "upptaget"
         assert "mörkt" in state["lamps"][0]["explanation"]
 
+        # Personen försvinner mitt i rummet: spåret hålls kvar och visas som tappat.
         ws.send_json({"type": "remove_person", "person_id": "1"})
         state = receive_until(ws, lambda s: not s["simulation"]["persons"])
-        assert state["targets"] == []
-        assert not state["rooms"][0]["occupied"]
+        assert [track["held"] for track in state["tracks"]] == [True]
+        assert state["rooms"][0]["status"] == "upptaget"
 
 
 def test_daylight_speed_and_simulation_switch() -> None:
@@ -90,14 +99,16 @@ def test_daylight_speed_and_simulation_switch() -> None:
         receive_until(ws, lambda s: s["simulation"]["speed"] == 60)
 
         ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 1, "y": 1})
-        receive_until(ws, lambda s: s["targets"])
+        receive_until(ws, lambda s: s["tracks"])
 
         # Avslaget läge: personerna och ljusnivåerna försvinner och tiden går normalt.
+        # De virtuella korten har tystnat, så ingen vet längre om rummet är tomt.
         ws.send_json({"type": "set_simulation", "enabled": False})
         state = receive_until(ws, lambda s: not s["simulation"]["enabled"])
         assert state["simulation"]["speed"] == 1
         assert state["simulation"]["persons"] == []
-        assert state["targets"] == []
+        assert state["tracks"] == []
+        assert state["rooms"][0]["status"] == "okänt"
         assert state["rooms"][0]["lux"] is None
 
         # Kommandon till ett avslaget läge ignoreras.
@@ -132,7 +143,7 @@ def test_invalid_messages_are_ignored() -> None:
 
         # Bara det sista, giltiga meddelandet har nått kärnan.
         state = receive_until(ws, lambda s: s["simulation"]["persons"])
-        assert state["targets"] == [{"floor_id": FLOOR, "x": 1, "y": 1}]
+        assert [(t["x"], t["y"]) for t in state["tracks"]] == [(pytest.approx(1), pytest.approx(1))]
         assert state["simulation"]["speed"] == 10
         assert state["simulation"]["daylight"] == DEFAULT_DAYLIGHT_LUX
 
@@ -188,10 +199,12 @@ def test_without_simulation_commands_are_ignored_but_state_streams() -> None:
         ws.receive_json()
         ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 1, "y": 1})
         state = ws.receive_json()
-        assert state["targets"] == []
+        assert state["tracks"] == []
         assert state["simulation"] is None
-        controller.observe(TargetsObserved("radar", (at(1, 1),)))
-        assert ws.receive_json()["targets"] == [{"floor_id": FLOOR, "x": 1, "y": 1}]
+        controller.observe(radar_sees((1, 1), source_id="radar"))
+        [track] = ws.receive_json()["tracks"]
+        assert track["held"] is False
+        assert (track["x"], track["y"]) == (pytest.approx(1), pytest.approx(1))
 
 
 def test_client_that_leaves_stops_listening() -> None:
@@ -273,12 +286,13 @@ def test_timer_switches_off_the_lamp_when_the_delay_is_over() -> None:
         controller = Controller(one_room_home(), clock, [lamps])
         timer = asyncio.create_task(run_timer(controller, clock))
         controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-        controller.observe(TargetsObserved("sim", (at(1, 1),)))
-        controller.observe(TargetsObserved("sim", ()))
+        controller.observe(radar_sees((1, 1)))
+        controller.observe(radar_sees())
         assert lamps.states == {"taklampa": True}
 
         # Hoppa fram till strax före släckning; en ny observation låter timern räkna om.
-        clock.offset += OFF_AFTER_EMPTY_SECONDS - 0.05
+        # Spåret hålls kvar en stund innan rummet räknas som tomt.
+        clock.offset += HOLD_SECONDS + OFF_AFTER_EMPTY_SECONDS - 0.05
         controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
         await asyncio.sleep(0)
         assert lamps.states == {"taklampa": True}
@@ -303,8 +317,8 @@ def test_timer_follows_a_faster_clock() -> None:
         controller = Controller(one_room_home(), clock, [lamps])
         timer = asyncio.create_task(run_timer(controller, clock))
         controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-        controller.observe(TargetsObserved("sim", (at(1, 1),)))
-        controller.observe(TargetsObserved("sim", ()))
+        controller.observe(radar_sees((1, 1)))
+        controller.observe(radar_sees())
         await asyncio.sleep(0)  # timern väntar nu i tre minuter
 
         # Takten ändras medan timern väntar; den ska räkna om sin väntan.

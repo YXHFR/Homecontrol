@@ -1,6 +1,7 @@
 import Konva from "konva";
 import { corners, fitTransform, wallSegments, type Transform } from "./geometry";
 import type { Floor, Person, Point, StateMessage, WallKind } from "./protocol";
+import { ROOM_FILLS, trackStyle, tracksOnFloor } from "./trackStyles";
 import { ZONE_STYLES } from "./zoneStyles";
 
 export interface LiveViewCallbacks {
@@ -11,8 +12,9 @@ export interface LiveViewCallbacks {
 /**
  * Ritytan i livevyn. Den ritar en våning åt gången, och bara det kärnan har skickat.
  *
- * Det kärnan ser (från alla källor) ritas som små prickar. Låtsaspersonerna
- * ritas ovanpå som större ringar som går att dra med mus eller finger.
+ * Kärnans spår ritas som små prickar, och ett spår som radarn har tappat men
+ * som hålls kvar som en streckad ring. Låtsaspersonerna ritas ovanpå som
+ * större ringar som går att dra med mus eller finger.
  */
 export interface LiveView {
   setFloor(floor: Floor): void;
@@ -27,9 +29,11 @@ const ASPECT = 0.65;
 const PERSON_RADIUS = 12;
 /** Extra yta runt personen som går att ta tag i, så att den är lätt att dra med fingret. */
 const PERSON_HIT_WIDTH = 24;
-const TARGET_RADIUS = 5;
+const TRACK_RADIUS = 5;
 /** Hur genomskinlig en zons yta är. Zonerna ska synas men inte ta över kartan. */
 const ZONE_OPACITY = 0.18;
+/** En upptagen zon syns tydligare. */
+const ZONE_OCCUPIED_OPACITY = 0.4;
 const ZONE_FONT_SIZE = 12;
 const LAMP_RADIUS = 14;
 /** Hur bred lampans namnetikett får vara, i pixlar. Den centreras under lampan. */
@@ -46,13 +50,10 @@ const SEND_INTERVAL_MS = 50;
 const SETTLE_MS = 300;
 
 const COLORS = {
-  floor: "#f4f1ea",
-  occupied: "#e3eefb",
   wall: "#4a4a4a",
   lampOn: "#ffc933",
   lampOff: "#b8b8b8",
   person: "#d64545",
-  target: "#7a1f1f",
   text: "#222222",
 };
 
@@ -72,7 +73,7 @@ function drawRoomFloors(
   state: StateMessage | null,
 ) {
   for (const room of floor.rooms) {
-    const occupied = state?.rooms.find((r) => r.id === room.id)?.occupied ?? false;
+    const status = state?.rooms.find((r) => r.id === room.id)?.status ?? "tomt";
     layer.add(
       new Konva.Line({
         points: corners(room).flatMap((p) => {
@@ -80,14 +81,17 @@ function drawRoomFloors(
           return [screen.x, screen.y];
         }),
         closed: true,
-        fill: occupied ? COLORS.occupied : COLORS.floor,
+        fill: ROOM_FILLS[status],
       }),
     );
   }
 }
 
-/** Zonerna i sina färger, med streckad kant och namnet i mitten. */
-function drawZones(layer: Konva.Layer, t: Transform, floor: Floor) {
+/** Zonerna i sina färger, med streckad kant och namnet i mitten. En upptagen zon är starkare. */
+function drawZones(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
+  const occupied = new Set(
+    state?.zones.filter((zone) => zone.status === "upptaget").map((zone) => zone.id),
+  );
   for (const zone of floor.rooms.flatMap((room) => room.zones)) {
     const points = zone.polygon.map(([x, y]) => t.toScreen({ x, y }));
     const color = ZONE_STYLES[zone.kind].color;
@@ -98,7 +102,7 @@ function drawZones(layer: Konva.Layer, t: Transform, floor: Floor) {
         points: points.flatMap((p) => [p.x, p.y]),
         closed: true,
         fill: color,
-        opacity: ZONE_OPACITY,
+        opacity: occupied.has(zone.id) ? ZONE_OCCUPIED_OPACITY : ZONE_OPACITY,
       }),
       new Konva.Line({
         points: points.flatMap((p) => [p.x, p.y]),
@@ -201,11 +205,9 @@ function drawLamps(layer: Konva.Layer, t: Transform, floor: Floor, state: StateM
   }
 }
 
-function drawTargets(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
-  for (const target of state?.targets ?? []) {
-    if (target.floor_id === floor.id) {
-      layer.add(new Konva.Circle({ ...t.toScreen(target), radius: TARGET_RADIUS, fill: COLORS.target }));
-    }
+function drawTracks(layer: Konva.Layer, t: Transform, floor: Floor, state: StateMessage | null) {
+  for (const track of tracksOnFloor(state, floor.id)) {
+    layer.add(new Konva.Circle({ ...t.toScreen(track), radius: TRACK_RADIUS, ...trackStyle(track) }));
   }
 }
 
@@ -311,11 +313,11 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
 
     roomLayer.destroyChildren();
     drawRoomFloors(roomLayer, transform, shownFloor, state);
-    drawZones(roomLayer, transform, shownFloor);
+    drawZones(roomLayer, transform, shownFloor, state);
     drawWalls(roomLayer, transform, shownFloor);
     drawRoomNames(roomLayer, transform, shownFloor);
     drawLamps(roomLayer, transform, shownFloor, state);
-    drawTargets(roomLayer, transform, shownFloor, state);
+    drawTracks(roomLayer, transform, shownFloor, state);
     placePersons(transform, shownFloor);
   };
 
