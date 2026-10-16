@@ -44,8 +44,6 @@ def create_app(
     # något att se. När riktiga kopplingar läggs till ska läget börja avslaget,
     # och tidsfarten spärras så länge riktiga lampor styrs (se Simulation).
     lamps = SimulatedLampOutput()
-    # Alla lampor är virtuella tills en riktig lamputgång styr dem.
-    virtual_lamps = frozenset(lamp.id for lamp in home.lamps)
     controller = Controller(home, clock, [lamps])
     source = SimulatedSource(room_ids=(room.id for room in home.rooms))
     simulation = Simulation(
@@ -76,7 +74,7 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    app.include_router(create_live_router(controller, simulation, allowed_hosts, virtual_lamps))
+    app.include_router(create_live_router(controller, simulation, allowed_hosts, _virtual_lamps))
     app.include_router(
         create_editor_router(
             controller,
@@ -94,3 +92,12 @@ def create_app(
             logger.warning("Hittar inte webbgränssnittet i %s, serverar bara API:t", web_dir)
 
     return app
+
+
+def _virtual_lamps(home: Home) -> frozenset[str]:
+    """Alla lampor är virtuella tills en riktig lamputgång styr dem.
+
+    Frågan ställs om varje nytt hem, så att en lampa som läggs till i
+    kartredigeraren blir virtuell direkt.
+    """
+    return frozenset(lamp.id for lamp in home.lamps)

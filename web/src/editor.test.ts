@@ -27,7 +27,7 @@ function home(): HomeDocument {
                 [0, 2],
               ],
               walls: ["gips", "gips", "gips", "gips"],
-              lamps: [{ position: [1, 1] }],
+              lamps: [{ id: "taklampa", name: "Taklampa", position: [1, 1] }],
             },
           ],
         },
@@ -382,5 +382,154 @@ describe("kartredigeraren", () => {
     expect(core.saved).toEqual([]);
     expect(text(root, ".save-status")).toBe("Hemmet har lästs om.");
     expect(core.document.home.floors[0].rooms.map((room) => room.name)).toEqual(["Köket"]);
+  });
+  it("ett rumskort placeras i rummet, vrids, får höjd och spegling och tas bort", async () => {
+    const { root, core, scenes, map, click, settled } = await setup();
+    const nodes = () => core.document.home.floors[0].rooms[0].nodes ?? [];
+    const input = (name: string) => {
+      const found = root.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+      if (found === null) {
+        throw new Error(`Inget fält ${name}`);
+      }
+      return found;
+    };
+
+    click("Rumskort (ESP32)");
+    expect(text(root, ".instruction")).toMatch(/ringen eller knapparna/);
+    map.onPointerDown({ x: 1.5, y: 1 });
+    await settled();
+    expect(nodes()).toMatchObject([{ name: "Rumskort 1", position: [1.5, 1], rotation: 0 }]);
+    expect(scenes.at(-1)?.selectedItemId).toBe(nodes()[0].id);
+
+    click("↻ 15°");
+    await settled();
+    click("↺ 15°");
+    await settled();
+    click("↺ 15°");
+    await settled();
+    expect(nodes()[0].rotation).toBe(345);
+
+    // Ringen på kartan.
+    map.onRotateNode(nodes()[0].id, 90.4);
+    await settled();
+    expect(nodes()[0].rotation).toBe(90);
+
+    const height = input("height");
+    height.value = "2.4";
+    height.dispatchEvent(new Event("change"));
+    await settled();
+    const mirrored = input("mirrored");
+    mirrored.checked = true;
+    mirrored.dispatchEvent(new Event("change"));
+    await settled();
+    expect(nodes()[0]).toMatchObject({ height: 2.4, mirrored: true });
+
+    // En orimlig höjd sparas inte.
+    const tooHigh = input("height");
+    tooHigh.value = "99";
+    tooHigh.dispatchEvent(new Event("change"));
+    expect(text(root, ".message")).toMatch(/mellan 0 och 20/);
+    expect(nodes()[0].height).toBe(2.4);
+
+    click("Ta bort rumskortet");
+    await settled();
+    expect(nodes()).toEqual([]);
+    expect(text(root, ".selection")).toMatch(/Inget valt/);
+  });
+
+  it("rumskort och lampor går inte att placera utanför rummen", async () => {
+    const { root, core, map, click } = await setup();
+    click("Lampa");
+    map.onPointerDown({ x: 9, y: 9 });
+
+    expect(core.saved).toEqual([]);
+    expect(text(root, ".message")).toMatch(/inne i ett rum/);
+  });
+
+  it("lampor och routrar placeras, flyttas och tas bort, och lampor kopplas till ett rum", async () => {
+    const { root, core, map, click, settled, drawRectangle } = await setup();
+    drawRectangle(4); // ett rum till, 4–6 × 0–2
+    await settled();
+    const floor = () => core.document.home.floors[0];
+
+    click("Router");
+    map.onPointerDown({ x: 8, y: 5 });
+    await settled();
+    expect(floor().signal_sources).toEqual([
+      { id: "router-1", name: "Router 1", position: [8, 5], height: 1 },
+    ]);
+
+    click("Lampa");
+    map.onPointerDown({ x: 2, y: 1 });
+    await settled();
+    expect(floor().rooms[0].lamps?.map((lamp) => lamp.name)).toEqual(["Taklampa", "Lampa 1"]);
+
+    // Lampan dras över till det nya rummet och styrs sedan av det.
+    click("Välj och flytta");
+    map.onMoveItem("lampa-1", { x: 5, y: 1 });
+    await settled();
+    expect(floor().rooms[1].lamps).toMatchObject([{ id: "lampa-1", position: [5, 1] }]);
+
+    // … och kopplas tillbaka till köket i listan.
+    const room = root.querySelector<HTMLSelectElement>('select[name="room"]');
+    if (room === null) {
+      throw new Error("Ingen rumslista");
+    }
+    room.value = "kok";
+    room.dispatchEvent(new Event("change"));
+    await settled();
+    expect(floor().rooms[0].lamps?.map((lamp) => lamp.id)).toEqual(["taklampa", "lampa-1"]);
+
+    map.onMoveItem("router-1", { x: 7, y: 6 });
+    await settled();
+    expect(floor().signal_sources?.[0].position).toEqual([7, 6]);
+    click("Ta bort routern");
+    await settled();
+    expect(floor().signal_sources).toEqual([]);
+  });
+
+  it("väggverktyget byter material för varje klick på väggen", async () => {
+    const { core, map, click, settled } = await setup();
+    click("Väggar och dörrar");
+    for (let i = 0; i < 5; i++) {
+      map.onClickWall("kok", 2);
+    }
+    await settled();
+
+    const kinds = core.saved.map((document) => document.home.floors[0].rooms[0].walls[2]);
+    expect(kinds).toEqual(["betong", "trä", "glas", "dörröppning", "gips"]);
+  });
+
+  it("ett valt rum får mörker- och ljusgräns och fördröjning", async () => {
+    const { root, core, map, settled } = await setup();
+    map.onSelectRoom("kok");
+    const field = (name: string) => {
+      const found = root.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+      if (found === null) {
+        throw new Error(`Inget fält ${name}`);
+      }
+      return found;
+    };
+    expect(field("dark_below_lux").value).toBe("30");
+    expect(field("off_after_empty_minutes").value).toBe("3");
+
+    field("dark_below_lux").value = "15";
+    field("dark_below_lux").dispatchEvent(new Event("change"));
+    await settled();
+    field("off_after_empty_minutes").value = "5";
+    field("off_after_empty_minutes").dispatchEvent(new Event("change"));
+    await settled();
+    expect(core.document.home.floors[0].rooms[0].settings).toEqual({
+      dark_below_lux: 15,
+      bright_above_lux: 100,
+      off_after_empty_seconds: 300,
+    });
+
+    // Mörkergränsen över ljusgränsen sparas inte.
+    field("dark_below_lux").value = "500";
+    field("dark_below_lux").dispatchEvent(new Event("change"));
+    expect(text(root, ".message")).toMatch(/lägre än ljusgränsen/);
+    expect(field("dark_below_lux").value).toBe("15");
+    expect(core.saved).toHaveLength(2);
   });
 });

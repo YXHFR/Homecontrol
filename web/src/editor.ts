@@ -1,6 +1,8 @@
 /**
  * Kartredigeraren: verktygen till vänster, kartan i mitten och egenskaperna
- * till höger (se #34). På en smal skärm staplas de.
+ * till höger (se #34). På en smal skärm staplas de. Väggar, rumskort,
+ * routrar och lampor ändras med placing.ts och visas med editorItems.ts och
+ * itemPanel.ts (se #35).
  *
  * Varje ändring sparas direkt i kärnan, som kontrollerar hemmet och visar det
  * i livevyn. Säger kärnan nej visas varför, och kartan läses om från kärnan,
@@ -26,10 +28,29 @@ import {
   toXY,
 } from "./editing";
 import { createKonvaEditorView, type EditorViewFactory } from "./editorView";
+import { button, element } from "./dom";
 import { coreApi, CoreError, type HomeApi } from "./homeApi";
 import type { FloorModel, HomeDocument } from "./homefile";
+import { itemProperties, type PanelActions, roomSettingsForm } from "./itemPanel";
+import {
+  cycleWall,
+  findItem,
+  ITEM_LABELS,
+  type ItemKind,
+  moveItem,
+  normalizeRotation,
+  placeItem,
+  updateItem,
+} from "./placing";
 import type { Point } from "./protocol";
-import { Drawing, INSTRUCTIONS, type Outcome, type ToolName } from "./tools";
+import {
+  Drawing,
+  INSTRUCTIONS,
+  isPlacingTool,
+  mapHandlesClicks,
+  type Outcome,
+  type ToolName,
+} from "./tools";
 
 /** En bild som är klar att skickas till kärnan, och hur många bildpunkter bred den är. */
 export interface PreparedImage {
@@ -91,23 +112,11 @@ const TOOL_LABELS: Record<ToolName, string> = {
   polygon: "Rum, fri form",
   rectangle: "Rum, rektangel",
   scale: "Skala bilden",
+  walls: "Väggar och dörrar",
+  node: `${ITEM_LABELS.node} (ESP32)`,
+  router: ITEM_LABELS.router,
+  lamp: ITEM_LABELS.lamp,
 };
-
-function element<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = Object.assign(document.createElement(tag), props);
-  node.append(...children);
-  return node;
-}
-
-function button(label: string, onClick: () => void, className = ""): HTMLButtonElement {
-  const node = element("button", { type: "button", className }, label);
-  node.addEventListener("click", onClick);
-  return node;
-}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -131,6 +140,8 @@ export function mountEditor(
   let shown: HomeDocument | null = null;
   let floorId: string | null = null;
   let selectedRoomId: string | null = null;
+  /** Det valda rumskortet, den valda routern eller lampan. Ett rum och en sak väljs inte samtidigt. */
+  let selectedItemId: string | null = null;
   /** Punkterna som ska skalas mellan, när användaren har klickat ut två. */
   let scalePoints: { a: Point; b: Point } | null = null;
   /** Ändras när en ny bild laddas upp, så att webbläsaren inte visar den gamla. */
@@ -163,6 +174,11 @@ export function mountEditor(
     toolButton("select"),
     toolButton("polygon"),
     toolButton("rectangle"),
+    toolButton("walls"),
+    element("h2", {}, "Placera"),
+    toolButton("node"),
+    toolButton("router"),
+    toolButton("lamp"),
     element("h2", {}, "Kartan"),
     element(
       "div",
@@ -200,7 +216,7 @@ export function mountEditor(
     "aside",
     { className: "properties" },
     element("section", {}, element("h2", {}, "Instruktion"), instruction, draftActions),
-    element("section", {}, element("h2", {}, "Valt rum"), selection),
+    element("section", {}, element("h2", {}, "Valt på kartan"), selection),
     element("section", {}, element("h2", {}, "Hemmet"), summary),
   );
 
@@ -283,11 +299,28 @@ export function mountEditor(
     }
   };
 
+  const panelActions: PanelActions = {
+    commit: (edit) => commit(edit),
+    showMessage: (text) => showMessage(text),
+    deselect: () => {
+      selectedItemId = null;
+    },
+  };
+
   const renderSelection = () => {
+    const item = shown === null ? null : findItem(shown, selectedItemId);
+    if (item !== null) {
+      selection.replaceChildren(...itemProperties(item, panelActions));
+      return;
+    }
     const room = selectedRoomId === null || shown === null ? null : findRoom(shown, selectedRoomId);
     if (room === null) {
       selection.replaceChildren(
-        element("p", { className: "muted" }, "Inget valt. Välj ett rum på kartan."),
+        element(
+          "p",
+          { className: "muted" },
+          "Inget valt. Välj ett rum, ett rumskort, en router eller en lampa på kartan.",
+        ),
       );
       return;
     }
@@ -313,6 +346,7 @@ export function mountEditor(
         { className: "muted" },
         `${formatNumber(polygonArea(room.polygon.map(toPoint)))} m², ${room.polygon.length} hörn`,
       ),
+      roomSettingsForm(room, panelActions),
       button(
         "Ta bort rummet",
         () => {
@@ -374,6 +408,7 @@ export function mountEditor(
           ? null
           : { url: `${deps.api.planImageUrl(floor.id)}?v=${imageVersion}`, plan: floor.plan_image },
       selectedRoomId,
+      selectedItemId,
       tool: drawing.tool,
       draft: drawing.draft,
     });
@@ -404,6 +439,9 @@ export function mountEditor(
     }
     if (selectedRoomId !== null && shown !== null && findRoom(shown, selectedRoomId) === null) {
       selectedRoomId = null;
+    }
+    if (selectedItemId !== null && shown !== null && findItem(shown, selectedItemId) === null) {
+      selectedItemId = null;
     }
   };
 
@@ -486,6 +524,7 @@ export function mountEditor(
     scalePoints = null;
     if (tool !== "select") {
       selectedRoomId = null;
+      selectedItemId = null;
     }
     render();
   };
@@ -534,9 +573,29 @@ export function mountEditor(
       }
     } else if (outcome?.kind === "scale") {
       scalePoints = outcome;
+    } else if (outcome?.kind === "place") {
+      place(outcome.item, outcome.point);
+      return;
     }
     render();
   }
+
+  /** Placerar ett rumskort, en router eller en lampa och väljer den. */
+  const place = (kind: ItemKind, point: Point) => {
+    const floor = currentFloor();
+    const placed =
+      shown === null || floor === null ? null : placeItem(shown, kind, floor.id, point);
+    if (placed === null || floor === null) {
+      showMessage("Klicka inne i ett rum. Rumskort och lampor hör till rummet de sitter i.");
+      render();
+      return;
+    }
+    selectedItemId = placed.id;
+    // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
+    // gör att den nya saken förblir vald.
+    const given = { id: placed.id, name: placed.name };
+    commit((document) => placeItem(document, kind, floor.id, point, given)?.document ?? document);
+  };
 
   const applyScale = (a: Point, b: Point, meters: number) => {
     const floor = currentFloor();
@@ -619,9 +678,10 @@ export function mountEditor(
 
   const view = deps.createView(stageContainer, {
     onPointerDown: (point) => {
-      // Med Välj sköter kartan klicket själv. Att rita om nu skulle byta ut
-      // rummet under pekaren mitt i klicket, och då kommer klicket aldrig fram.
-      if (drawing.tool === "select") {
+      // Med Välj och väggverktyget sköter kartan klicket själv. Att rita om nu
+      // skulle byta ut det som är under pekaren mitt i klicket, och då kommer
+      // klicket aldrig fram.
+      if (mapHandlesClicks(drawing.tool)) {
         return;
       }
       if (drawing.tool === "scale" && currentFloor()?.plan_image == null) {
@@ -630,7 +690,8 @@ export function mountEditor(
       if (drawing.tool === "scale") {
         scalePoints = null; // ett nytt klick börjar om med två nya punkter
       }
-      const snapped = drawing.tool === "scale" ? point : snap(point);
+      // Hörnen dras till befintliga hörn; det som placeras ut hamnar där man klickar.
+      const snapped = drawing.tool === "scale" || isPlacingTool(drawing.tool) ? point : snap(point);
       handle(drawing.pointerDown(snapped, SNAP_PIXELS * view.metersPerPixel()));
     },
     onPointerMove: (point) => {
@@ -646,7 +707,24 @@ export function mountEditor(
     },
     onSelectRoom: (roomId) => {
       selectedRoomId = roomId;
+      selectedItemId = null;
       render();
+    },
+    onSelectItem: (itemId) => {
+      selectedItemId = itemId;
+      selectedRoomId = null;
+      render();
+    },
+    onMoveItem: (itemId, point) => {
+      selectedItemId = itemId;
+      selectedRoomId = null;
+      commit((document) => moveItem(document, itemId, point));
+    },
+    onRotateNode: (nodeId, rotation) => {
+      commit((document) => updateItem(document, nodeId, { rotation: normalizeRotation(rotation) }));
+    },
+    onClickWall: (roomId, index) => {
+      commit((document) => cycleWall(document, roomId, index));
     },
     onMoveRoom: (roomId, dx, dy) => {
       if (shown !== null && (dx !== 0 || dy !== 0)) {
