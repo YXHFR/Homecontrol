@@ -40,6 +40,14 @@ class Settings:
     Lösenordet står inte här utan läses av databasbiblioteket från PGPASSWORD.
     Utan databas används exempelhemmet, och inget sparas.
     """
+    prepare_database: bool = True
+    """Om kärnan själv skapar och uppdaterar tabellerna och ställer in historiken.
+
+    Med Docker Compose görs det i stället av `homecontrol förbered-databasen`
+    före kärnan, och kärnan ansluter med en roll som bara får läsa och skriva.
+    """
+    core_database_password: str | None = field(default=None, repr=False)
+    """Lösenordet som kärnans databasroll får av `homecontrol förbered-databasen`."""
     esphome_secret: str | None = field(default=None, repr=False)
     """Hemligheten som rumskortens nycklar räknas fram ur (se esphome.py).
 
@@ -78,6 +86,11 @@ class Settings:
                 if name.strip()
             ),
             database=os.environ.get("HOMECONTROL_DATABASE", "").strip() or None,
+            prepare_database=_parse_bool(
+                "HOMECONTROL_PREPARE_DATABASE",
+                os.environ.get("HOMECONTROL_PREPARE_DATABASE", ""),
+                default=True,
+            ),
             history_full_resolution=_parse_duration(
                 "HISTORY_FULL_HOURS",
                 os.environ.get("HOMECONTROL_HISTORY_FULL_HOURS", ""),
@@ -92,6 +105,7 @@ class Settings:
                 minimum=timedelta(days=1),
                 default=None,
             ),
+            core_database_password=os.environ.get("HOMECONTROL_CORE_DATABASE_PASSWORD") or None,
             esphome_secret=os.environ.get("HOMECONTROL_ESPHOME_SECRET", "").strip() or None,
             mqtt=_mqtt_from_env(),
         )
@@ -102,6 +116,17 @@ def _parse_port(text: str, name: str = "HOMECONTROL_PORT") -> int:
         return int(text)
     except ValueError:
         raise ValueError(f"{name} ska vara ett portnummer (inte {text!r})") from None
+
+
+def _parse_bool(name: str, text: str, *, default: bool) -> bool:
+    value = text.strip().lower()
+    if not value:
+        return default
+    if value in ("true", "1"):
+        return True
+    if value in ("false", "0"):
+        return False
+    raise ValueError(f"{name} ska vara true eller false (inte {text!r})")
 
 
 @overload

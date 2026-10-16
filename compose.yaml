@@ -22,13 +22,12 @@ services:
       HOMECONTROL_HOST: ${BIND_ADDRESS:-0.0.0.0}
       HOMECONTROL_PORT: ${WEB_PORT:-8000}
       HOMECONTROL_ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
-      # Hemmodellen sparas i databasen. Lösenordet läses från PGPASSWORD.
-      HOMECONTROL_DATABASE: host=/var/run/postgresql dbname=homecontrol user=homecontrol
-      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD saknas – kopiera .env.example till .env och fyll i}
-      # Hur länge historiken sparas (se README).
-      HOMECONTROL_HISTORY_FULL_HOURS: ${HISTORY_FULL_HOURS:-24}
-      # Tomt betyder utan tidsgräns.
-      HOMECONTROL_HISTORY_KEEP_DAYS: ${HISTORY_KEEP_DAYS:-}
+      # Hemmodellen och historiken sparas i databasen. Kärnan ansluter med en
+      # egen roll som bara får läsa och skriva i tabellerna; db-setup skapar
+      # och uppdaterar dem. Lösenordet läses från PGPASSWORD.
+      HOMECONTROL_DATABASE: host=/var/run/postgresql dbname=homecontrol user=homecontrol_core require_auth=scram-sha-256
+      HOMECONTROL_PREPARE_DATABASE: "false"
+      PGPASSWORD: ${CORE_DATABASE_PASSWORD:?CORE_DATABASE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
       # Rumskortens nycklar räknas fram ur den här. Tom: inga kort ansluts.
       HOMECONTROL_ESPHOME_SECRET: ${ESPHOME_SECRET:-}
       # Zigbee-lamporna styrs genom Zigbee2MQTT på MQTT-brokern. Kärnan delar
@@ -36,10 +35,45 @@ services:
       # publicerar sin port: på BIND_ADDRESS, eller 127.0.0.1 om den inte är satt.
       HOMECONTROL_MQTT_HOST: ${BIND_ADDRESS:-127.0.0.1}
       HOMECONTROL_MQTT_PORT: ${MQTT_PORT:-1883}
-      HOMECONTROL_MQTT_USER: ${MQTT_USER:?MQTT_USER saknas – kopiera .env.example till .env och fyll i}
-      HOMECONTROL_MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD saknas – kopiera .env.example till .env och fyll i}
+      # Kärnans egen MQTT-användare får bara det den behöver av Zigbee2MQTT:s
+      # ämnen (mosquitto/acl).
+      HOMECONTROL_MQTT_USER: homecontrol_core
+      HOMECONTROL_MQTT_PASSWORD: ${MQTT_CORE_PASSWORD:?MQTT_CORE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
+    volumes:
+      # Skrivskyddad, så att kärnan inte kan lägga en egen socket i stället
+      # för databasens.
+      - db-socket:/var/run/postgresql:ro
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+
+  # Skapar och uppdaterar databasens tabeller, ställer in hur länge historiken
+  # sparas och ger kärnans roll (homecontrol_core) rätt att läsa och skriva.
+  # Ansluter som databasens ägare och avslutas sedan, så att ägarens lösenord
+  # aldrig finns hos den kärna som är igång. Skapar kärnans roll om den saknas,
+  # så att en databas från en tidigare version uppgraderas med datan kvar.
+  db-setup:
+    image: ghcr.io/yxhfr/homecontrol:0.1.0 # x-release-please-version
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    command: ["homecontrol", "förbered-databasen"]
+    restart: "no"
+    # Behöver inget nätverk: databasen nås genom socketen i den delade volymen.
+    network_mode: none
+    environment:
+      # require_auth: lösenordet skickas aldrig i klartext, inte ens till en falsk databas.
+      HOMECONTROL_DATABASE: host=/var/run/postgresql dbname=homecontrol user=homecontrol require_auth=scram-sha-256
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD saknas – kopiera .env.example till .env och fyll i}
+      HOMECONTROL_CORE_DATABASE_PASSWORD: ${CORE_DATABASE_PASSWORD:?CORE_DATABASE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
+      # Hur länge historiken sparas (se README). Tomt betyder utan tidsgräns.
+      HOMECONTROL_HISTORY_FULL_HOURS: ${HISTORY_FULL_HOURS:-24}
+      HOMECONTROL_HISTORY_KEEP_DAYS: ${HISTORY_KEEP_DAYS:-}
     volumes:
       - db-socket:/var/run/postgresql
+    # Avbildens egen hälsokontroll gäller kärnans webbsida, som inte finns här.
+    healthcheck:
+      disable: true
     depends_on:
       db:
         condition: service_healthy
@@ -47,6 +81,9 @@ services:
   db:
     image: timescale/timescaledb:2.30.2-pg17
     restart: unless-stopped
+    # Lyssnar bara på socketen och kräver lösenord för alla inloggningar
+    # (se postgres/pg_hba.conf).
+    command: ["postgres", "-c", "listen_addresses=", "-c", "hba_file=/homecontrol/pg_hba.conf"]
     environment:
       POSTGRES_DB: homecontrol
       POSTGRES_USER: homecontrol
@@ -54,10 +91,11 @@ services:
       TIMESCALEDB_TELEMETRY: "off"
     volumes:
       - db-data:/var/lib/postgresql/data
+      - ./postgres/pg_hba.conf:/homecontrol/pg_hba.conf:ro
       # Databasens socket delas med kärnan. Databasen publiceras inte på någon port.
       - db-socket:/var/run/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U homecontrol -d homecontrol"]
+      test: ["CMD-SHELL", "pg_isready -h /var/run/postgresql -U homecontrol -d homecontrol"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -69,19 +107,23 @@ services:
     restart: unless-stopped
     entrypoint: ["sh", "/homecontrol/entrypoint.sh"]
     command: ["mosquitto", "-c", "/homecontrol/mosquitto.conf"]
+    # Kärnan, Zigbee2MQTT och hälsokontrollen har var sin användare.
+    # mosquitto/acl bestämmer vilka ämnen var och en får läsa och skriva.
     environment:
-      MQTT_USER: ${MQTT_USER:?MQTT_USER saknas – kopiera .env.example till .env och fyll i}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD saknas – kopiera .env.example till .env och fyll i}
+      MQTT_CORE_PASSWORD: ${MQTT_CORE_PASSWORD:?MQTT_CORE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
+      MQTT_ZIGBEE2MQTT_PASSWORD: ${MQTT_ZIGBEE2MQTT_PASSWORD:?MQTT_ZIGBEE2MQTT_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${MQTT_PORT:-1883}:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/homecontrol/mosquitto.conf:ro
+      - ./mosquitto/acl:/homecontrol/acl:ro
       - ./mosquitto/entrypoint.sh:/homecontrol/entrypoint.sh:ro
       - mosquitto-data:/mosquitto/data
     healthcheck:
       test:
         - CMD-SHELL
-        - mosquitto_sub -h 127.0.0.1 -u "$$MQTT_USER" -P "$$MQTT_PASSWORD" -t '$$SYS/broker/uptime' -C 1 -W 3
+        # Användaren och lösenordet läses från en fil som entrypoint.sh skapar.
+        - mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/uptime' -C 1 -W 3
       interval: 30s
       timeout: 5s
       retries: 3
@@ -96,8 +138,9 @@ services:
       # Vid första start visas en guide på Zigbee2MQTT-porten där du väljer
       # adaptertyp. MQTT är redan ifyllt härifrån.
       ZIGBEE2MQTT_CONFIG_MQTT_SERVER: mqtt://mosquitto:1883
-      ZIGBEE2MQTT_CONFIG_MQTT_USER: ${MQTT_USER:?MQTT_USER saknas – kopiera .env.example till .env och fyll i}
-      ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD saknas – kopiera .env.example till .env och fyll i}
+      # Zigbee2MQTT:s egen MQTT-användare får bara sina egna ämnen (mosquitto/acl).
+      ZIGBEE2MQTT_CONFIG_MQTT_USER: zigbee2mqtt
+      ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD: ${MQTT_ZIGBEE2MQTT_PASSWORD:?MQTT_ZIGBEE2MQTT_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
       ZIGBEE2MQTT_CONFIG_SERIAL_PORT: ${ZIGBEE_SERIAL_PORT:-/dev/zigbee}
       # Zigbee2MQTT berättar när en lampa slutar svara, så att kärnan kan visa det.
       ZIGBEE2MQTT_CONFIG_AVAILABILITY_ENABLED: "true"

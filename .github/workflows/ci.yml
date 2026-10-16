@@ -148,9 +148,11 @@ jobs:
       - name: Skapa .env med testlösenord
         run: |
           cp .env.example .env
-          sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" .env
-          sed -i "s/^MQTT_PASSWORD=.*/MQTT_PASSWORD=$(openssl rand -hex 16)/" .env
-          sed -i "s/^ZIGBEE2MQTT_AUTH_TOKEN=.*/ZIGBEE2MQTT_AUTH_TOKEN=$(openssl rand -hex 16)/" .env
+          for name in POSTGRES_PASSWORD CORE_DATABASE_PASSWORD MQTT_CORE_PASSWORD \
+              MQTT_ZIGBEE2MQTT_PASSWORD ZIGBEE2MQTT_AUTH_TOKEN; do
+            sed -i "s/^${name}=.*/${name}=$(openssl rand -hex 16)/" .env
+          done
+          if grep "=byt-mig$" .env; then echo "Raden ovan fylls inte i här"; exit 1; fi
       - name: Starta alla tjänster
         run: docker compose up --detach --build --wait --wait-timeout 300
       - name: Kontrollera kärnan och webbgränssnittet
@@ -158,6 +160,48 @@ jobs:
           curl --fail --silent http://127.0.0.1:8000/health
           curl --fail --silent http://127.0.0.1:8000/ | grep -q '<title>Homecontrol</title>'
           curl --fail --silent --output /dev/null http://127.0.0.1:8080/
+      - name: Kärnan ansluter till databasen med en egen roll utan superanvändarrättigheter
+        run: |
+          docker compose exec -T core python - <<'EOF'
+          import psycopg
+
+          core = "host=/var/run/postgresql dbname=homecontrol user=homecontrol_core"
+          with psycopg.connect(core) as conn:
+              row = conn.execute(
+                  "SELECT current_user, rolsuper, rolcreaterole, rolcreatedb"
+                  " FROM pg_roles WHERE rolname = current_user"
+              ).fetchone()
+              assert row == ("homecontrol_core", False, False, False), row
+          try:
+              # Databasens ägare, med kärnans lösenord: ska nekas.
+              psycopg.connect("host=/var/run/postgresql dbname=homecontrol user=homecontrol")
+          except psycopg.OperationalError:
+              pass
+          else:
+              raise AssertionError("kärnan kom in som databasens ägare")
+          EOF
+      - name: Kärnan och Zigbee2MQTT har var sin MQTT-användare med ACL
+        run: |
+          set -a; . ./.env; set +a
+          docker compose exec -T -e CORE="$MQTT_CORE_PASSWORD" -e Z2M="$MQTT_ZIGBEE2MQTT_PASSWORD" mosquitto sh -eu <<'EOF'
+          core() { mosquitto_sub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -C 1 -W 3 -t "$1"; }
+          z2m() { mosquitto_sub -h 127.0.0.1 -u zigbee2mqtt -P "$Z2M" -C 1 -W 3 -t "$1"; }
+          denied() { if "$@"; then echo "släpptes igenom: $*"; exit 1; fi; }
+          # Meddelandena sparas (-r), så att ordningen mellan pub och sub inte spelar roll.
+          mosquitto_pub -h 127.0.0.1 -u zigbee2mqtt -P "$Z2M" -r -t zigbee2mqtt/ci -m hej
+          mosquitto_pub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -r -t zigbee2mqtt/ci/set -m tand
+          mosquitto_pub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -r \
+            -t zigbee2mqtt/bridge/request/permit_join -m '{"time": 254}'
+          # Kärnan läser det Zigbee2MQTT skriver, och Zigbee2MQTT tar emot kärnans kommandon.
+          test "$(core zigbee2mqtt/ci)" = hej
+          test "$(z2m zigbee2mqtt/ci/set)" = tand
+          # Men kärnan får inte släppa in nya enheter.
+          denied z2m zigbee2mqtt/bridge/request/permit_join
+          # Zigbee2MQTT får inte läsa brokerns egna ämnen.
+          denied z2m '$SYS/broker/uptime'
+          # Utan lösenord kommer ingen in. HOME pekar bort från hälsokontrollens inloggning.
+          denied env HOME=/tmp mosquitto_sub -h 127.0.0.1 -t zigbee2mqtt/# -C 1 -W 3
+          EOF
       - name: Exportera hemmet från databasen och importera det igen
         run: |
           docker compose exec -T core homecontrol exportera > hem.json

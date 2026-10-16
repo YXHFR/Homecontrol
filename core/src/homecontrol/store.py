@@ -11,6 +11,11 @@ transaktioner. Ingen av dem anropas när lampor tänds och släcks; hemmet
 läses när kärnan startar och skrivs när någon importerar eller redigerar det.
 `DatabaseStore` är samma sak för kärnans webbgränssnitt, med en egen
 anslutning per anrop.
+
+Med Docker Compose ansluter kärnan med en egen roll (`CORE_ROLE`) som bara
+får läsa och skriva i tabellerna. Tabellerna skapas och ändras i stället
+av ett eget steg vid start (`homecontrol förbered-databasen`), som ansluter
+som databasens ägare och skapar kärnans roll om den saknas (`grant_core_role`).
 """
 
 import logging
@@ -19,6 +24,7 @@ import time
 from importlib import resources
 
 import psycopg
+from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from homecontrol import homefile
@@ -30,6 +36,16 @@ logger = logging.getLogger(__name__)
 _MIGRATION_NAME = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 # Godtyckligt men fast tal som låser migreringarna om två kärnor startar samtidigt.
 _MIGRATION_LOCK = 0x486F6D65
+
+CORE_ROLE = "homecontrol_core"
+"""Rollen som kärnan ansluter med i Docker Compose. Den är ingen superanvändare.
+
+Samma namn står i kärnans HOMECONTROL_DATABASE i compose.yaml.
+"""
+
+
+class SchemaOutdatedError(Exception):
+    """Tabellerna är inte skapade eller uppdaterade, och kärnan får inte göra det själv."""
 
 
 def connect(conninfo: str, *, attempts: int = 30, wait_seconds: float = 2.0) -> psycopg.Connection:
@@ -61,6 +77,67 @@ def migrate(conn: psycopg.Connection) -> None:
             logger.info("Uppdaterar databasen: %s", name)
             conn.execute(sql.encode())
             conn.execute("INSERT INTO schema_migration (version) VALUES (%s)", (version,))
+
+
+def check_schema(conn: psycopg.Connection) -> None:
+    """Kontrollerar att tabellerna är aktuella, utan att ändra något.
+
+    Används i stället för `migrate` när kärnan saknar rätt att ändra tabellerna.
+    Ger `SchemaOutdatedError` om någon migrering inte har körts.
+    """
+    if conn.execute("SELECT to_regclass('schema_migration') IS NOT NULL").fetchone() == (True,):
+        applied = {row[0] for row in conn.execute("SELECT version FROM schema_migration")}
+    else:
+        applied = set()
+    missing = [name for version, name, _ in _migrations() if version not in applied]
+    if missing:
+        raise SchemaOutdatedError(
+            f"Databasen är inte uppdaterad (saknar {', '.join(missing)}). "
+            "Den uppdateras av 'homecontrol förbered-databasen', "
+            "som Docker Compose kör före kärnan."
+        )
+
+
+def grant_core_role(conn: psycopg.Connection, password: str) -> None:
+    """Skapar kärnans roll om den saknas och ger den rätt att läsa och skriva tabellerna.
+
+    Rollen får inte skapa, ändra eller ta bort tabeller och är ingen
+    superanvändare. Lösenordet sätts om varje gång, så att det följer .env.
+    Det skickas bara hashat till databasen och syns därför inte i dess logg.
+    Anropas av databasens ägare, efter `migrate`, så att rättigheterna
+    också gäller nya tabeller.
+    """
+    role = CORE_ROLE
+    name = sql.Identifier(role)
+    hashed = conn.pgconn.encrypt_password(password.encode(), role.encode(), b"scram-sha-256")
+    with conn.transaction():
+        if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone() is None:
+            logger.info("Skapar databasrollen %s åt kärnan", role)
+            conn.execute(sql.SQL("CREATE ROLE {}").format(name))
+        conn.execute(
+            sql.SQL(
+                "ALTER ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE"
+                " NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD {}"
+            ).format(name, sql.Literal(hashed.decode()))
+        )
+        schema = sql.Identifier(_current_schema(conn))
+        conn.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(schema, name))
+        conn.execute(sql.SQL("REVOKE CREATE ON SCHEMA {} FROM {}").format(schema, name))
+        conn.execute(
+            sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {} TO {}").format(
+                schema, name
+            )
+        )
+        conn.execute(
+            sql.SQL("GRANT USAGE ON ALL SEQUENCES IN SCHEMA {} TO {}").format(schema, name)
+        )
+
+
+def _current_schema(conn: psycopg.Connection) -> str:
+    row = conn.execute("SELECT current_schema()").fetchone()
+    if row is None or row[0] is None:
+        raise RuntimeError("Databasen har inget schema att skapa tabellerna i (search_path)")
+    return str(row[0])
 
 
 def save_home(conn: psycopg.Connection, home: Home) -> None:
