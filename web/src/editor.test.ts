@@ -340,4 +340,47 @@ describe("kartredigeraren", () => {
     expect(core.document.home.floors[0].plan_image).toBeUndefined();
     expect(root.querySelector<HTMLButtonElement>('[data-tool="scale"]')?.disabled).toBe(true);
   });
+  it("medan en bild laddas upp går den inte att skala eller ta bort", async () => {
+    const { root, core, settled } = await setup();
+    let arrive: (value?: unknown) => void = () => undefined;
+    const arrived = new Promise((resolve) => (arrive = resolve));
+    const upload = core.api.uploadPlanImage;
+    core.api.uploadPlanImage = async (...args) => {
+      await arrived;
+      return upload(...args);
+    };
+    const input = root.querySelector<HTMLInputElement>('input[type="file"]');
+    Object.defineProperty(input, "files", { value: [new File(["bild"], "plan.png")] });
+    input?.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(root.dataset.busy).toBe("true"));
+
+    const disabled = (selector: string) =>
+      root.querySelector<HTMLButtonElement>(selector)?.disabled;
+    expect(disabled('[data-tool="scale"]')).toBe(true);
+    arrive();
+    await settled();
+    expect(disabled('[data-tool="scale"]')).toBe(false);
+    expect(text(root, ".instruction")).toMatch(/två punkter/);
+  });
+
+  it("går hemmet inte att läsa om efter ett fel skrivs inget över sedan", async () => {
+    const { root, core, drawRectangle, settled } = await setup();
+    core.failures = [new CoreError("Kunde inte nå databasen.")];
+    const load = core.api.load;
+    core.api.load = () => Promise.reject(new CoreError("Får ingen kontakt."));
+    drawRectangle(4);
+    await settled();
+
+    // Ett annat fönster ändrar under tiden, och kontakten kommer tillbaka.
+    core.document = structuredClone(core.document);
+    core.document.home.floors[0].rooms[0].name = "Köket";
+    core.revision++;
+    core.api.load = load;
+    drawRectangle(8);
+    await settled();
+
+    expect(core.saved).toEqual([]);
+    expect(text(root, ".save-status")).toBe("Hemmet har lästs om.");
+    expect(core.document.home.floors[0].rooms.map((room) => room.name)).toEqual(["Köket"]);
+  });
 });

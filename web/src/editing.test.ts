@@ -84,6 +84,12 @@ describe("rum", () => {
     });
   });
 
+  it("får ett nytt id om det givna redan används", () => {
+    const { roomId, document } = addRoom(home(), "plan", square, { roomId: "kok", name: "Kök" });
+    expect(roomId).toBe("rum-2");
+    expect(document.home.floors[0].rooms.map((room) => room.id)).toEqual(["kok", "rum-2"]);
+  });
+
   it("ändrar inte det gamla dokumentet", () => {
     const before = home();
     addRoom(before, "plan", square);

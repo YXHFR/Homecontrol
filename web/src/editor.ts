@@ -76,7 +76,9 @@ export async function shrinkImage(file: File): Promise<PreparedImage> {
 type Edit = (document: HomeDocument) => HomeDocument;
 
 /** Något som ska skickas till kärnan: en ändring av hemmet eller av en bild. */
-type Change = { kind: "edit"; edit: Edit } | { kind: "image"; send: () => Promise<void> };
+type Change =
+  | { kind: "edit"; edit: Edit }
+  | { kind: "image"; send: () => Promise<void>; done?: () => void };
 
 const defaultDependencies: EditorDependencies = {
   api: coreApi,
@@ -220,12 +222,16 @@ export function mountEditor(
     for (const [tool, node] of toolButtons) {
       node.setAttribute("aria-pressed", String(tool === drawing.tool));
     }
-    const hasImage = currentFloor()?.plan_image != null;
+    // Medan en bild laddas upp eller tas bort visar kartan fortfarande den
+    // gamla, så den går inte att skala eller ta bort förrän kärnan är klar.
+    const imageChanging = waiting.some((change) => change.kind === "image");
+    const hasImage = currentFloor()?.plan_image != null && !imageChanging;
     const scaleButton = toolButtons.get("scale");
     if (scaleButton !== undefined) {
       scaleButton.disabled = !hasImage;
     }
     removeImageButton.disabled = !hasImage;
+    uploadButton.disabled = imageChanging;
   };
 
   const renderInstruction = () => {
@@ -412,6 +418,7 @@ export function mountEditor(
       return; // en tidigare ändring misslyckades, och den här byggde på den
     }
     let changedView = change.kind === "image";
+    let succeeded = false;
     try {
       if (change.kind === "edit" && saved !== null) {
         // Ändringen görs på det kärnan har nu, inte på det som visades när
@@ -424,6 +431,7 @@ export function mountEditor(
         await reload(); // kärnan har ändrat hemmet; läs det som blev
       }
       waiting = waiting.filter((other) => other !== change);
+      succeeded = true;
       savedCount++;
       root.dataset.saves = String(savedCount);
     } catch (error) {
@@ -438,12 +446,18 @@ export function mountEditor(
       try {
         await reload();
       } catch {
-        // Kärnan går inte att nå; visa det som senast sparades.
+        // Kärnan går inte att nå; visa det som senast sparades. Det kan vara
+        // inaktuellt, så nästa ändring får skickas utan giltig revision. Då
+        // nekar kärnan den (409) och hemmet läses om i stället för att skrivas över.
+        revision = "";
       }
     }
     if (changedView) {
       refreshShown();
       render();
+    }
+    if (succeeded && change.kind === "image") {
+      change.done?.();
     }
     if (waiting.length === 0) {
       if (message.hidden) {
@@ -533,14 +547,21 @@ export function mountEditor(
       showMessage("Skriv in ett avstånd större än noll, mellan två olika punkter.");
       return;
     }
-    const plan = scalePlanImage(floor.plan_image, a, b, meters);
-    if (plan.meters_per_pixel > 1) {
+    const shownPlan = floor.plan_image;
+    if (scalePlanImage(shownPlan, a, b, meters).meters_per_pixel > 1) {
       showMessage("Så stor kan bilden inte bli. Kontrollera avståndet.");
       return;
     }
     drawing.cancel();
     scalePoints = null;
-    commit((document) => setPlanImage(document, floor.id, plan));
+    commit((document) => {
+      const plan = document.home.floors.find((f) => f.id === floor.id)?.plan_image;
+      // Punkterna klickades på bilden som visades; har den bytts gäller de inte.
+      if (plan == null || JSON.stringify(plan) !== JSON.stringify(shownPlan)) {
+        return document;
+      }
+      return setPlanImage(document, floor.id, scalePlanImage(plan, a, b, meters));
+    });
     view.fit();
   };
 
@@ -562,7 +583,12 @@ export function mountEditor(
         // Kärnan lägger bilden på våningen och sparar hemmet i samma steg.
         revision = await deps.api.uploadPlanImage(floor.id, image.blob, image.width, revision);
         imageVersion = Date.now();
-        chooseTool("scale");
+      },
+      done: () => {
+        // Nästa steg är att skala bilden, om användaren inte redan ritar något annat.
+        if (drawing.draft.kind === "none") {
+          chooseTool("scale");
+        }
       },
     });
   };

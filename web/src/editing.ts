@@ -182,8 +182,10 @@ export function addRoom(
   corners: Point[],
   given?: { roomId: string; name: string },
 ): { document: HomeDocument; roomId: string; name: string } {
-  const name = given?.name ?? nextRoomName(document);
-  const roomId = given?.roomId ?? uniqueId(document, name);
+  // Ett givet id som redan används (någon annan hann lägga till ett rum) byts ut.
+  const usable = given !== undefined && !allIds(document).has(given.roomId) ? given : undefined;
+  const name = usable?.name ?? nextRoomName(document);
+  const roomId = usable?.roomId ?? uniqueId(document, name);
   const polygon = corners.map(toXY);
   const room: RoomModel = { id: roomId, name, polygon, walls: polygon.map(() => "gips") };
   return {
