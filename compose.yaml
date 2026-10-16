@@ -27,6 +27,9 @@ services:
       # och uppdaterar dem. Lösenordet läses från PGPASSWORD.
       HOMECONTROL_DATABASE: host=/var/run/postgresql dbname=homecontrol user=homecontrol_core require_auth=scram-sha-256
       HOMECONTROL_PREPARE_DATABASE: "false"
+      # Kärnans egen kopia av hemmet. Svarar inte databasen vid start används
+      # kopian, så att lamporna styrs ändå (se README).
+      HOMECONTROL_HOME_COPY: /var/lib/homecontrol/hem.json
       PGPASSWORD: ${CORE_DATABASE_PASSWORD:?CORE_DATABASE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
       # Rumskortens nycklar räknas fram ur den här. Tom: inga kort ansluts.
       HOMECONTROL_ESPHOME_SECRET: ${ESPHOME_SECRET:-}
@@ -43,6 +46,10 @@ services:
       # Skrivskyddad, så att kärnan inte kan lägga en egen socket i stället
       # för databasens.
       - db-socket:/var/run/postgresql:ro
+      # Bara kärnan har den här volymen, och bara kärnans användare kan läsa kopian.
+      - core-data:/var/lib/homecontrol
+    # Kärnan startar när db-setup har lyckats. Svarar inte databasen alls
+    # lyckas db-setup ändå, och kärnan startar med sin kopia av hemmet.
     depends_on:
       db-setup:
         condition: service_completed_successfully
@@ -74,9 +81,14 @@ services:
     # Avbildens egen hälsokontroll gäller kärnans webbsida, som inte finns här.
     healthcheck:
       disable: true
+    # Startas även när databasen inte kommer igång. Svarar den inte alls
+    # avslutas db-setup utan fel, så att kärnan kan starta med sin kopia av
+    # hemmet. Alla andra fel (till exempel fel lösenord eller en ogiltig
+    # inställning för historiken) stoppar kärnan som vanligt.
     depends_on:
       db:
         condition: service_healthy
+        required: false
 
   db:
     image: timescale/timescaledb:2.30.2-pg17
@@ -160,6 +172,7 @@ services:
         condition: service_healthy
 
 volumes:
+  core-data:
   db-data:
   db-socket:
   mosquitto-data:

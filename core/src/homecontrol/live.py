@@ -19,7 +19,10 @@ Protokollet är JSON. Kärnan skickar:
   inga kort kan anslutas. Fältet ``calibration`` visar lampkalibreringen som
   pågår eller den senaste (``phase`` är ``"pågår"``, ``"klar"`` eller
   ``"avbruten"``, och ``results`` är varje lampas bidrag i lux), eller är null.
-  Kalibreringen startas genom API:t (se calibration_api.py).
+  Kalibreringen startas genom API:t (se calibration_api.py). Fältet
+  ``database`` är ``{"connected": true}`` när kärnan har kontakt med
+  databasen, ``{"connected": false}`` när den inte har det och styr med sin
+  kopia av hemmet (se databaselink.py), och null när ingen databas är inställd.
 
 Livevyn styr lamporna för hand:
 
@@ -66,6 +69,7 @@ from homecontrol.calibration import CalibrationView
 from homecontrol.cards import Cards, CardView, cards_message
 from homecontrol.clock import PacedClock
 from homecontrol.controller import Controller, Snapshot
+from homecontrol.databaselink import DatabaseLink, DatabaseView
 from homecontrol.home import Home, Point
 from homecontrol.simulation import Simulation, SimulationView, Speed
 from homecontrol.trust import trusted
@@ -220,6 +224,7 @@ def state_message(
     snapshot: Snapshot,
     simulation: SimulationView | None,
     cards: Sequence[CardView] | None = None,
+    database: DatabaseView | None = None,
 ) -> dict[str, Any]:
     return {
         "type": "state",
@@ -263,6 +268,7 @@ def state_message(
         "calibration": (
             None if snapshot.calibration is None else calibration_message(snapshot.calibration)
         ),
+        "database": None if database is None else {"connected": database.connected},
     }
 
 
@@ -301,13 +307,15 @@ def create_live_router(
     allowed_hosts: Set[str] = frozenset(),
     virtual_lamps: Callable[[Home], Set[str]] = lambda _: frozenset(),
     cards: Cards | None = None,
+    database: DatabaseLink | None = None,
 ) -> APIRouter:
     """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som livevyn får nås på.
 
     `virtual_lamps` ger lamporna i ett hem som bara finns i simuleringen, utan
     någon riktig lampa. Den anropas varje gång hemmet har bytts.
 
-    `cards` är de riktiga rumskorten (se cards.py).
+    `cards` är de riktiga rumskorten (se cards.py), och `database` kärnans
+    kontakt med databasen (se databaselink.py).
     """
     router = APIRouter()
 
@@ -323,7 +331,7 @@ def create_live_router(
         changed = asyncio.Event()
         changed.set()
         unsubscribes = [controller.subscribe(changed.set)]
-        for source in (simulation, cards):
+        for source in (simulation, cards, database):
             if source is not None:
                 unsubscribes.append(source.subscribe(changed.set))
 
@@ -337,7 +345,10 @@ def create_live_router(
                     await websocket.send_json(home_message(sent_home, virtual_lamps(sent_home)))
                 view = None if simulation is None else simulation.view()
                 card_views = None if cards is None else cards.cards()
-                await websocket.send_json(state_message(controller.snapshot(), view, card_views))
+                database_view = None if database is None else database.view()
+                await websocket.send_json(
+                    state_message(controller.snapshot(), view, card_views, database_view)
+                )
 
         async def receive_commands(group: anyio.abc.TaskGroup) -> None:
             try:

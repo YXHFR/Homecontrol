@@ -31,6 +31,11 @@ const STATUS_TEXT: Record<ConnectionStatus, string> = {
   closed: "Tappade kontakten med kärnan, försöker igen …",
 };
 
+const DATABASE_DOWN =
+  "⚠ Databasen svarar inte. Lamporna styrs som vanligt med det senast sparade hemmet, " +
+  "men varken ändringar i kartredigeraren eller historiken sparas. " +
+  "Kärnan försöker ansluta igen av sig själv.";
+
 /** Våningen som visas först: entréplanet om det finns, annars den första. */
 export function startFloor(home: HomeMessage): Floor {
   return home.floors.find((floor) => floor.level === 0) ?? home.floors[0];
@@ -43,6 +48,8 @@ export function startFloor(home: HomeMessage): Floor {
  */
 export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDependencies): void {
   const status = element("p", { className: "status" }, STATUS_TEXT.connecting);
+  const databaseWarning = element("p", { className: "database-warning", hidden: true }, DATABASE_DOWN);
+  databaseWarning.setAttribute("role", "alert");
   const stageContainer = element("div", { className: "stage" });
   const events = element("ol", { className: "events" });
   const roomsNow = element("ul", { className: "rooms-now" });
@@ -67,6 +74,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   root.replaceChildren(
     element("h1", {}, "Homecontrol – livevy"),
     status,
+    databaseWarning,
     floorPicker,
     stageContainer,
     element(
@@ -158,6 +166,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
 
   const showState = (state: StateMessage) => {
     lastState = state;
+    databaseWarning.hidden = state.database === null || state.database.connected;
     view.setState(state);
     cards.show(state.cards);
     simulation.show(state.simulation);

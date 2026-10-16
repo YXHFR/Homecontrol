@@ -46,6 +46,11 @@ class Settings:
     Med Docker Compose görs det i stället av `homecontrol förbered-databasen`
     före kärnan, och kärnan ansluter med en roll som bara får läsa och skriva.
     """
+    home_copy: Path | None = None
+    """Filen där kärnan har en kopia av hemmet, att starta med när databasen inte svarar.
+
+    Utan den väntar kärnan på databasen vid start (se homecopy.py).
+    """
     core_database_password: str | None = field(default=None, repr=False)
     """Lösenordet som kärnans databasroll får av `homecontrol förbered-databasen`."""
     esphome_secret: str | None = field(default=None, repr=False)
@@ -105,10 +110,15 @@ class Settings:
                 minimum=timedelta(days=1),
                 default=None,
             ),
+            home_copy=_optional_path(os.environ.get("HOMECONTROL_HOME_COPY", "")),
             core_database_password=os.environ.get("HOMECONTROL_CORE_DATABASE_PASSWORD") or None,
             esphome_secret=os.environ.get("HOMECONTROL_ESPHOME_SECRET", "").strip() or None,
             mqtt=_mqtt_from_env(),
         )
+
+
+def _optional_path(text: str) -> Path | None:
+    return Path(text.strip()) if text.strip() else None
 
 
 def _parse_port(text: str, name: str = "HOMECONTROL_PORT") -> int:

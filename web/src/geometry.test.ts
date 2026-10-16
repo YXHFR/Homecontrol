@@ -99,6 +99,7 @@ describe("parseServerMessage", () => {
       events: [],
       simulation: null,
       cards: null,
+      database: null,
     };
     const simulation = { enabled: true, speed: 10, daylight: 5, persons: [] };
     expect(parseServerMessage(JSON.stringify(state))).toEqual(state);

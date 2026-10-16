@@ -18,6 +18,7 @@ from homecontrol.cards import create_cards_router
 from homecontrol.clock import SystemClock
 from homecontrol.connectors import defer_in_loop
 from homecontrol.controller import Controller
+from homecontrol.databaselink import DatabaseLink
 from homecontrol.editor import HomeChanges, HomeStore, MemoryStore, create_editor_router
 from homecontrol.esphome import (
     AioesphomeNetwork,
@@ -51,6 +52,7 @@ def create_app(
     esphome_secret: str | None = None,
     card_network: Network | None = None,
     mqtt: Connect | None = None,
+    database: DatabaseLink | None = None,
 ) -> FastAPI:
     """`home` är hemmet från databasen. Utan det används exempelhemmet.
 
@@ -65,6 +67,10 @@ def create_app(
 
     Med `mqtt` styrs de Zigbee-lampor som är placerade på kartan genom
     Zigbee2MQTT (se zigbee.py). Övriga lampor är virtuella.
+
+    `database` är kärnans kontakt med databasen där `home_store` sparar (se
+    databaselink.py). Utan kontakt visar livevyn en varning, ändringar nekas
+    och kärnan ansluter igen i bakgrunden.
     """
     clock = clock if clock is not None else SystemClock()
     home = home if home is not None else example_home()
@@ -129,6 +135,8 @@ def create_app(
             tasks.append(asyncio.create_task(cards.run(controller.observe)))
         if zigbee is not None and mqtt is not None:
             tasks.append(asyncio.create_task(zigbee.run(controller.observe, mqtt)))
+        if database is not None:
+            tasks.append(asyncio.create_task(database.run(changes.resync)))
         try:
             yield
         finally:
@@ -151,6 +159,7 @@ def create_app(
     app.state.simulation = simulation
     app.state.cards = cards
     app.state.zigbee = zigbee
+    app.state.database = database
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -162,7 +171,7 @@ def create_app(
         return frozenset(lamp.id for lamp in home.lamps) - real_lamps(home)
 
     app.include_router(
-        create_live_router(controller, simulation, allowed_hosts, virtual_lamps, cards)
+        create_live_router(controller, simulation, allowed_hosts, virtual_lamps, cards, database)
     )
     app.include_router(create_cards_router(cards, allowed_hosts))
     app.include_router(create_lamp_devices_router(zigbee, allowed_hosts))
@@ -170,6 +179,7 @@ def create_app(
         controller,
         home_store if home_store is not None else MemoryStore(),
         on_home_replaced=use_home,
+        database=database,
     )
     controller.on_calibrated(calibration_saver(changes))
     app.include_router(create_editor_router(changes, allowed_hosts))

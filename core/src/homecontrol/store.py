@@ -21,10 +21,11 @@ som databasens ägare och skapar kärnans roll om den saknas (`grant_core_role`)
 import logging
 import re
 import time
+from collections.abc import Callable
 from importlib import resources
 
 import psycopg
-from psycopg import sql
+from psycopg import pq, sql
 from psycopg.types.json import Jsonb
 
 from homecontrol import homefile
@@ -44,6 +45,11 @@ Samma namn står i kärnans HOMECONTROL_DATABASE i compose.yaml.
 """
 
 
+STATEMENT_TIMEOUT_MS = 30_000
+"""Så länge en fråga från `DatabaseStore` får ta, så att en databas som hänger
+inte håller kvar kartredigerarens ändringar för alltid."""
+
+
 class SchemaOutdatedError(Exception):
     """Tabellerna är inte skapade eller uppdaterade, och kärnan får inte göra det själv."""
 
@@ -59,6 +65,15 @@ def connect(conninfo: str, *, attempts: int = 30, wait_seconds: float = 2.0) -> 
             logger.info("Databasen svarar inte än, försöker igen (%d/%d)", attempt, attempts)
             time.sleep(wait_seconds)
     raise AssertionError("unreachable")
+
+
+def responds(conninfo: str) -> bool:
+    """Om databasen svarar alls, utan att logga in.
+
+    Skiljer en databas som inte är igång från en som nekar inloggningen, vilket
+    `psycopg.OperationalError` inte gör.
+    """
+    return pq.PGconn.ping(conninfo.encode()) == pq.Ping.OK
 
 
 def migrate(conn: psycopg.Connection) -> None:
@@ -157,6 +172,16 @@ def save_home(conn: psycopg.Connection, home: Home) -> None:
         )
 
 
+def load_or_save_home(conn: psycopg.Connection, home: Home) -> Home:
+    """Hemmet i databasen. Har inget hem sparats än sparas `home` och returneras."""
+    with conn.transaction():
+        saved = load_home(conn)
+        if saved is not None:
+            return saved
+        save_home(conn, home)
+        return home
+
+
 def load_home(conn: psycopg.Connection) -> Home | None:
     """Läser hemmet från databasen, eller None om inget hem har sparats än.
 
@@ -195,28 +220,55 @@ class DatabaseStore:
     Anropen väntar på databasen och ska därför köras utanför händelseloopen.
     """
 
-    def __init__(self, conninfo: str) -> None:
+    def __init__(
+        self, conninfo: str, *, prepare: Callable[[psycopg.Connection], None] | None = None
+    ) -> None:
+        """`prepare` skapar eller uppdaterar tabellerna innan hemmet läses (se `fetch_home`)."""
         self._conninfo = conninfo
+        self._prepare = prepare
+
+    def fetch_home(self, seed: Home) -> Home:
+        """Hemmet i databasen, eller `seed` om inget hem har sparats (det sparas då).
+
+        Utan `prepare` ger tabeller som inte är aktuella `SchemaOutdatedError`.
+        Ett sparat hem som inte går att läsa ger `homefile.HomeFileError`, och
+        en databas som inte svarar `psycopg.OperationalError`.
+        """
+        with self._connect() as conn:
+            if self._prepare is not None:
+                self._prepare(conn)
+            else:
+                check_schema(conn)
+            return load_or_save_home(conn, seed)
 
     def save_home(self, home: Home) -> None:
-        with connect(self._conninfo, attempts=1) as conn:
+        with self._connect() as conn:
             save_home(conn, home)
 
     def save_plan_image(self, home: Home, floor_id: str, image: StoredImage) -> None:
         """Sparar bilden och hemmet (med bildens nya placering) på en gång."""
-        with connect(self._conninfo, attempts=1) as conn, conn.transaction():
+        with self._connect() as conn, conn.transaction():
             save_home(conn, home)
             save_plan_image(conn, floor_id, image)
 
     def delete_plan_image(self, home: Home, floor_id: str) -> None:
         """Tar bort bilden och sparar hemmet (utan bilden) på en gång."""
-        with connect(self._conninfo, attempts=1) as conn, conn.transaction():
+        with self._connect() as conn, conn.transaction():
             save_home(conn, home)
             delete_plan_image(conn, floor_id)
 
     def load_plan_image(self, floor_id: str) -> StoredImage | None:
-        with connect(self._conninfo, attempts=1) as conn:
+        with self._connect() as conn:
             return load_plan_image(conn, floor_id)
+
+    def _connect(self) -> psycopg.Connection:
+        conn = connect(self._conninfo, attempts=1)
+        try:
+            conn.execute(sql.SQL("SET statement_timeout = {}").format(STATEMENT_TIMEOUT_MS))
+        except BaseException:
+            conn.close()
+            raise
+        return conn
 
 
 def _migrations() -> list[tuple[int, str, str]]:

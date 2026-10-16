@@ -17,6 +17,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_HISTORY_KEEP_DAYS",
         "HOMECONTROL_ESPHOME_SECRET",
         "HOMECONTROL_MQTT_HOST",
+        "HOMECONTROL_HOME_COPY",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -33,6 +34,18 @@ def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings.from_env()
 
     assert settings == Settings(host="0.0.0.0", port=9000, web_dir=Path("/srv/web"))
+
+
+def test_reads_the_path_of_the_home_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_HOME_COPY", " /var/lib/homecontrol/hem.json ")
+
+    assert Settings.from_env().home_copy == Path("/var/lib/homecontrol/hem.json")
+
+
+def test_without_a_home_copy_path_there_is_no_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOMECONTROL_HOME_COPY", "")
+
+    assert Settings.from_env().home_copy is None
 
 
 def test_reads_allowed_hosts_as_lowercase_list(monkeypatch: pytest.MonkeyPatch) -> None:

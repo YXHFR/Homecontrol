@@ -22,7 +22,11 @@ RUN uv sync --frozen --no-dev --no-editable
 
 # --- Körbar avbild utan byggverktyg ---
 FROM python:3.14-slim
-RUN useradd --system --uid 10001 --no-create-home homecontrol
+# /var/lib/homecontrol har kärnans kopia av hemmet (se compose.yaml). En tom
+# volym som monteras där får samma ägare och rättigheter, så att bara kärnan
+# kan läsa den.
+RUN useradd --system --uid 10001 --no-create-home homecontrol \
+    && install -d -o homecontrol -g homecontrol -m 700 /var/lib/homecontrol
 WORKDIR /app
 COPY --from=deps /app/.venv /app/.venv
 COPY --from=web /web/dist /app/web

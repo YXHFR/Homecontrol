@@ -94,6 +94,8 @@ så slipper du skriva `sudo` före varje `docker`. Kontrollera att allt finns:
 docker compose version
 ```
 
+Versionen ska vara 2.20 eller senare.
+
 Homecontrol fungerar på samma sätt på andra Linux-datorer (amd64 eller
 arm64). Docker Desktop på Mac och Windows går att använda för att prova, men
 rumskorten kräver en inställning där (se **Steg 6**).
@@ -606,6 +608,52 @@ Så läser du filen:
 
 Lampornas zon sparas redan men används först i kommande versioner.
 
+### När databasen är nere
+
+Lamporna fungerar även när databasen krånglar. Kärnan har en egen kopia av
+hemmet i volymen `core-data`, i samma form som exportfilen ovan. Kopian
+skrivs varje gång kärnan har läst hemmet från databasen och varje gång
+hemmet sparas.
+
+- **Vid start:** svarar inte databasen inom några sekunder startar kärnan
+  med kopian. Lamporna styrs som vanligt, och livevyn visar en varning:
+  "Databasen svarar inte". Har kärnan ingen kopia än, till exempel första
+  gången, väntar den på databasen som förut. Svarar databasen men något
+  annat är fel, till exempel ett fel lösenord i `.env`, startar kärnan inte
+  (se **Om något inte fungerar**).
+  Har du ändrat hur länge historiken sparas (eller uppdaterat Homecontrol)
+  medan databasen var nere, kör `docker compose up -d` igen när den är
+  igång, så att ändringen görs i databasen.
+- **Medan databasen är nere:** ändringar i kartredigeraren och resultatet
+  av en lampkalibrering nekas med ett meddelande om varför. Historiken
+  sparas inte; det som inte hinner skrivas tappas (se **Historik**).
+  Planritningens bild finns bara i databasen och syns inte heller.
+- **När databasen svarar igen:** kärnan försöker ansluta var tionde sekund.
+  Lyckas det läses hemmet från databasen, varningen försvinner och
+  ändringar tas emot igen. Databasen bestämmer alltid: en kopia som är
+  äldre än databasen skriver aldrig över den. Bara om databasen är helt tom
+  (till exempel efter att volymen `db-data` har tagits bort) läggs kopian in
+  där.
+- Misslyckas ett sparande medan kärnan är igång gäller samma sak: varningen
+  visas, och hemmet läses från databasen igen när den svarar.
+
+Kopian innehåller inga lösenord eller nycklar, bara det som finns i en
+exporterad hemfil, och kan bara läsas av kärnan (filen
+`/var/lib/homecontrol/hem.json` i kärnans container).
+
+Vill du börja om från början, eller ta bort dina uppgifter innan datorn
+lämnas bort, räcker det inte att ta bort databasen: då läggs hemmet in igen
+från kopian. Ta bort båda volymerna. De har mappens namn först, oftast
+`homecontrol`:
+
+```sh
+docker compose down
+docker volume rm homecontrol_db-data homecontrol_core-data
+```
+
+(`docker compose down --volumes` tar också bort MQTT:s och Zigbee2MQTT:s
+data, och då måste lamporna paras ihop igen.)
+
 ### Vem som når Homecontrol
 
 Homecontrol har inga konton och ingen inloggning: alla i hushållet har samma
@@ -646,9 +694,10 @@ Blir en del angripen eller går fel kommer den inte åt resten.
 
 - **Databasen:** `db-setup` skapar och uppdaterar tabellerna, ställer in
   hur länge historiken sparas och skapar kärnans roll om den saknas. Först
-  därefter startar kärnan. Alla inloggningar i databasen kräver lösenord,
-  även inifrån datorn (se `postgres/pg_hba.conf`), och databasen nås inte
-  från nätverket.
+  därefter startar kärnan. Kommer databasen inte igång alls startar kärnan
+  ändå, med sin kopia av hemmet (se **När databasen är nere**). Alla
+  inloggningar i databasen kräver lösenord, även inifrån datorn (se
+  `postgres/pg_hba.conf`), och databasen nås inte från nätverket.
 - **MQTT:** vilka ämnen varje användare får läsa och skriva står i
   `mosquitto/acl`. Allt annat är förbjudet, och utan lösenord kommer ingen in.
   Mosquittos hälsokontroll har en egen användare med ett lösenord som
@@ -691,6 +740,10 @@ det `password authentication failed for user "homecontrol"` är
 `POSTGRES_PASSWORD` i `.env` inte samma som när databasen skapades första
 gången; databasen minns det första lösenordet. Sätt tillbaka det. Ge inte
 `POSTGRES_PASSWORD` samma lösenord som någon annan rad i `.env`.
+
+Visar livevyn "Databasen svarar inte"? Lamporna styrs ändå, men ändringar
+sparas inte. Titta i `docker compose ps` och `docker compose logs db`. När
+databasen är igång igen försvinner varningen av sig själv inom en halv minut.
 
 Syns inte en ny lampa under **Placera** i kartredigeraren? Kontrollera i
 Zigbee2MQTT att den är ihopparad och klar (inte "interviewing"). Står en lampa
@@ -865,7 +918,10 @@ till och från ett JSON-dokument, och `store.py` sparar samma dokument i
 Postgres (tabellerna skapas av `migrations/`). Formen beskrivs alltså bara i
 `home.py`, och filen och databasen har samma version. Exempelhemmet är
 `example_home.json`. Kärnan läser hemmet när den startar; en import kräver
-därför en omstart. Kärnan startar inte utan databasen.
+därför en omstart. Med `HOMECONTROL_HOME_COPY` har kärnan en kopia av hemmet
+(`homecopy.py`) och startar med den när databasen inte svarar;
+`databaselink.py` håller reda på kontakten och ansluter igen. Utan
+inställningen väntar kärnan på databasen vid start.
 
 Scenariotester skrivs som läsbara steg med `homecontrol.scenario.Scenario`
 och körs med en styrd klocka, så att minuter av väntan tar ingen tid. Se

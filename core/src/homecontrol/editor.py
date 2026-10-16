@@ -17,6 +17,10 @@ Den som skickar med revisionen i ``If-Match`` får svar 409 om någon annan
 (till exempel redigeraren i ett annat fönster) har hunnit ändra hemmet, i
 stället för att skriva över den ändringen.
 
+Medan kärnan inte har kontakt med databasen (se databaselink.py) nekas alla
+ändringar med svar 503 och en förklaring, så att kärnans kopia av hemmet och
+databasen inte hamnar i otakt.
+
 Ett sparat hem lämnas till kärnan direkt (`Controller.replace_home`), så att
 livevyn visar ändringen utan omstart. Andra delar av kärnan som ändrar hemmet,
 som lampkalibreringen, gör det genom samma `HomeChanges`, så att revisionen
@@ -70,6 +74,16 @@ class HomeStore(Protocol):
     def load_plan_image(self, floor_id: str) -> StoredImage | None: ...
 
 
+class DatabaseConnection(Protocol):
+    """Om kärnan har kontakt med databasen (se databaselink.py)."""
+
+    @property
+    def connected(self) -> bool: ...
+
+    def mark_lost(self) -> None:
+        """Kontakten har tappats; hemmet läses om från databasen när den svarar."""
+
+
 class MemoryStore:
     """Sparar bara så länge kärnan är igång. Används när ingen databas är inställd."""
 
@@ -102,11 +116,18 @@ class StoreUnavailable(Exception):
     """Lagringen svarade inte, så ändringen sparades inte."""
 
 
+class DatabaseDown(StoreUnavailable):
+    """Kärnan har inte kontakt med databasen, så ändringen gjordes inte alls."""
+
+
 class HomeChanges:
     """Ändrar hemmet: en ändring i taget, sparad och lämnad till kärnan, med en ny revision.
 
     `on_home_replaced` anropas med det nya hemmet efter varje ändring, för det
     utöver kärnan som behöver veta vilka rum och våningar som finns (simuleringen).
+
+    Med `database` nekas ändringar medan kärnan inte har kontakt med databasen,
+    och ett misslyckat sparande räknas som att kontakten har tappats.
     """
 
     def __init__(
@@ -114,10 +135,12 @@ class HomeChanges:
         controller: Controller,
         store: HomeStore,
         on_home_replaced: Callable[[Home], None] | None = None,
+        database: DatabaseConnection | None = None,
     ) -> None:
         self.controller = controller
         self.store = store
         self._on_home_replaced = on_home_replaced
+        self._database = database
         # En ändring i taget, så att databasen och kärnan alltid får dem i samma ordning.
         self._lock = asyncio.Lock()
         # Revisionen börjar om när kärnan startar; den slumpade delen gör att en
@@ -137,9 +160,12 @@ class HomeChanges:
         """Ändrar hemmet med `update`, sparar det med `store` och lämnar det till kärnan.
 
         Med `if_match` görs ändringen bara om revisionen stämmer (annars
-        `Conflict`). Når `store` inte lagringen blir det `StoreUnavailable`.
+        `Conflict`). Når `store` inte lagringen blir det `StoreUnavailable`,
+        och saknar kärnan kontakt med databasen `DatabaseDown`.
         """
         async with self._lock:
+            if self._database is not None and not self._database.connected:
+                raise DatabaseDown
             if if_match is not None and if_match != self.revision():
                 raise Conflict
             home = update(self.controller.home)
@@ -147,16 +173,41 @@ class HomeChanges:
                 await anyio.to_thread.run_sync(store, home)
             except Exception as error:
                 logger.exception("Kunde inte nå lagringen")
+                if self._database is not None:
+                    # Ändringen kan ha hunnit sparas; hemmet läses om från databasen.
+                    self._database.mark_lost()
                 raise StoreUnavailable from error
             # Nu är hemmet sparat och har en ny revision, vad som än händer i kärnan.
-            self._count += 1
-            self.controller.replace_home(home)
-            if self._on_home_replaced is not None:
-                self._on_home_replaced(home)
+            self._hand_over(home)
             return home
+
+    async def resync(self, fetch: Callable[[Home], Home]) -> None:
+        """Läser hemmet med `fetch` och lämnar det till kärnan om det har ändrats.
+
+        Används när databasen svarar igen. `fetch` får hemmet som kärnan
+        använder, att spara om databasen inte har något. Inga ändringar görs
+        medan hemmet läses.
+        """
+        async with self._lock:
+            current = self.controller.home
+            home = await anyio.to_thread.run_sync(fetch, current)
+            if home != current:
+                logger.info("Hemmet i databasen skiljer sig från kopian; använder databasens")
+                self._hand_over(home)
+
+    def _hand_over(self, home: Home) -> None:
+        """Ger hemmet en ny revision och lämnar det till kärnan."""
+        self._count += 1
+        self.controller.replace_home(home)
+        if self._on_home_replaced is not None:
+            self._on_home_replaced(home)
 
 
 _UNAVAILABLE = "Kunde inte nå databasen. Försök igen om en stund."
+_DATABASE_DOWN = (
+    "Databasen svarar inte, så ändringar kan inte sparas just nu. Lamporna styrs som "
+    "vanligt med det senast sparade hemmet. Försök igen när varningen i livevyn är borta."
+)
 
 
 def create_editor_router(changes: HomeChanges, allowed_hosts: Set[str] = frozenset()) -> APIRouter:
@@ -191,6 +242,8 @@ def create_editor_router(changes: HomeChanges, allowed_hosts: Set[str] = frozens
                 status.HTTP_409_CONFLICT,
                 "Hemmet har ändrats i ett annat fönster. Nu visas det senaste.",
             ) from None
+        except DatabaseDown:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, _DATABASE_DOWN) from None
         except StoreUnavailable:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, _UNAVAILABLE) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"ETag": revision()})

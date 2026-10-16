@@ -207,6 +207,45 @@ jobs:
           docker compose exec -T core homecontrol exportera > hem.json
           grep -q '"name": "Exempelhemmet"' hem.json
           docker compose exec -T core homecontrol importera - < hem.json
+      - name: Kärnan startar och styr med sin kopia av hemmet när databasen är avstängd
+        run: |
+          put_home() {
+            curl --silent --output /dev/null --write-out '%{http_code}' -X PUT \
+              -H 'Content-Type: application/json' --data-binary @hem.json \
+              http://127.0.0.1:8000/api/home
+          }
+          docker compose stop db
+          # Som efter ett strömavbrott: Docker startar om kärnan medan databasen
+          # är borta, utan att bry sig om depends_on.
+          docker restart "$(docker compose ps -q core)"
+          for _ in $(seq 60); do
+            curl --fail --silent http://127.0.0.1:8000/health && break
+            sleep 1
+          done
+          curl --fail --silent --output hem-utan-databas.json http://127.0.0.1:8000/api/home
+          grep -q 'Exempelhemmet' hem-utan-databas.json
+          docker compose logs core > core.log
+          grep -q 'Startar med kopian av hemmet' core.log
+          # Ändringar nekas tills databasen svarar igen.
+          test "$(put_home)" = 503
+          docker compose start db
+          for _ in $(seq 60); do
+            status="$(put_home)"
+            test "$status" = 204 && break
+            sleep 2
+          done
+          test "$status" = 204
+          # Kopian kan bara läsas av kärnans egen användare.
+          test "$(docker compose exec -T core stat -c '%a %U' /var/lib/homecontrol/hem.json)" = '600 homecontrol'
+      - name: db-setup stoppar kärnan när databasen svarar men något annat är fel
+        run: |
+          # Bara en databas som inte svarar alls får släppa igenom kärnan.
+          if docker compose run --rm -e PGPASSWORD=fel-losenord db-setup; then
+            echo "db-setup lyckades med fel lösenord"; exit 1
+          fi
+          if docker compose run --rm -e HOMECONTROL_HISTORY_KEEP_DAYS=inget-tal db-setup; then
+            echo "db-setup lyckades med en ogiltig inställning för historiken"; exit 1
+          fi
       - name: Visa loggar
         if: failure()
         run: docker compose logs
