@@ -108,6 +108,23 @@ function formatNumber(value: number, decimals = 1): string {
   return value.toLocaleString("sv-SE", { maximumFractionDigits: decimals });
 }
 
+/** Om det valda finns i hemmet. En ny sort som går att välja måste läggas till här. */
+function stillThere(document: HomeDocument, selection: Selection): boolean {
+  if (selection === null) {
+    return true;
+  }
+  switch (selection.kind) {
+    case "room":
+      return findRoom(document, selection.id) !== null;
+    case "zone":
+      return findZone(document, selection.id) !== null;
+    default: {
+      const unknown: never = selection.kind;
+      throw new Error(`Okänd sort att välja: ${String(unknown)}`);
+    }
+  }
+}
+
 export function mountEditor(
   root: HTMLElement,
   deps: EditorDependencies = defaultDependencies,
@@ -420,13 +437,7 @@ export function mountEditor(
         shown = change.edit(shown);
       }
     }
-    const stillThere =
-      shown === null ||
-      selection === null ||
-      (selection.kind === "room"
-        ? findRoom(shown, selection.id)
-        : findZone(shown, selection.id)) !== null;
-    if (!stillThere) {
+    if (shown !== null && !stillThere(shown, selection)) {
       selection = null;
     }
   };
