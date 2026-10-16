@@ -84,6 +84,7 @@ function state(
     simulation,
     cards: null,
     calibration: null,
+    database: null,
   };
 }
 
@@ -481,6 +482,32 @@ describe("mountApp", () => {
     });
     expect(root.querySelector(".cards button")).toBeNull();
     expect(text(root, ".cards li")).toMatch(/Uppdaterar till 0\.5\.0 … 42 %/);
+  });
+
+  it("varnar när kärnan inte har kontakt med databasen, och slutar när den har det igen", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage({ ...state(null, false), database: { connected: true } });
+    expect(find<HTMLElement>(root, ".database-warning").hidden).toBe(true);
+
+    handlers.onMessage({ ...state(null, false), database: { connected: false } });
+
+    const warning = find<HTMLElement>(root, ".database-warning");
+    expect(warning.hidden).toBe(false);
+    expect(warning.getAttribute("role")).toBe("alert");
+    expect(warning.textContent).toContain("Databasen svarar inte");
+
+    handlers.onMessage({ ...state(null, false), database: { connected: true } });
+
+    expect(warning.hidden).toBe(true);
+  });
+
+  it("visar ingen databasvarning när kärnan inte har någon databas", () => {
+    const { root, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(null, false));
+
+    expect(find<HTMLElement>(root, ".database-warning").hidden).toBe(true);
   });
 
   it("visar att en lampa inte svarar", () => {

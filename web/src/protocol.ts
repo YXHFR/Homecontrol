@@ -179,6 +179,11 @@ export interface StateMessage {
   cards: Card[] | null;
   /** Lampkalibreringen som pågår eller den senaste, eller null om ingen har körts. */
   calibration: Calibration | null;
+  /**
+   * Kärnans kontakt med databasen, eller null om ingen databas är inställd.
+   * Utan kontakt styr kärnan med sin kopia av hemmet, och ändringar sparas inte.
+   */
+  database: { connected: boolean } | null;
 }
 
 /** Hur lampkalibreringen går (se core/src/homecontrol/calibration.py). */

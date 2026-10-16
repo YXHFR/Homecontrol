@@ -15,12 +15,16 @@ startas kärnan om för att läsa in det nya hemmet.
 databasens ägare. Kärnans roll får lösenordet i HOMECONTROL_CORE_DATABASE_PASSWORD.
 Kärnan själv (med HOMECONTROL_PREPARE_DATABASE=false) kontrollerar då bara
 att tabellerna är aktuella.
+
+Med HOMECONTROL_HOME_COPY har kärnan en lokal kopia av hemmet och startar
+även när databasen inte svarar (se homecopy.py och databaselink.py).
 """
 
 import argparse
 import logging
 import os
 import sys
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -30,12 +34,19 @@ import uvicorn
 from homecontrol import history, store
 from homecontrol.app import create_app
 from homecontrol.config import Settings
+from homecontrol.databaselink import DatabaseLink
+from homecontrol.editor import HomeStore
 from homecontrol.esphome import MIN_SECRET_LENGTH
 from homecontrol.home import Home
+from homecontrol.homecopy import CopyingStore, HomeCopy
 from homecontrol.homefile import HomeFileError, dumps, example_home, loads
 from homecontrol.zigbee import mqtt_connect
 
 logger = logging.getLogger("homecontrol")
+
+STARTUP_ATTEMPTS_WITH_COPY = 5
+"""Så många gånger kärnan försöker nå databasen vid start, med två sekunder emellan,
+innan den startar med kopian av hemmet."""
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -86,15 +97,15 @@ def serve(settings: Settings) -> None:
         )
     if secret is None:
         logger.info("ESPHOME_SECRET är inte satt: inga rumskort ansluts")
+    home, home_store, database = open_home(settings)
     uvicorn.run(
         create_app(
             settings.web_dir,
             allowed_hosts=settings.allowed_hosts,
-            home=load_or_seed_home(settings),
-            home_store=(
-                None if settings.database is None else store.DatabaseStore(settings.database)
-            ),
-            history=prepare_history(settings),
+            home=home,
+            home_store=home_store,
+            database=database,
+            history=prepare_history(settings, database),
             esphome_secret=secret,
             mqtt=None if settings.mqtt is None else mqtt_connect(settings.mqtt),
         ),
@@ -156,6 +167,55 @@ def import_home(database: str, path: str | None, *, prepare: bool = True) -> Non
     )
 
 
+def open_home(settings: Settings) -> tuple[Home, HomeStore | None, DatabaseLink | None]:
+    """Hemmet att starta med, var ändringar sparas och kärnans kontakt med databasen.
+
+    Med en kopia av hemmet (`Settings.home_copy`) startar kärnan med kopian
+    om databasen inte svarar inom några sekunder, och ansluter sedan igen i
+    bakgrunden. Utan kopia väntar kärnan på databasen.
+    """
+    if settings.database is None:
+        return load_or_seed_home(settings), None, None
+    database = store.DatabaseStore(settings.database, prepare=settings.prepare_database)
+    if settings.home_copy is None:
+        return load_or_seed_home(settings), database, DatabaseLink(database.fetch_home)
+    copy = HomeCopy(settings.home_copy)
+
+    def fetch(seed: Home) -> Home:
+        home = database.fetch_home(seed)
+        copy.save(home)
+        return home
+
+    home_store = CopyingStore(database, copy)
+    saved = copy.load()
+    if saved is None:
+        # Ingen kopia än, till exempel första gången: vänta på databasen som vanligt.
+        home = load_or_seed_home(settings)
+        copy.save(home)
+        return home, home_store, DatabaseLink(fetch)
+    for attempt in range(1, STARTUP_ATTEMPTS_WITH_COPY + 1):
+        try:
+            home = fetch(saved)
+        except HomeFileError as error:
+            sys.exit(_unreadable(error))
+        except (psycopg.OperationalError, store.SchemaOutdatedError) as error:
+            if attempt < STARTUP_ATTEMPTS_WITH_COPY:
+                logger.info("Databasen svarar inte än, försöker igen (%d)", attempt)
+                time.sleep(2.0)
+                continue
+            logger.warning(
+                "Databasen svarar inte (%s). Startar med kopian av hemmet i %s (%s); "
+                "ändringar kan inte sparas förrän databasen svarar igen",
+                type(error).__name__,
+                settings.home_copy,
+                _summary(saved),
+            )
+            return saved, home_store, DatabaseLink(fetch, connected=False)
+        logger.info("Läste in hemmet från databasen (%s)", _summary(home))
+        return home, home_store, DatabaseLink(fetch)
+    raise AssertionError("unreachable")
+
+
 def load_or_seed_home(settings: Settings) -> Home:
     if settings.database is None:
         logger.warning("Ingen databas är inställd: visar exempelhemmet och sparar inget")
@@ -167,11 +227,7 @@ def load_or_seed_home(settings: Settings) -> Home:
         except HomeFileError as error:
             # Till exempel ett hem som sparades innan en kontroll skärptes.
             # Exempelhemmet läses inte in i stället, för då skrivs hemmet över.
-            sys.exit(
-                f"Det sparade hemmet går inte att läsa: {error}\n"
-                "Rätta hemfilen och läs in den med 'homecontrol importera', "
-                "eller börja om med 'homecontrol importera --exempelhem'."
-            )
+            sys.exit(_unreadable(error))
         if home is None:
             # Första starten: börja med exempelhemmet så att det finns något att se.
             home = example_home()
@@ -181,15 +237,18 @@ def load_or_seed_home(settings: Settings) -> Home:
     return home
 
 
-def prepare_history(settings: Settings) -> history.History | None:
+def prepare_history(
+    settings: Settings, database: DatabaseLink | None = None
+) -> history.History | None:
     """Skrivaren av historiken. Utan databas sparas ingen historik.
 
     Får kärnan förbereda databasen ställs också in hur länge historiken sparas;
-    annars har `förbered-databasen` redan gjort det.
+    annars har `förbered-databasen` redan gjort det. Det hoppas över om kärnan
+    startade utan kontakt med databasen; skrivaren försöker ändå i bakgrunden.
     """
     if settings.database is None:
         return None
-    if settings.prepare_database:
+    if settings.prepare_database and (database is None or database.connected):
         with store.connect(settings.database) as conn:
             store.migrate(conn)
             _configure_history(conn, settings)
@@ -216,6 +275,14 @@ def _migrate_or_check(conn: psycopg.Connection, prepare: bool) -> None:
         store.check_schema(conn)
     except store.SchemaOutdatedError as error:
         sys.exit(str(error))
+
+
+def _unreadable(error: HomeFileError) -> str:
+    return (
+        f"Det sparade hemmet går inte att läsa: {error}\n"
+        "Rätta hemfilen och läs in den med 'homecontrol importera', "
+        "eller börja om med 'homecontrol importera --exempelhem'."
+    )
 
 
 def _summary(home: Home) -> str:

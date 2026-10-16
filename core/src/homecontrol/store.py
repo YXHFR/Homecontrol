@@ -157,6 +157,16 @@ def save_home(conn: psycopg.Connection, home: Home) -> None:
         )
 
 
+def load_or_save_home(conn: psycopg.Connection, home: Home) -> Home:
+    """Hemmet i databasen. Har inget hem sparats än sparas `home` och returneras."""
+    with conn.transaction():
+        saved = load_home(conn)
+        if saved is not None:
+            return saved
+        save_home(conn, home)
+        return home
+
+
 def load_home(conn: psycopg.Connection) -> Home | None:
     """Läser hemmet från databasen, eller None om inget hem har sparats än.
 
@@ -195,8 +205,24 @@ class DatabaseStore:
     Anropen väntar på databasen och ska därför köras utanför händelseloopen.
     """
 
-    def __init__(self, conninfo: str) -> None:
+    def __init__(self, conninfo: str, *, prepare: bool = False) -> None:
         self._conninfo = conninfo
+        self._prepare = prepare
+
+    def fetch_home(self, seed: Home) -> Home:
+        """Hemmet i databasen, eller `seed` om inget hem har sparats (det sparas då).
+
+        Med `prepare` skapas eller uppdateras tabellerna först; annars ger
+        tabeller som inte är aktuella `SchemaOutdatedError`. Ett sparat hem som
+        inte går att läsa ger `homefile.HomeFileError`, och en databas som inte
+        svarar `psycopg.OperationalError`.
+        """
+        with connect(self._conninfo, attempts=1) as conn:
+            if self._prepare:
+                migrate(conn)
+            else:
+                check_schema(conn)
+            return load_or_save_home(conn, seed)
 
     def save_home(self, home: Home) -> None:
         with connect(self._conninfo, attempts=1) as conn:
