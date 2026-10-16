@@ -152,7 +152,7 @@ jobs:
               MQTT_ZIGBEE2MQTT_PASSWORD ZIGBEE2MQTT_AUTH_TOKEN; do
             sed -i "s/^${name}=.*/${name}=$(openssl rand -hex 16)/" .env
           done
-          if grep byt-mig .env; then echo "Raden ovan fylls inte i här"; exit 1; fi
+          if grep "=byt-mig$" .env; then echo "Raden ovan fylls inte i här"; exit 1; fi
       - name: Starta alla tjänster
         run: docker compose up --detach --build --wait --wait-timeout 300
       - name: Kontrollera kärnan och webbgränssnittet
