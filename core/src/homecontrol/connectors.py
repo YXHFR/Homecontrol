@@ -87,7 +87,9 @@ class Source(Protocol):
 
     När källan tappar kontakten, eller stoppas, skickar den `SourceLost` så att
     ingen blir kvar i ett rum bara för att källan tystnade, och så att rummet
-    i stället får läget okänt.
+    i stället får läget okänt. Det gäller också när bara en del av källan
+    tystnar, till exempel radarn på ett av korten: kärnan litar på att det
+    radarn senast såg finns kvar tills radarn säger något annat.
     """
 
     @property

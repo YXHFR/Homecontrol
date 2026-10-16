@@ -57,7 +57,7 @@ export interface HomeMessage {
   floors: Floor[];
 }
 
-/** Något som står på en viss våning. */
+/** En punkt på en viss våning. */
 export interface Target extends Point {
   floor_id: string;
 }

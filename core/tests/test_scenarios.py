@@ -42,7 +42,7 @@ def test_room_empties_lamp_off_after_3_minutes() -> None:
         .person_enters()
         .expect_lamp_on()
         .person_leaves()
-        .wait(seconds=10)
+        .wait_for_hold()
         .wait(minutes=2, seconds=59)
         .expect_lamp_on()
         .expect_explanation("släcks när det varit tomt i 3 minuter")
@@ -109,7 +109,8 @@ def test_returning_restarts_the_delay() -> None:
         .wait(minutes=5)
         .expect_lamp_on()
         .person_leaves()
-        .wait(minutes=3, seconds=9)
+        .wait_for_hold()
+        .wait(minutes=2, seconds=59)
         .expect_lamp_on()
         .wait(seconds=1)
         .expect_lamp_off()
@@ -124,7 +125,8 @@ def test_walking_out_of_the_room_counts_as_leaving() -> None:
         .person_moves_to(x=2, y=2)  # inne i rummet
         .expect_lamp_on()
         .person_moves_to(x=7, y=2)  # rummet är 5 m brett, så det här är utanför
-        .wait(minutes=3, seconds=10)
+        .wait_for_hold()
+        .wait(minutes=3)
         .expect_lamp_off()
     )
 
@@ -145,7 +147,7 @@ def test_lost_source_makes_the_room_unknown_and_leaves_the_lamp() -> None:
         .expect_lamp_on()
         .expect_explanation("okänt")
         .source_returns()
-        .light_level(10)
+        .light_level(10)  # ljusnivån glömdes när källan tystnade
         .expect_room("tomt")
         .wait(minutes=2, seconds=59)
         .expect_lamp_on()
@@ -177,7 +179,8 @@ def test_person_upstairs_does_not_light_the_room_below() -> None:
         .expect_lamp_off(lamp="lampa-nere")
         .person_moves_to(x=2.5, y=2, floor="nere")
         .expect_lamp_on(lamp="lampa-nere")
-        .wait(minutes=3, seconds=10)
+        .wait_for_hold()
+        .wait(minutes=3)
         .expect_lamp_off(lamp="lampa-uppe")
         .expect_lamp_on(lamp="lampa-nere")
     )
@@ -193,7 +196,7 @@ def test_room_settings_decide_darkness_and_delay() -> None:
         .expect_lamp_on()
         .expect_explanation("under 50")
         .person_leaves()
-        .wait(seconds=10)
+        .wait_for_hold()
         .wait(seconds=59)
         .expect_lamp_on()
         .expect_explanation("släcks när det varit tomt i 1 minut")
@@ -213,7 +216,8 @@ def test_lamp_stays_on_while_someone_is_left() -> None:
         .wait(minutes=10)
         .expect_lamp_on()
         .person_leaves(who="Bo")
-        .wait(minutes=3, seconds=10)
+        .wait_for_hold()
+        .wait(minutes=3)
         .expect_lamp_off()
     )
 
@@ -290,7 +294,7 @@ def test_still_zone_keeps_presence_while_wifi_senses_motion() -> None:
         .wait(minutes=20)
         .expect_room("upptaget")
         .expect_lamp_on()
-        .wifi_motion(False)  # personen har somnat, eller gått ut utan att radarn såg det
+        .wifi_motion_stops()  # personen har somnat, eller gått ut utan att radarn såg det
         .expect_room("tomt")
         .expect_tracks(0)
         .wait(minutes=2, seconds=59)
@@ -331,6 +335,28 @@ def test_still_zone_without_wifi_motion_holds_like_the_rest_of_the_room() -> Non
     )
 
 
+def test_passer_by_does_not_take_the_track_of_the_person_on_the_sofa() -> None:
+    """Någon går förbi soffan medan radarn har tappat den som sitter där, och går sedan ut.
+
+    Spåret i soffan ska ligga kvar, så rummet är fortfarande upptaget.
+    """
+    (
+        Scenario(home_with_zones(SOFA))
+        .light_level(10)
+        .wifi_motion()
+        .person_moves_to(x=1, y=3)
+        .radar_loses()
+        .wait(minutes=1)
+        .person_moves_to(x=3.5, y=2.2, who="Bo")
+        .walk(seconds=2, Bo=(4.5, 1))
+        .person_leaves(who="Bo")
+        .wait(minutes=5)
+        .expect_tracks(1, held=1)
+        .expect_zone("upptaget", zone="soffa")
+        .expect_lamp_on()
+    )
+
+
 def test_lost_track_in_the_middle_of_the_room_is_gone_after_10_seconds() -> None:
     """Radarn tappar personen mitt i rummet: spåret hålls kvar i 10 s, sedan är rummet tomt."""
     (
@@ -355,7 +381,7 @@ def test_wifi_motion_does_not_keep_a_track_outside_the_still_zone() -> None:
         .wifi_motion()
         .person_enters()
         .radar_loses()
-        .wait(seconds=10)
+        .wait_for_hold()
         .expect_room("tomt")
     )
 
@@ -395,7 +421,8 @@ def test_two_persons_crossing_keep_their_own_rooms() -> None:
         .expect_room("upptaget", room="a")
         .expect_room("upptaget", room="b")
         .person_leaves(who="Anna")
-        .wait(minutes=3, seconds=10)
+        .wait_for_hold()
+        .wait(minutes=3)
         .expect_lamp_off(lamp="lampa-b")
         .expect_lamp_on(lamp="lampa-a")
         .expect_lamp_switches(True, lamp="lampa-a")
@@ -421,7 +448,7 @@ def test_full_wifi_weight_lets_wifi_motion_start_presence() -> None:
         .wifi_motion()
         .expect_room("upptaget")
         .expect_lamp_on()
-        .wifi_motion(False)
+        .wifi_motion_stops()
         .expect_room("tomt")
     )
 
@@ -434,7 +461,7 @@ def test_zero_wifi_weight_ignores_wifi_in_the_still_zone() -> None:
         .wifi_motion()
         .person_moves_to(x=1, y=3)
         .radar_loses()
-        .wait(seconds=10)
+        .wait_for_hold()
         .expect_room("tomt")
     )
 

@@ -6,6 +6,13 @@ import type { Occupancy, StateMessage, Track } from "./protocol";
 
 export const TRACK_COLOR = "#7a1f1f";
 
+/** Golvets färg i ett rum, efter läget i rummet. */
+export const ROOM_FILLS: Record<Occupancy, string> = {
+  upptaget: "#e3eefb",
+  tomt: "#f4f1ea",
+  okänt: "#dcdcdc",
+};
+
 export interface TrackStyle {
   fill?: string;
   stroke?: string;

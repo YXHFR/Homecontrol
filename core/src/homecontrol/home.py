@@ -54,11 +54,6 @@ DEFAULT_BRIGHT_ABOVE_LUX = 100.0
 DEFAULT_OFF_AFTER_EMPTY_SECONDS = 180.0
 DEFAULT_WIFI_WEIGHT = 0.5
 
-# Radarns synfält (LD2450): så långt den ser och så många grader åt varje sida.
-RADAR_RANGE = 6.0
-RADAR_HALF_ANGLE = 60.0
-RADAR_MAX_TARGETS = 3
-"""Radarn följer högst så här många personer åt gången."""
 BODY_HEIGHT = 1.0
 """Ungefär där radarn ser en person, i meter över golvet: mitt på kroppen."""
 
@@ -153,10 +148,10 @@ class RoomSettings(_Model):
     wifi_weight: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)] = DEFAULT_WIFI_WEIGHT
     """Hur mycket Wi-Fi-rörelse väger mot radarn, från 0 till 1.
 
-    0 betyder att Wi-Fi inte används. Annars förlänger Wi-Fi-rörelse närvaron
-    i stillhetszoner. Rörelse räknas som någon i rummet på egen hand först när
-    vikten gånger rörelsepoängen når 1, så under 1 startar Wi-Fi aldrig
-    närvaro ensam.
+    Vikten gånger rörelsepoängen (0–1) avgör vad rörelsen räcker till: från
+    en fjärdedel håller den kvar den som radarn har tappat i en stillhetszon,
+    och vid 1 räknas rummet som upptaget av rörelsen ensam. Med 0 används inte
+    Wi-Fi, och under 1 startar Wi-Fi aldrig närvaro ensam (se fusion.py).
     """
 
     @model_validator(mode="after")
@@ -208,10 +203,11 @@ class Node(_Model):
     def radar_to_home(self, x: float, y: float) -> Point:
         """Var en punkt som radarn ser i (x, y) ligger i hemmets koordinater."""
         slant = math.hypot(x, y)
-        drop = self.height - BODY_HEIGHT
-        scale = math.sqrt(max(0.0, slant**2 - drop**2)) / slant if slant > 0 else 0.0
+        drop = abs(self._drop())
+        floor_distance = math.sqrt((slant - drop) * (slant + drop)) if slant > drop else 0.0
+        scale = floor_distance / slant if slant > 0 else 0.0
         side, ahead = self._axes()
-        across = x * scale * (-1 if self.mirrored else 1)
+        across = x * scale * self._side_sign()
         forward = y * scale
         return Point(
             self.position.x + forward * ahead.x + across * side.x,
@@ -225,17 +221,17 @@ class Node(_Model):
         forward = dx * ahead.x + dy * ahead.y
         across = dx * side.x + dy * side.y
         floor_distance = math.hypot(forward, across)
-        drop = self.height - BODY_HEIGHT
-        scale = math.hypot(floor_distance, drop) / floor_distance if floor_distance > 0 else 0.0
-        return Point(across * scale * (-1 if self.mirrored else 1), forward * scale)
+        slant = math.hypot(floor_distance, self._drop())
+        scale = slant / floor_distance if floor_distance > 0 else 0.0
+        return Point(across * scale * self._side_sign(), forward * scale)
 
-    def radar_sees(self, x: float, y: float) -> bool:
-        """Om en punkt i radarns koordinater ligger i dess synfält."""
-        return (
-            y > 0
-            and math.hypot(x, y) <= RADAR_RANGE
-            and abs(math.degrees(math.atan2(x, y))) <= RADAR_HALF_ANGLE
-        )
+    def _drop(self) -> float:
+        """Hur mycket högre radarn sitter än där den ser en person."""
+        return self.height - BODY_HEIGHT
+
+    def _side_sign(self) -> int:
+        """Åt vilket håll radarns x pekar: åt höger, eller åt vänster på ett spegelvänt kort."""
+        return -1 if self.mirrored else 1
 
     def _axes(self) -> tuple[Point, Point]:
         """Riktningen åt höger (sett bakifrån) och rakt fram, som enhetsvektorer i hemmet.
@@ -292,6 +288,14 @@ class Room(_Model):
     def center(self) -> Point:
         """Ytans tyngdpunkt."""
         return _centroid(self.polygon)
+
+    def blocks(self, a: Point, b: Point) -> bool:
+        """Om sträckan a–b går genom någon av rummets väggar. Dörröppningar räknas inte."""
+        return any(
+            _crossing(a, b, start, end)
+            for start, end, kind in self.wall_segments()
+            if not kind.is_doorway
+        )
 
     def wall_segments(self) -> Iterator[tuple[Point, Point, WallKind]]:
         """Varje vägg med sina två ändpunkter."""

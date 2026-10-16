@@ -106,7 +106,10 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
         if (roomState === undefined) {
           return [];
         }
-        const lux = roomState.lux === null ? "ljusnivån okänd" : `${roomState.lux} lux`;
+        const lux =
+          roomState.lux === null
+            ? "ljusnivån okänd"
+            : `${roomState.lux.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} lux`;
         const item = element("li", {}, `${room.name}: ${OCCUPANCY_TEXT[roomState.status]}, ${lux}`);
         item.dataset.status = roomState.status;
         return [item];

@@ -146,7 +146,7 @@ har.
 Varje rumskort ser personer med radarn. Kärnan räknar om det radarn ser
 utifrån var kortet sitter, hur högt, åt vilket håll det tittar och om det är
 spegelvänt. Det radarn ser utanför kortets eget rum (genom en vägg) och i
-ignorera-zoner bortses från. Kvar blir anonyma spår, prickar på kartan.
+ignorera-zoner räknas inte med. Kvar blir anonyma spår, prickar på kartan.
 
 Tappar radarn någon räknas personen som kvar en stund, beroende på var:
 
@@ -158,10 +158,16 @@ En person som hålls kvar visas som en streckad ring i livevyn. Under
 **Just nu** står om varje rum är upptaget, tomt eller okänt. Okänt betyder att
 ett rumskort i rummet har slutat svara; då lämnas lamporna som de är.
 
-Wi-Fi-rörelsens vikt ställs per rum, från 0 till 1. Med 0 används inte Wi-Fi
-alls. Med standardvärdet 0,5 förlänger Wi-Fi närvaron i stillhetszoner men
-räcker inte ensamt för att ett rum ska räknas som upptaget. Med 1 räcker
-Wi-Fi-rörelse ensam.
+Wi-Fi-rörelsens vikt ställs per rum, från 0 till 1. Vikten gånger hur säker
+mätningen är (också 0–1) avgör vad rörelsen räcker till. Från en fjärdedel
+förlänger den närvaron i stillhetszoner, och vid 1 räcker Wi-Fi-rörelse
+ensam för att rummet ska räknas som upptaget. Med 0 används inte Wi-Fi alls,
+och med standardvärdet 0,5 förlänger tydlig rörelse närvaron men startar
+den aldrig.
+
+Livevyn visar alltså också när någon sitter eller ligger still, i vilka
+zoner, och vilka sensorer som inte svarar. Tänk på det när du bestämmer vem
+som når livevyn (se nedan).
 
 ### Hemmet: spara, flytta och läsa in
 
@@ -296,9 +302,9 @@ revision (`If-Match`) nekas. Ett sparat hem går till kärnan med
 
 Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
 sammanvägningen (`fusion.py`) gör om dem till spår och avgör vilka rum som
-är upptagna, regelmotorn
-(`rules.evaluate`, en ren funktion) ger lampkommandon med förklaringar och
-lamputgångar (`connectors.LampOutput`) tar emot dem. Simuleringen
+är upptagna, regelmotorn (`rules.evaluate`, en ren funktion) ger
+lampkommandon med förklaringar och lamputgångar (`connectors.LampOutput`)
+tar emot dem. Simuleringen
 (`simulation.py`) är både en källa och en utgång. Simuleringsläget i livevyn
 styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
 når kärnan genom samma ingång som en riktig källa, som radarmål i varje

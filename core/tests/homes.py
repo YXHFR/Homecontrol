@@ -99,15 +99,18 @@ def radar_sees(
     return RadarTargetsObserved(source_id, node.id, targets)
 
 
-def side_by_side_home(*, a_zones: Sequence[Zone] = (), b_zones: Sequence[Zone] = ()) -> Home:
-    """Två rum på 5 × 4 meter bredvid varandra med en dörröppning emellan.
+def side_by_side_home(
+    *, a_zones: Sequence[Zone] = (), b_zones: Sequence[Zone] = (), doorway: bool = True
+) -> Home:
+    """Två rum på 5 × 4 meter bredvid varandra, med en dörröppning emellan eller en gipsvägg.
 
     Rummet A (x 0–5) har sitt rumskort på vänstra väggen och rummet B (x 5–10)
     på högra, och båda tittar mot dörröppningen. Radarerna ser alltså en bit
     in i grannrummet, genom väggen.
     """
-    doorway_right = (WallKind.PLASTERBOARD, WallKind.DOORWAY, *(WallKind.PLASTERBOARD,) * 2)
-    doorway_left = (*(WallKind.PLASTERBOARD,) * 3, WallKind.DOORWAY)
+    between = WallKind.DOORWAY if doorway else WallKind.PLASTERBOARD
+    doorway_right = (WallKind.PLASTERBOARD, between, *(WallKind.PLASTERBOARD,) * 2)
+    doorway_left = (*(WallKind.PLASTERBOARD,) * 3, between)
     return Home(
         name="Tvårumshemmet",
         floors=(

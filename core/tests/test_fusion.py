@@ -10,8 +10,9 @@ import math
 import pytest
 
 from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved
-from homecontrol.fusion import HOLD_SECONDS, Fusion, Occupancy
-from homes import one_room_home, radar_sees, room
+from homecontrol.fusion import HOLD_SECONDS, STILL_HOLD_MAX_SECONDS, Fusion, Occupancy
+from homecontrol.home import Home, Point, ZoneKind
+from homes import home_with_zones, one_room_home, radar_sees, room, side_by_side_home, zone
 
 HOME = one_room_home()
 ROOM = HOME.rooms[0]
@@ -155,3 +156,97 @@ def test_node_coordinates_are_turned_into_home_coordinates() -> None:
     [track] = fusion.tracks()
     assert track.position.x == pytest.approx(2.5)
     assert track.position.y == pytest.approx(2.0)
+
+
+def seen_from(home: Home, node_id: str, *points: tuple[float, float]) -> RadarTargetsObserved:
+    """Det noden `node_id` i hemmet ser när personer står i `points` (hemmets meter)."""
+    node = next(n for r in home.rooms for n in r.nodes if n.id == node_id)
+    targets = tuple(RadarTarget(*node.home_to_radar(Point(x, y))) for x, y in points)
+    return RadarTargetsObserved("sim", node_id, targets)
+
+
+@pytest.mark.parametrize(
+    ("doorway", "in_a", "in_b"),
+    [
+        (True, (4.7, 2.0), (5.3, 2.2)),  # en halvmeter isär i dörröppningen
+        (False, (4.9, 2.0), (5.1, 2.0)),  # tätt intill varandra, men med en vägg emellan
+    ],
+)
+def test_persons_on_each_side_of_the_wall_keep_their_own_rooms(
+    doorway: bool, in_a: tuple[float, float], in_b: tuple[float, float]
+) -> None:
+    """Två personer står på var sin sida om gränsen mellan rummen. Båda radarerna ser båda.
+
+    Varje radar kastar personen i grannrummet, och spåret i grannrummet tas
+    inte över av den som står på andra sidan.
+    """
+    home = side_by_side_home(doorway=doorway)
+    fusion = Fusion(home, now=0)
+    for frame in range(20):
+        node = "nod-a" if frame % 2 == 0 else "nod-b"
+        fusion.radar(seen_from(home, node, in_a, in_b), now=frame * 0.05)
+        rooms = fusion.rooms()
+        if frame > 0:
+            assert rooms["a"].status is Occupancy.OCCUPIED
+            assert rooms["b"].status is Occupancy.OCCUPIED
+            assert rooms["a"].since == 0
+    assert positions(fusion) == [in_a, in_b]
+
+
+def test_late_wifi_motion_does_not_revive_a_released_track() -> None:
+    """Spåret i soffan skulle ha släppts vid 11 s. Rörelse som kommer efteråt ändrar inte det."""
+    home = home_with_sofa()
+    fusion = Fusion(home, now=0)
+    fusion.radar(radar_sees((1, 3), home=home), now=0)
+    fusion.radar(radar_sees(home=home), now=1)
+    assert fusion.wake_at == 1 + HOLD_SECONDS
+
+    fusion.motion(MotionObserved("sim", NODE.id, True), now=15)
+
+    assert fusion.tracks() == ()
+    assert fusion.rooms()[ROOM.id].since == 1 + HOLD_SECONDS
+
+
+def test_weak_wifi_motion_does_not_hold_the_sofa_with_the_default_weight() -> None:
+    """Vikten 0,5 gånger poängen 0,4 är under gränsen för att hålla kvar spåret."""
+    home = home_with_sofa()
+    fusion = Fusion(home, now=0)
+    fusion.motion(MotionObserved("sim", NODE.id, True, score=0.4), now=0)
+    fusion.radar(radar_sees((1, 3), home=home), now=0)
+    fusion.radar(radar_sees(home=home), now=1)
+    assert fusion.wake_at == 1 + HOLD_SECONDS
+
+    fusion.motion(MotionObserved("sim", NODE.id, True, score=0.8), now=2)
+    assert fusion.wake_at == 1 + STILL_HOLD_MAX_SECONDS
+
+
+def test_absurd_values_from_the_radar_are_ignored_and_warned_about_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fusion = Fusion(HOME, now=0)
+    absurd = RadarTargetsObserved("sim", NODE.id, (RadarTarget(1e200, 2), RadarTarget(2, -1e200)))
+
+    for step in range(10):
+        fusion.radar(absurd, now=step / 10)
+
+    assert fusion.tracks() == ()
+    assert caplog.text.count("Ogiltigt mål") == 1
+
+
+def test_unknown_nodes_are_warned_about_once_each_and_not_without_end(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fusion = Fusion(HOME, now=0)
+
+    for i in range(500):
+        for _ in range(3):
+            fusion.radar(RadarTargetsObserved("sim", f"okänd-{i}\nfalsk rad", ()), now=0)
+
+    assert caplog.text.count("ignoreras") == 100
+    assert caplog.text.count("Fler problem") == 1
+    # Nod-id:t skrivs med citattecken, så en radbrytning i det kan inte göra en falsk loggrad.
+    assert "\nfalsk rad" not in caplog.text
+
+
+def home_with_sofa() -> Home:
+    return home_with_zones(zone("soffa", ZoneKind.STILL, 0.5, 2.5, 2, 1.5))

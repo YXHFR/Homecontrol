@@ -254,8 +254,8 @@ export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLEl
     element(
       "p",
       { className: "muted" },
-      "Wi-Fi-rörelse håller kvar den som sitter still i en stillhetszon. " +
-        "Först vid vikten 1 räcker rörelsen ensam för att rummet ska räknas som upptaget.",
+      "Wi-Fi-rörelse håller kvar den som sitter still i en stillhetszon. Vid 0 används " +
+        "inte Wi-Fi, och först vid 1 räcker rörelsen ensam för att rummet ska räknas som upptaget.",
     ),
     element("p", { className: "muted" }, "Dagsljusgränsen används när dagsljusregeln kommer."),
   );

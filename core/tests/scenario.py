@@ -29,7 +29,7 @@ from typing import Self
 
 from homecontrol.clock import ManualClock
 from homecontrol.controller import Controller, LampView
-from homecontrol.fusion import Occupancy
+from homecontrol.fusion import HOLD_SECONDS, Occupancy
 from homecontrol.home import Capability, Home, Point
 from homecontrol.simulation import SimulatedLampOutput, SimulatedSource, Simulation
 from homes import one_room_home
@@ -92,7 +92,7 @@ class Scenario:
         Radarn ser dem tio gånger i sekunden på vägen. Framme står de kvar en
         sekund, så att radarn hinner se var de stannade.
         """
-        floor_id = _only(f.id for f in self.home.floors)
+        floor_id = _only(floor.id for floor in self.home.floors)
         persons = self.source.persons
         starts = {who: persons[self._persons[who]].position for who in destinations}
         steps = max(1, round(seconds / RADAR_INTERVAL))
@@ -101,19 +101,13 @@ class Scenario:
             share = step / steps
             self.source.move_persons(
                 {
-                    self._persons[who]: (
-                        floor_id,
-                        Point(
-                            starts[who].x + (x - starts[who].x) * share,
-                            starts[who].y + (y - starts[who].y) * share,
-                        ),
-                    )
-                    for who, (x, y) in destinations.items()
+                    self._persons[who]: (floor_id, _between(starts[who], Point(*end), share))
+                    for who, end in destinations.items()
                 }
             )
         for _ in range(round(1 / RADAR_INTERVAL)):
             self.wait(seconds=RADAR_INTERVAL)
-            self.source.report()
+            self.source.repeat_targets()
         return self
 
     def radar_loses(self, *, who: str = _PERSON) -> Self:
@@ -121,12 +115,17 @@ class Scenario:
         self.source.set_seen_by_radar(self._persons[who], False)
         return self
 
-    def wifi_motion(self, moving: bool = True, room: str | None = None) -> Self:
-        """Wi-Fi-mätningen i rummet känner rörelse (eller slutar känna den)."""
-        for node in self.home.room(self._room_id(room)).nodes:
-            if Capability.CSI in node.capabilities:
-                self.source.set_motion(node.id, moving)
-        return self
+    def wifi_motion(self, room: str | None = None) -> Self:
+        """Wi-Fi-mätningen i rummet känner rörelse."""
+        return self._set_motion(room, moving=True)
+
+    def wifi_motion_stops(self, room: str | None = None) -> Self:
+        """Wi-Fi-mätningen i rummet slutar känna rörelse."""
+        return self._set_motion(room, moving=False)
+
+    def wait_for_hold(self) -> Self:
+        """Väntar ut de 10 sekunder som ett tappat spår hålls kvar mitt i rummet."""
+        return self.wait(seconds=HOLD_SECONDS)
 
     def source_lost(self) -> Self:
         """Låtsaskällan tappar kontakten, som en radar utan ström."""
@@ -167,21 +166,12 @@ class Scenario:
         """Läget i rummet: "upptaget", "tomt" eller "okänt"."""
         room_id = self._room_id(room)
         view = next(r for r in self.controller.snapshot().rooms if r.room_id == room_id)
-        if view.status is not Occupancy(status):
-            raise AssertionError(
-                f"{room_id} skulle vara {status} efter {self.clock.now():g} s "
-                f"men är {view.status.value}"
-            )
-        return self
+        return self._expect_status(room_id, view.status, status)
 
     def expect_zone(self, status: str, zone: str) -> Self:
+        """Läget i zonen: "upptaget", "tomt" eller "okänt"."""
         view = next(z for z in self.controller.snapshot().zones if z.zone_id == zone)
-        if view.status is not Occupancy(status):
-            raise AssertionError(
-                f"{zone} skulle vara {status} efter {self.clock.now():g} s "
-                f"men är {view.status.value}"
-            )
-        return self
+        return self._expect_status(zone, view.status, status)
 
     def expect_tracks(self, count: int, *, held: int = 0) -> Self:
         """Så många spår finns, och så många av dem är tappade men kvarhållna."""
@@ -229,6 +219,19 @@ class Scenario:
 
     # --- Hjälpfunktioner ---
 
+    def _expect_status(self, name: str, actual: Occupancy, wanted: str) -> Self:
+        if actual is not Occupancy(wanted):
+            raise AssertionError(
+                f"{name} skulle vara {wanted} efter {self.clock.now():g} s men är {actual.value}"
+            )
+        return self
+
+    def _set_motion(self, room: str | None, *, moving: bool) -> Self:
+        for node in self.home.room(self._room_id(room)).nodes:
+            if Capability.CSI in node.capabilities:
+                self.source.set_motion(node.id, moving)
+        return self
+
     def _place(self, who: str, floor_id: str, position: Point) -> None:
         """Flyttar personen, eller lägger till den om den inte redan finns."""
         person_id = self._persons.get(who)
@@ -249,6 +252,11 @@ class Scenario:
 
     def _room_id(self, room: str | None) -> str:
         return room if room is not None else _only(room.id for room in self.home.rooms)
+
+
+def _between(start: Point, end: Point, share: float) -> Point:
+    """Punkten en viss andel av vägen från `start` till `end`."""
+    return Point(start.x + (end.x - start.x) * share, start.y + (end.y - start.y) * share)
 
 
 def _only(ids: Iterable[str]) -> str:

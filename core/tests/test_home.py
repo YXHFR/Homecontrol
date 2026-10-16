@@ -278,13 +278,3 @@ def test_home_to_radar_is_the_reverse(rotation: float, mirrored: bool) -> None:
     for point in (Point(6, 9), Point(1.5, 5.2), Point(5, 4)):
         seen = radar.home_to_radar(point)
         assert approx(radar.radar_to_home(*seen)) == approx(point)
-
-
-def test_radar_sees_6_meters_and_60_degrees_to_each_side() -> None:
-    radar = node()
-
-    assert radar.radar_sees(0, 5.9)
-    assert not radar.radar_sees(0, 6.1)
-    assert radar.radar_sees(1.7, 1)  # 59,5° åt sidan
-    assert not radar.radar_sees(1.8, 1)  # 61°
-    assert not radar.radar_sees(0, -1)  # bakom radarn

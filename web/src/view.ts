@@ -1,7 +1,7 @@
 import Konva from "konva";
 import { corners, fitTransform, wallSegments, type Transform } from "./geometry";
-import type { Floor, Occupancy, Person, Point, StateMessage, WallKind } from "./protocol";
-import { trackStyle, tracksOnFloor } from "./trackStyles";
+import type { Floor, Person, Point, StateMessage, WallKind } from "./protocol";
+import { ROOM_FILLS, trackStyle, tracksOnFloor } from "./trackStyles";
 import { ZONE_STYLES } from "./zoneStyles";
 
 export interface LiveViewCallbacks {
@@ -50,9 +50,6 @@ const SEND_INTERVAL_MS = 50;
 const SETTLE_MS = 300;
 
 const COLORS = {
-  floor: "#f4f1ea",
-  occupied: "#e3eefb",
-  unknown: "#dcdcdc",
   wall: "#4a4a4a",
   lampOn: "#ffc933",
   lampOff: "#b8b8b8",
@@ -75,11 +72,6 @@ function drawRoomFloors(
   floor: Floor,
   state: StateMessage | null,
 ) {
-  const fills: Record<Occupancy, string> = {
-    upptaget: COLORS.occupied,
-    tomt: COLORS.floor,
-    okänt: COLORS.unknown,
-  };
   for (const room of floor.rooms) {
     const status = state?.rooms.find((r) => r.id === room.id)?.status ?? "tomt";
     layer.add(
@@ -89,7 +81,7 @@ function drawRoomFloors(
           return [screen.x, screen.y];
         }),
         closed: true,
-        fill: fills[status],
+        fill: ROOM_FILLS[status],
       }),
     );
   }

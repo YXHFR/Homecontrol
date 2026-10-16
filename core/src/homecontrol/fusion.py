@@ -2,9 +2,12 @@
 
 Varje radarmål räknas om från nodens koordinater till hemmets. Mål utanför
 nodens rum (radarn ser genom väggar) och mål i ignorera-zoner kastas. Resten
-knyts till anonyma spår: varje mål går till det närmaste spåret som personen
-hinner ha gått till sedan sist, och spårets position jämnas ut. Ett mål som
-inget spår når blir ett nytt spår, så ett spår hoppar aldrig orimligt långt.
+knyts till anonyma spår: varje mål går till det närmaste spåret i nodens rum
+som personen hinner ha gått till sedan sist, och spårets position jämnas ut.
+Ett spår i ett annat rum tas bara över genom en dörröppning, och bara när
+radarn där har tappat det eller när målet är samma punkt som spåret (två
+radarer ser samma person i dörren). Ett mål som inget spår når blir ett nytt
+spår, så ett spår hoppar aldrig orimligt långt.
 
 Radarns egen numrering av målen används inte. Den byter när två personer
 möts, och spåren ska följa personerna, inte numren.
@@ -15,11 +18,19 @@ När radarn tappar ett spår hålls det kvar en stund, beroende på var det tapp
 * i en stillhetszon: så länge Wi-Fi känner rörelse i rummet, högst 30 minuter
 * någon annanstans i rummet (och i en stillhetszon utan Wi-Fi-rörelse): 10 sekunder
 
+Ett spår som hålls kvar i en stillhetszon tas bara över av ett mål i samma
+zon eller alldeles intill, så att den som går förbi soffan inte tar med sig
+spåret av den som sitter i den.
+
+Wi-Fi-rörelsen vägs med rummets inställning `RoomSettings.wifi_weight`:
+vikten gånger rörelsepoängen måste nå `WIFI_HOLD` för att hålla kvar ett
+spår i en stillhetszon, och 1 för att rummet ska räknas som upptaget av
+Wi-Fi-rörelse ensam.
+
 Varje rum och zon är upptaget, tomt eller okänt. Ett rum är upptaget om ett
 spår, sett eller kvarhållet, finns i det, eller om Wi-Fi-rörelsen väger
-tillräckligt på egen hand (se `RoomSettings.wifi_weight`). Annars är det okänt
-om någon av rummets noder hör till en källa som har tappat kontakten, och
-annars tomt.
+tillräckligt på egen hand. Annars är det okänt om någon av rummets noder hör
+till en källa som har tappat kontakten, och annars tomt.
 
 Modulen läser ingen klocka; tiden lämnas in i varje anrop. Den loggar aldrig
 var någon är.
@@ -27,12 +38,12 @@ var någon är.
 
 import logging
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
 from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved
-from homecontrol.home import Capability, Home, Node, Point, Room, ZoneKind
+from homecontrol.home import Capability, Home, Node, Point, Room, Zone, ZoneKind
 
 logger = logging.getLogger(__name__)
 
@@ -40,19 +51,28 @@ HOLD_SECONDS = 10.0
 """Så länge ett tappat spår hålls kvar i rummet utanför zonerna."""
 STILL_HOLD_MAX_SECONDS = 30 * 60.0
 """Så länge ett tappat spår i en stillhetszon som längst hålls kvar av Wi-Fi-rörelse."""
+WIFI_HOLD = 0.25
+"""Så mycket Wi-Fi-rörelsen måste väga (vikt gånger poäng) för att hålla kvar ett spår."""
 
 WALKING_SPEED = 3.0
 """Fortare än så här (meter per sekund) rör sig ingen inomhus."""
 POSITION_NOISE = 0.8
 """Så långt (meter) radarn kan flytta en person som står still, mellan två mätningar."""
+SAME_PERSON = 0.4
+"""Två radarer som ser ett mål så här nära varandra (meter) i en dörröppning ser samma person."""
 MAX_GAP_SECONDS = 0.5
 """Ett spår som inte har setts på så här länge förutsägs inte längre fram."""
 SMOOTHING = 0.5
 """Hur mycket av skillnaden mellan förutsagd och uppmätt position som tas med."""
 VELOCITY_SMOOTHING = 0.2
+"""Hur mycket av den uppmätta fartändringen som tas med."""
+
 MAX_TARGETS = 16
 """Fler mål än så här i en observation är fel i källan, och resten kastas."""
-
+MAX_TARGET_DISTANCE = 20.0
+"""Mål längre bort än så här (meter, åt något håll) är fel i källan och kastas."""
+MAX_WARNINGS = 100
+"""Så många olika problem med källorna varnas det för. Sedan blir det tyst."""
 
 _STILL = Point(0, 0)
 """Farten hos någon som står still."""
@@ -72,15 +92,6 @@ class Presence:
     status: Occupancy
     since: float
 
-    @property
-    def occupied(self) -> bool:
-        return self.status is Occupancy.OCCUPIED
-
-    @property
-    def vacant_since(self) -> float | None:
-        """När rummet blev tomt, eller None om det inte är tomt."""
-        return self.since if self.status is Occupancy.VACANT else None
-
 
 @dataclass(frozen=True)
 class Track:
@@ -92,7 +103,7 @@ class Track:
     """Radarn har tappat spåret, men det hålls kvar."""
 
 
-@dataclass
+@dataclass(eq=False)
 class _Track:
     floor_id: str
     room: Room
@@ -112,6 +123,11 @@ class _Placed:
 
 
 class Fusion:
+    """Håller spåren och läget i varje rum och zon, och ändrar dem när mätningar kommer.
+
+    Varje anrop får tiden `now`, och tiden får aldrig gå bakåt mellan två anrop.
+    """
+
     def __init__(self, home: Home, now: float) -> None:
         self._tracks: list[_Track] = []
         self._source_of: dict[str, str] = {}
@@ -121,8 +137,8 @@ class Fusion:
         """Wi-Fi-rörelsens poäng per nod, 0 när den inte känner någon rörelse."""
         self._motion_stopped: dict[str, float] = {}
         """När nodens Wi-Fi-rörelse senast upphörde."""
-        self._warned: set[str] = set()
-        """Noder som det redan har varnats för, så att loggen inte fylls tio gånger i sekunden."""
+        self._warned: set[tuple[str, str]] = set()
+        """Problem som det redan har varnats för, så att loggen inte fylls tio gånger i sekunden."""
         self._rooms: dict[str, Presence] = {}
         self._zones: dict[str, Presence] = {}
         self._use(home)
@@ -149,15 +165,14 @@ class Fusion:
         placed = self._placed_with(observation.node_id, Capability.RADAR)
         if placed is None:
             return
+        # Först släpps det vars tid redan har gått ut, så att det inte hittas igen.
+        self._expire(now)
         self._heard(observation.source_id, observation.node_id)
-        self._expire(now)  # så att ett spår som just släppts inte hittas igen
         targets = observation.targets
         if len(targets) > MAX_TARGETS:
-            logger.warning(
-                "Noden %s skickade %d mål, bara de första används", placed.node.id, len(targets)
-            )
+            self._warn_once(placed.node.id, "för många mål", "Noden %r skickar för många mål")
             targets = targets[:MAX_TARGETS]
-        self._associate(placed, list(_detections(placed, targets)), now)
+        self._associate(placed, list(self._detections(placed, targets)), now)
         self._refresh(now)
 
     def motion(self, observation: MotionObserved, now: float) -> None:
@@ -166,8 +181,12 @@ class Fusion:
             return
         score = observation.score
         if not math.isfinite(score) or not 0 <= score <= 1:
-            logger.warning("Ogiltig rörelsepoäng från noden %s ignoreras", placed.node.id)
+            self._warn_once(
+                placed.node.id, "rörelsepoäng", "Ogiltig rörelsepoäng från noden %r ignoreras"
+            )
             return
+        # Rörelsen gäller från nu. Det som skulle ha släppts innan dess släpps först.
+        self._expire(now)
         self._heard(observation.source_id, observation.node_id)
         node_id = observation.node_id
         if not observation.moving and self._motion.get(node_id, 0.0) > 0:
@@ -177,6 +196,7 @@ class Fusion:
 
     def source_lost(self, source_id: str, now: float) -> None:
         """Källans noder räknas som borta tills de hörs av igen. Deras spår glöms."""
+        self._expire(now)
         nodes = {node_id for node_id, source in self._source_of.items() if source == source_id}
         self._lost_nodes |= nodes
         for node_id in nodes:
@@ -195,6 +215,7 @@ class Fusion:
         räknades om med den gamla placeringen. Det gör också spår som inte
         längre är i sitt rum. Noden ser dem snart igen om de finns kvar.
         """
+        self._expire(now)
         before = self._placed
         self._use(home)
         kept = self._placed.keys()
@@ -227,44 +248,103 @@ class Fusion:
     def _placed_with(self, node_id: str, capability: Capability) -> _Placed | None:
         placed = self._placed.get(node_id)
         if placed is None or capability not in placed.node.capabilities:
-            if node_id not in self._warned:
-                self._warned.add(node_id)
-                logger.warning(
-                    "Mätningar från noden %s ignoreras: den är inte placerad med %s",
-                    node_id,
-                    capability,
-                )
+            self._warn_once(
+                node_id,
+                f"inte placerad med {capability}",
+                f"Mätningar från noden %r ignoreras: den är inte placerad med {_NAMES[capability]}",
+            )
             return None
         return placed
+
+    def _warn_once(self, node_id: str, problem: str, message: str) -> None:
+        """Varnar en gång per nod och problem. Nod-id:t kommer från källan och kortas av."""
+        key = (node_id[:64], problem)
+        if key in self._warned or len(self._warned) > MAX_WARNINGS:
+            return
+        self._warned.add(key)
+        if len(self._warned) > MAX_WARNINGS:
+            logger.warning("Fler problem med källorna loggas inte förrän hemmet ändras")
+            return
+        logger.warning(message, key[0])
 
     def _heard(self, source_id: str, node_id: str) -> None:
         self._source_of[node_id] = source_id
         self._lost_nodes.discard(node_id)
 
+    def _detections(self, placed: _Placed, targets: Iterable[RadarTarget]) -> Iterable[Point]:
+        """Målen i hemmets koordinater, utom de som är utanför rummet eller i en ignorera-zon."""
+        ignored = [zone for zone in placed.room.zones if zone.kind is ZoneKind.IGNORE]
+        for target in targets:
+            if not all(
+                math.isfinite(value) and abs(value) <= MAX_TARGET_DISTANCE
+                for value in (target.x, target.y)
+            ):
+                self._warn_once(placed.node.id, "ogiltigt mål", "Ogiltigt mål från noden %r")
+                continue
+            point = placed.node.radar_to_home(target.x, target.y)
+            if placed.room.contains(point) and not any(zone.contains(point) for zone in ignored):
+                yield point
+
     def _associate(self, placed: _Placed, detections: Sequence[Point], now: float) -> None:
-        """Knyter nodens mål till spår. Närmaste par först, och bara par som personen hinner."""
-        candidates = [track for track in self._tracks if track.floor_id == placed.floor_id]
-        pairs = sorted(
-            (distance, i, j)
-            for i, track in enumerate(candidates)
-            for j, detection in enumerate(detections)
-            if (distance := _distance(_predict(track, now), detection)) <= _reach(track, now)
+        """Knyter nodens mål till spår, närmaste par först och bara par som personen hinner.
+
+        Först prövas spåren i nodens eget rum och spår som har tappats var som
+        helst. Mål som blir över kan sedan ta över ett spår som syns i ett
+        annat rum, om det är samma person i en dörröppning.
+        """
+        on_floor = [track for track in self._tracks if track.floor_id == placed.floor_id]
+        own = [t for t in on_floor if t.room.id == placed.room.id or t.lost_at is not None]
+        others = [t for t in on_floor if t not in own]
+        matched = self._match(
+            own,
+            dict(enumerate(detections)),
+            lambda track, detection: (
+                _distance(_predict(track, now), detection) <= _reach(track, now)
+                and _may_take_over(track, detection)
+            ),
+            now,
         )
-        matched_tracks: set[int] = set()
-        matched_detections: set[int] = set()
-        for _, i, j in pairs:
-            if i not in matched_tracks and j not in matched_detections:
-                matched_tracks.add(i)
-                matched_detections.add(j)
-                _follow(candidates[i], detections[j], placed, now)
+        left = {j: d for j, d in enumerate(detections) if j not in matched.values()}
+        matched |= self._match(
+            others,
+            left,
+            lambda track, detection: (
+                _distance(track.position, detection) <= SAME_PERSON
+                and not track.room.blocks(track.position, detection)
+                and not placed.room.blocks(track.position, detection)
+            ),
+            now,
+        )
+        for track, j in matched.items():
+            _follow(track, detections[j], placed, now)
         # Det noden såg förut men inte ser nu har den tappat.
-        for i, track in enumerate(candidates):
-            if i not in matched_tracks and track.node_id == placed.node.id:
-                track.lost_at = track.lost_at if track.lost_at is not None else now
+        for track in on_floor:
+            if track not in matched and track.node_id == placed.node.id and track.lost_at is None:
+                track.lost_at = now
         for j, detection in enumerate(detections):
-            if j not in matched_detections:
+            if j not in matched.values():
                 track = _Track(placed.floor_id, placed.room, placed.node.id, detection, _STILL, now)
                 self._tracks.append(track)
+
+    @staticmethod
+    def _match(
+        tracks: Sequence[_Track],
+        detections: Mapping[int, Point],
+        allowed: Callable[[_Track, Point], bool],
+        now: float,
+    ) -> dict[_Track, int]:
+        """Vilket mål (med sitt nummer i observationen) varje spår får, närmaste par först."""
+        pairs = sorted(
+            (_distance(_predict(track, now), detection), i, j)
+            for i, track in enumerate(tracks)
+            for j, detection in detections.items()
+            if allowed(track, detection)
+        )
+        matched: dict[_Track, int] = {}
+        for _, i, j in pairs:
+            if tracks[i] not in matched and j not in matched.values():
+                matched[tracks[i]] = j
+        return matched
 
     def _held(self) -> Iterable[_Track]:
         return (track for track in self._tracks if track.lost_at is not None)
@@ -286,23 +366,26 @@ class Fusion:
         lost_at = track.lost_at
         if lost_at is None:
             return math.inf  # radarn ser spåret
-        kinds = {zone.kind for zone in track.room.zones if zone.contains(track.position)}
+        kinds = {zone.kind for zone in _zones_at(track)}
         if ZoneKind.ENTRANCE in kinds:
             return lost_at
-        if ZoneKind.STILL in kinds and track.room.settings.wifi_weight > 0:
+        if ZoneKind.STILL in kinds:
             longest = lost_at + STILL_HOLD_MAX_SECONDS
-            if self._wifi_score(track.room) > 0:
+            if self._wifi_weighted(track.room) >= WIFI_HOLD:
                 return longest
-            # Rörelsen har upphört. Personen räknas som kvar till dess, inte bara 10 sekunder.
-            stopped = max(
-                (self._motion_stopped.get(node.id, -math.inf) for node in track.room.nodes),
-                default=-math.inf,
-            )
-            return min(longest, max(lost_at + HOLD_SECONDS, stopped))
+            # Rörelsen kan ha upphört efter att radarn tappade personen. Då räknas
+            # personen som kvar tills rörelsen upphörde, om det var mer än de vanliga
+            # 10 sekunderna efter att radarn tappade den.
+            if track.room.settings.wifi_weight >= WIFI_HOLD:  # poängen är högst 1
+                stopped = max(
+                    (self._motion_stopped.get(node.id, -math.inf) for node in track.room.nodes),
+                    default=-math.inf,
+                )
+                return min(longest, max(lost_at + HOLD_SECONDS, stopped))
         return lost_at + HOLD_SECONDS
 
-    def _wifi_score(self, room: Room) -> float:
-        """Wi-Fi-rörelsen i rummet, viktad med rummets inställning."""
+    def _wifi_weighted(self, room: Room) -> float:
+        """Wi-Fi-rörelsen i rummet gånger rummets vikt."""
         scores = (self._motion.get(node.id, 0.0) for node in room.nodes)
         return room.settings.wifi_weight * max(scores, default=0.0)
 
@@ -314,7 +397,7 @@ class Fusion:
     def _refresh_at(self, now: float) -> None:
         for room in self._home.rooms:
             tracks = [track for track in self._tracks if track.room.id == room.id]
-            if tracks or self._wifi_score(room) >= 1:
+            if tracks or self._wifi_weighted(room) >= 1:
                 status = Occupancy.OCCUPIED
             elif any(node.id in self._lost_nodes for node in room.nodes):
                 status = Occupancy.UNKNOWN
@@ -322,14 +405,7 @@ class Fusion:
                 status = Occupancy.VACANT
             self._rooms[room.id] = _keep_since(self._rooms.get(room.id), status, now)
             for zone in room.zones:
-                if zone.kind is not ZoneKind.IGNORE and any(
-                    zone.contains(track.position) for track in tracks
-                ):
-                    zone_status = Occupancy.OCCUPIED
-                elif status is Occupancy.UNKNOWN:
-                    zone_status = Occupancy.UNKNOWN
-                else:
-                    zone_status = Occupancy.VACANT
+                zone_status = _zone_status(zone, tracks, status)
                 self._zones[zone.id] = _keep_since(self._zones.get(zone.id), zone_status, now)
         # Rum och zoner som har ritats bort glöms.
         room_ids = {room.id for room in self._home.rooms}
@@ -338,15 +414,33 @@ class Fusion:
         self._zones = {key: value for key, value in self._zones.items() if key in zone_ids}
 
 
-def _detections(placed: _Placed, targets: Iterable[RadarTarget]) -> Iterable[Point]:
-    """Målen i hemmets koordinater, utom de som är utanför rummet eller i en ignorera-zon."""
-    ignored = [zone for zone in placed.room.zones if zone.kind is ZoneKind.IGNORE]
-    for target in targets:
-        if not (math.isfinite(target.x) and math.isfinite(target.y)):
-            continue
-        point = placed.node.radar_to_home(target.x, target.y)
-        if placed.room.contains(point) and not any(zone.contains(point) for zone in ignored):
-            yield point
+_NAMES = {Capability.RADAR: "radar", Capability.CSI: "Wi-Fi-mätning", Capability.LUX: "ljussensor"}
+
+
+def _zone_status(zone: Zone, tracks: Sequence[_Track], room_status: Occupancy) -> Occupancy:
+    """En zon är upptagen om ett spår finns i den, utom en ignorera-zon som aldrig är det."""
+    if zone.kind is not ZoneKind.IGNORE and any(zone.contains(t.position) for t in tracks):
+        return Occupancy.OCCUPIED
+    return Occupancy.UNKNOWN if room_status is Occupancy.UNKNOWN else Occupancy.VACANT
+
+
+def _zones_at(track: _Track) -> list[Zone]:
+    return [zone for zone in track.room.zones if zone.contains(track.position)]
+
+
+def _may_take_over(track: _Track, detection: Point) -> bool:
+    """Ett kvarhållet spår i en stillhetszon tas bara över av ett mål i zonen eller intill.
+
+    Annars kunde den som går förbi soffan ta med sig spåret av den som sitter i den.
+    """
+    if track.lost_at is None:
+        return True
+    still = [zone for zone in _zones_at(track) if zone.kind is ZoneKind.STILL]
+    return (
+        not still
+        or any(zone.contains(detection) for zone in still)
+        or _distance(track.position, detection) <= POSITION_NOISE
+    )
 
 
 def _predict(track: _Track, now: float) -> Point:
@@ -382,6 +476,9 @@ def _follow(track: _Track, detection: Point, placed: _Placed, now: float) -> Non
             if speed > WALKING_SPEED:
                 vx, vy = vx * WALKING_SPEED / speed, vy * WALKING_SPEED / speed
             track.velocity = Point(vx, vy)
+    if not placed.room.contains(track.position):
+        # Utjämningen får inte lägga spåret utanför rummet där radarn såg personen.
+        track.position = detection
     track.seen_at = now
     track.lost_at = None
     track.node_id = placed.node.id

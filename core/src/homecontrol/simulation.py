@@ -28,7 +28,7 @@ from homecontrol.connectors import (
     RadarTargetsObserved,
     SourceLost,
 )
-from homecontrol.home import RADAR_MAX_TARGETS, Capability, Home, Point, Target
+from homecontrol.home import Capability, Home, Node, Point, Target
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,14 @@ MAX_PERSONS = 10
 Speed = Literal[1, 10, 60]
 """Tidsfarterna som går att välja. Vid 60× går en minut på en sekund."""
 SPEEDS: tuple[Speed, ...] = get_args(Speed)
+
+# Den virtuella radarn ser som en LD2450: 6 meter bort och 60° åt varje
+# sida, och följer högst tre personer åt gången.
+RADAR_RANGE = 6.0
+"""Så långt radarn ser, i meter."""
+RADAR_HALF_ANGLE = 60.0
+"""Så många grader åt varje sida om riktningen den tittar åt som radarn ser."""
+RADAR_MAX_TARGETS = 3
 
 DEFAULT_DAYLIGHT_LUX = 10.0
 """Dagsljuset när simuleringen startar: mörkt, så att lamporna tänds."""
@@ -64,6 +72,7 @@ class SimulatedSource:
         self._unseen: set[str] = set()
         """Personer som radarn har tappat, fast de är kvar."""
         self._motion: dict[str, bool] = {}
+        """Om varje nods Wi-Fi-mätning känner rörelse."""
         self._next_id = count(1)
         self._daylight: float | None = None
 
@@ -137,12 +146,12 @@ class SimulatedSource:
                 self._unseen.add(person_id)
             self._emit_targets()
 
-    def report(self) -> None:
+    def repeat_targets(self) -> None:
         """Skickar det radarna ser igen, som en riktig radar gör tio gånger i sekunden."""
         self._emit_targets()
 
     def set_motion(self, node_id: str, moving: bool) -> None:
-        """Om nodens Wi-Fi-mätning känner rörelse."""
+        """Låtsas att nodens Wi-Fi-mätning känner rörelse, eller slutar känna den."""
         self._motion[node_id] = moving
         if self._sink is not None:
             self._sink(MotionObserved(self._source_id, node_id, moving))
@@ -182,22 +191,31 @@ class SimulatedSource:
             person for person_id, person in self._persons.items() if person_id not in self._unseen
         ]
         for floor in self._home.floors:
-            radars = [
-                node
-                for room in floor.rooms
-                for node in room.nodes
-                if Capability.RADAR in node.capabilities
-            ]
-            for node in radars:
-                in_view: list[Point] = []
-                for person in seen:
-                    if person.floor_id == floor.id:
-                        target = node.home_to_radar(person.position)
-                        if node.radar_sees(target.x, target.y):
-                            in_view.append(target)
-                in_view.sort(key=lambda target: math.hypot(target.x, target.y))
-                targets = tuple(RadarTarget(t.x, t.y) for t in in_view[:RADAR_MAX_TARGETS])
-                self._sink(RadarTargetsObserved(self._source_id, node.id, targets))
+            on_floor = [person.position for person in seen if person.floor_id == floor.id]
+            for node in (node for room in floor.rooms for node in room.nodes):
+                if Capability.RADAR in node.capabilities:
+                    targets = _targets_seen_by(node, on_floor)
+                    self._sink(RadarTargetsObserved(self._source_id, node.id, targets))
+
+
+def _targets_seen_by(node: Node, positions: Iterable[Point]) -> tuple[RadarTarget, ...]:
+    """Det radarn på noden ser av personerna, närmast först och högst tre."""
+    in_view = [
+        target
+        for target in (node.home_to_radar(position) for position in positions)
+        if _in_view(target)
+    ]
+    in_view.sort(key=lambda target: math.hypot(target.x, target.y))
+    return tuple(RadarTarget(t.x, t.y) for t in in_view[:RADAR_MAX_TARGETS])
+
+
+def _in_view(target: Point) -> bool:
+    """Om en punkt i radarns koordinater ligger i dess synfält."""
+    return (
+        target.y > 0
+        and math.hypot(target.x, target.y) <= RADAR_RANGE
+        and abs(math.degrees(math.atan2(target.x, target.y))) <= RADAR_HALF_ANGLE
+    )
 
 
 class SimulatedLampOutput:
