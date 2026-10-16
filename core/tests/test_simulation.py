@@ -3,16 +3,37 @@
 import pytest
 
 from homecontrol.clock import SystemClock
-from homecontrol.connectors import LightLevelObserved, Observation, SourceLost, TargetsObserved
-from homecontrol.home import Point
+from homecontrol.connectors import (
+    LightLevelObserved,
+    MotionObserved,
+    Observation,
+    RadarTarget,
+    RadarTargetsObserved,
+    SourceLost,
+)
+from homecontrol.home import Point, Target
 from homecontrol.simulation import MAX_PERSONS, SimulatedSource, Simulation, TooManyPersons
-from homes import FLOOR, at
+from homes import FLOOR, one_room_home, two_floor_home
+
+HOME = one_room_home()
+NODE = HOME.rooms[0].nodes[0]
+"""Rumskortet sitter mitt på övre väggen, i (2.5, 0), och tittar rakt ned i rummet."""
+
+
+def at(x: float, y: float) -> Target:
+    return Target(FLOOR, Point(x, y))
+
+
+def radar(*points: tuple[float, float]) -> RadarTargetsObserved:
+    """Det rumskortet ser när personer står i `points`, i radarns egna koordinater."""
+    targets = tuple(RadarTarget(*NODE.home_to_radar(Point(x, y))) for x, y in points)
+    return RadarTargetsObserved("sim", NODE.id, targets)
 
 
 def make(enabled: bool = True) -> tuple[Simulation, list[Observation], SystemClock]:
     seen: list[Observation] = []
     clock = SystemClock()
-    source = SimulatedSource("sim", room_ids=["kök", "hall"])
+    source = SimulatedSource(HOME, "sim")
     simulation = Simulation(
         source, seen.append, clock, floor_ids=[FLOOR], enabled=enabled, daylight=20
     )
@@ -22,11 +43,7 @@ def make(enabled: bool = True) -> tuple[Simulation, list[Observation], SystemClo
 def test_starts_by_reporting_no_one_and_the_daylight_in_every_room() -> None:
     _, seen, _ = make()
 
-    assert seen == [
-        TargetsObserved("sim", ()),
-        LightLevelObserved("sim", "kök", 20),
-        LightLevelObserved("sim", "hall", 20),
-    ]
+    assert seen == [radar(), LightLevelObserved("sim", "vardagsrum", 20)]
 
 
 def test_persons_are_added_moved_and_removed_through_the_sink() -> None:
@@ -38,11 +55,12 @@ def test_persons_are_added_moved_and_removed_through_the_sink() -> None:
     simulation.remove_person("2")
     simulation.move_person("2", FLOOR, Point(4, 4))  # borta, ignoreras
 
-    assert seen[3:] == [
-        TargetsObserved("sim", (at(1, 1),)),
-        TargetsObserved("sim", (at(1, 1), at(2, 2))),
-        TargetsObserved("sim", (at(3, 3), at(2, 2))),
-        TargetsObserved("sim", (at(3, 3),)),
+    # Radarn numrerar målen efter avståndet, så den som flyttade längre bort kommer sist.
+    assert seen[2:] == [
+        radar((1, 1)),
+        radar((1, 1), (2, 2)),
+        radar((2, 2), (3, 3)),
+        radar((3, 3)),
     ]
     assert simulation.view().persons == {"1": at(3, 3)}
 
@@ -119,7 +137,7 @@ def test_notifies_listeners_of_changes() -> None:
 
 
 def test_number_of_persons_is_limited() -> None:
-    source = SimulatedSource()
+    source = SimulatedSource(HOME)
     for _ in range(MAX_PERSONS):
         source.add_person(FLOOR, Point(1, 1))
 
@@ -150,3 +168,55 @@ def test_faster_clock_continues_from_where_it_was() -> None:
     assert clock.real_seconds_until(0) == 0
     with pytest.raises(ValueError, match="framåt"):
         clock.set_speed(0)
+
+
+def test_radar_only_sees_its_field_of_view_and_at_most_three() -> None:
+    simulation, seen, _ = make()
+    simulation.add_person(FLOOR, Point(0.2, 0.5))  # bredvid kortet, utanför synfältet
+    assert seen[-1] == radar()
+
+    for x in (1.0, 2.0, 3.0, 4.0):
+        simulation.add_person(FLOOR, Point(x, 3))
+
+    assert seen[-1] == radar((2, 3), (3, 3), (1, 3))
+
+
+def test_radar_does_not_see_other_floors() -> None:
+    home = two_floor_home()
+    seen: list[Observation] = []
+    source = SimulatedSource(home, "sim")
+    source.start(seen.append)
+
+    source.add_person("uppe", Point(2.5, 2))
+
+    by_node = {o.node_id: o.targets for o in seen[-2:] if isinstance(o, RadarTargetsObserved)}
+    assert by_node["nod-vardagsrum"] == ()
+    assert len(by_node["nod-sovrum"]) == 1
+
+
+def test_person_lost_by_the_radar_is_still_there() -> None:
+    source = SimulatedSource(HOME, "sim")
+    seen: list[Observation] = []
+    source.start(seen.append)
+    person = source.add_person(FLOOR, Point(2, 2))
+
+    source.set_seen_by_radar(person, False)
+    assert seen[-1] == radar()
+    assert source.persons == {person: at(2, 2)}
+
+    source.set_seen_by_radar(person, True)
+    assert seen[-1] == radar((2, 2))
+
+
+def test_wifi_motion_is_reported_and_repeated_after_a_restart() -> None:
+    source = SimulatedSource(HOME, "sim")
+    seen: list[Observation] = []
+    source.set_motion(NODE.id, True)  # minns tills källan startar
+    source.start(seen.append)
+    assert MotionObserved("sim", NODE.id, True) in seen
+
+    source.stop()
+    seen.clear()
+    source.start(seen.append)
+
+    assert not any(isinstance(o, MotionObserved) for o in seen)

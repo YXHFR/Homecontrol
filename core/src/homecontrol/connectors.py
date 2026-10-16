@@ -17,19 +17,46 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from homecontrol.home import Target
+
+@dataclass(frozen=True)
+class RadarTarget:
+    """Ett mål som radarn ser, i meter i radarns egna koordinater.
+
+    y är rakt fram från radarn och x åt sidan (se `Node.radar_to_home`).
+    Kopplingen räknar om radarns egna enheter, till exempel millimeter, till meter.
+    """
+
+    x: float
+    y: float
 
 
 @dataclass(frozen=True)
-class TargetsObserved:
-    """Alla mål (personer) som källan ser just nu, i hemmets koordinater.
+class RadarTargetsObserved:
+    """Alla mål som en nods radar ser just nu.
 
-    En tom tupel betyder att källan inte ser någon. Varje observation ersätter
-    källans förra, så källan måste alltid skicka hela bilden.
+    En tom tupel betyder att radarn inte ser någon. Varje observation ersätter
+    nodens förra, så källan måste alltid skicka hela bilden. Ordningen är
+    radarns egen numrering av målen. Den byter ofta när två personer möts och
+    används därför inte till något: bara sammanvägningen ser målen, och den
+    bygger egna, anonyma spår av dem.
     """
 
     source_id: str
-    targets: tuple[Target, ...]
+    node_id: str
+    targets: tuple[RadarTarget, ...]
+
+
+@dataclass(frozen=True)
+class MotionObserved:
+    """Om nodens Wi-Fi-mätning (CSI) känner rörelse i rummet just nu.
+
+    `score` är hur säker mätningen är, från 0 till 1.
+    """
+
+    source_id: str
+    node_id: str
+    moving: bool
+    score: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -43,12 +70,15 @@ class LightLevelObserved:
 
 @dataclass(frozen=True)
 class SourceLost:
-    """Källan har tappat kontakten eller stoppats. Det den såg senast gäller inte längre."""
+    """Källan har tappat kontakten eller stoppats. Det den såg senast gäller inte längre.
+
+    Rummen som källans noder sitter i får läget okänt tills källan hörs av igen.
+    """
 
     source_id: str
 
 
-Observation = TargetsObserved | LightLevelObserved | SourceLost
+Observation = RadarTargetsObserved | MotionObserved | LightLevelObserved | SourceLost
 ObservationSink = Callable[[Observation], None]
 
 
@@ -56,7 +86,8 @@ class Source(Protocol):
     """En källkoppling. Den lämnar observationer till `sink` tills den stoppas.
 
     När källan tappar kontakten, eller stoppas, skickar den `SourceLost` så att
-    ingen blir kvar i ett rum bara för att källan tystnade.
+    ingen blir kvar i ett rum bara för att källan tystnade, och så att rummet
+    i stället får läget okänt.
     """
 
     @property

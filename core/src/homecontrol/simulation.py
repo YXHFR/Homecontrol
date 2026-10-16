@@ -1,11 +1,18 @@
 """Simulering: en låtsaskälla, virtuella lampor och simuleringsläget i livevyn.
 
 Låtsaskällan styrs från livevyn eller från scenariotester och lämnar sina
-observationer genom samma ingång som riktiga källor. Kärnan kan alltså inte
-se skillnad på en låtsasperson och en person som radarn ser.
+observationer genom samma ingång som riktiga källor. Varje rumskort med radar
+i hemmet blir en virtuell radar, som ser låtsaspersonerna i sitt synfält och
+skickar dem i sina egna koordinater, precis som en riktig radar. Kärnan kan
+alltså inte se skillnad på en låtsasperson och en person som radarn ser, och
+omräkningen och sammanvägningen prövas på samma sätt som med riktiga noder.
+
+Den virtuella radarn ser genom alla väggar. Det gör en riktig radar också,
+mer eller mindre, och sammanvägningen ska klara det.
 """
 
 import logging
+import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from itertools import count
@@ -15,11 +22,13 @@ from homecontrol.clock import SpeedControl
 from homecontrol.connectors import (
     LampCommand,
     LightLevelObserved,
+    MotionObserved,
     ObservationSink,
+    RadarTarget,
+    RadarTargetsObserved,
     SourceLost,
-    TargetsObserved,
 )
-from homecontrol.home import Home, Point, Target
+from homecontrol.home import RADAR_MAX_TARGETS, Capability, Home, Point, Target
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +50,20 @@ class TooManyPersons(Exception):
 
 
 class SimulatedSource:
-    """En källkoppling med låtsaspersoner och låtsat dagsljus.
+    """En källkoppling med låtsaspersoner, låtsad Wi-Fi-rörelse och låtsat dagsljus.
 
     Varje person får ett id när den läggs till, så att den kan flyttas och tas
-    bort. Id:t stannar i simuleringen; kärnan får bara se var personerna är.
+    bort. Id:t stannar i simuleringen; kärnan får bara se det radarna ser.
     """
 
-    def __init__(self, source_id: str = "simulering", room_ids: Iterable[str] = ()) -> None:
+    def __init__(self, home: Home, source_id: str = "simulering") -> None:
         self._source_id = source_id
-        self._room_ids = tuple(room_ids)
+        self._home = home
         self._sink: ObservationSink | None = None
         self._persons: dict[str, Target] = {}
+        self._unseen: set[str] = set()
+        """Personer som radarn har tappat, fast de är kvar."""
+        self._motion: dict[str, bool] = {}
         self._next_id = count(1)
         self._daylight: float | None = None
 
@@ -71,12 +83,16 @@ class SimulatedSource:
     def start(self, sink: ObservationSink) -> None:
         self._sink = sink
         self._emit_targets()
+        for node_id, moving in self._motion.items():
+            self._sink(MotionObserved(self._source_id, node_id, moving))
         if self._daylight is not None:
             self.set_daylight(self._daylight)
 
     def stop(self) -> None:
         """Källan tystnar och glömmer sina personer, som en radar som stängs av."""
         self._persons.clear()
+        self._unseen.clear()
+        self._motion.clear()
         if self._sink is not None:
             self._sink(SourceLost(self._source_id))
         self._sink = None
@@ -92,28 +108,62 @@ class SimulatedSource:
 
     def move_person(self, person_id: str, floor_id: str, position: Point) -> None:
         """Flyttar en person. En person som inte finns (längre) lämnas i fred."""
-        if person_id in self._persons:
-            self._persons[person_id] = Target(floor_id, position)
+        self.move_persons({person_id: (floor_id, position)})
+
+    def move_persons(self, moves: Mapping[str, tuple[str, Point]]) -> None:
+        """Flyttar flera personer på en gång, så att radarerna ser dem samtidigt."""
+        moved = False
+        for person_id, (floor_id, position) in moves.items():
+            if person_id in self._persons:
+                self._persons[person_id] = Target(floor_id, position)
+                moved = True
+        if moved:
             self._emit_targets()
 
     def remove_person(self, person_id: str) -> None:
+        self._unseen.discard(person_id)
         if self._persons.pop(person_id, None) is not None:
             self._emit_targets()
+
+    def set_seen_by_radar(self, person_id: str, seen: bool) -> None:
+        """Radarn tappar personen (eller hittar den igen), fast den inte har gått någonstans.
+
+        Så gör en riktig radar med någon som sitter eller ligger helt still.
+        """
+        if person_id in self._persons:
+            if seen:
+                self._unseen.discard(person_id)
+            else:
+                self._unseen.add(person_id)
+            self._emit_targets()
+
+    def report(self) -> None:
+        """Skickar det radarna ser igen, som en riktig radar gör tio gånger i sekunden."""
+        self._emit_targets()
+
+    def set_motion(self, node_id: str, moving: bool) -> None:
+        """Om nodens Wi-Fi-mätning känner rörelse."""
+        self._motion[node_id] = moving
+        if self._sink is not None:
+            self._sink(MotionObserved(self._source_id, node_id, moving))
 
     def set_daylight(self, lux: float) -> None:
         """Samma ljusnivå i alla rum, som när solen går upp eller ner."""
         self._daylight = lux
-        for room_id in self._room_ids:
-            self.set_light_level(room_id, lux)
+        for room in self._home.rooms:
+            self.set_light_level(room.id, lux)
 
-    def set_rooms(self, room_ids: Iterable[str]) -> None:
-        """Byter rummen, till exempel när hemmet har ritats om. Nya rum får dagsljuset."""
-        before = set(self._room_ids)
-        self._room_ids = tuple(room_ids)
+    def use_home(self, home: Home) -> None:
+        """Byter hem, till exempel när det har ritats om. Nya rum får dagsljuset."""
+        before = {room.id for room in self._home.rooms}
+        self._home = home
+        nodes = {node.id for room in home.rooms for node in room.nodes}
+        self._motion = {node: moving for node, moving in self._motion.items() if node in nodes}
         if self._daylight is not None:
-            for room_id in self._room_ids:
-                if room_id not in before:
-                    self.set_light_level(room_id, self._daylight)
+            for room in home.rooms:
+                if room.id not in before:
+                    self.set_light_level(room.id, self._daylight)
+        self._emit_targets()
 
     def set_light_level(self, room_id: str, lux: float) -> None:
         """Ljusnivån i ett enda rum."""
@@ -121,8 +171,33 @@ class SimulatedSource:
             self._sink(LightLevelObserved(self._source_id, room_id, lux))
 
     def _emit_targets(self) -> None:
-        if self._sink is not None:
-            self._sink(TargetsObserved(self._source_id, tuple(self._persons.values())))
+        """Varje radar skickar personerna den ser, i sina egna koordinater.
+
+        Radarn numrerar målen efter avståndet, så numren byter när två
+        personer går förbi varandra, som de gör i en riktig radar.
+        """
+        if self._sink is None:
+            return
+        seen = [
+            person for person_id, person in self._persons.items() if person_id not in self._unseen
+        ]
+        for floor in self._home.floors:
+            radars = [
+                node
+                for room in floor.rooms
+                for node in room.nodes
+                if Capability.RADAR in node.capabilities
+            ]
+            for node in radars:
+                in_view: list[Point] = []
+                for person in seen:
+                    if person.floor_id == floor.id:
+                        target = node.home_to_radar(person.position)
+                        if node.radar_sees(target.x, target.y):
+                            in_view.append(target)
+                in_view.sort(key=lambda target: math.hypot(target.x, target.y))
+                targets = tuple(RadarTarget(t.x, t.y) for t in in_view[:RADAR_MAX_TARGETS])
+                self._sink(RadarTargetsObserved(self._source_id, node.id, targets))
 
 
 class SimulatedLampOutput:
@@ -206,9 +281,9 @@ class Simulation:
         self._notify()
 
     def use_home(self, home: Home) -> None:
-        """Byter till ett ändrat hem, så att nya rum och våningar också simuleras."""
+        """Byter till ett ändrat hem, så att nya rum, noder och våningar också simuleras."""
         self._floor_ids = frozenset(floor.id for floor in home.floors)
-        self._source.set_rooms(room.id for room in home.rooms)
+        self._source.use_home(home)
 
     def add_person(self, floor_id: str, position: Point) -> str | None:
         """Lägger till en person och returnerar dess id, eller None om det inte gick."""

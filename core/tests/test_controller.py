@@ -3,10 +3,11 @@ import math
 import pytest
 
 from homecontrol.clock import ManualClock
-from homecontrol.connectors import LampCommand, LightLevelObserved, SourceLost, TargetsObserved
+from homecontrol.connectors import LampCommand, LightLevelObserved, SourceLost
 from homecontrol.controller import Controller
+from homecontrol.fusion import Occupancy
 from homecontrol.simulation import SimulatedLampOutput
-from homes import at, one_room_home, room
+from homes import one_room_home, radar_sees, room
 
 
 def make() -> tuple[Controller, ManualClock, SimulatedLampOutput]:
@@ -15,26 +16,36 @@ def make() -> tuple[Controller, ManualClock, SimulatedLampOutput]:
     return Controller(one_room_home(), clock, [lamps]), clock, lamps
 
 
-def test_targets_from_several_sources_are_combined() -> None:
+def test_radar_targets_become_tracks_in_the_home() -> None:
     controller, _, _ = make()
-    controller.observe(TargetsObserved("a", (at(1, 1),)))
-    controller.observe(TargetsObserved("b", (at(9, 9),)))
-    controller.observe(TargetsObserved("a", ()))
+    controller.observe(radar_sees((1, 1)))
 
     snapshot = controller.snapshot()
 
-    assert snapshot.targets == (at(9, 9),)
-    assert not snapshot.rooms[0].occupied
+    [track] = snapshot.tracks
+    assert track.floor_id == "plan"
+    assert track.position.x == pytest.approx(1)
+    assert track.position.y == pytest.approx(1)
+    assert snapshot.rooms[0].occupied
 
 
-def test_lost_source_forgets_its_targets() -> None:
+def test_lost_source_forgets_its_tracks_and_makes_the_room_unknown() -> None:
     controller, _, _ = make()
-    controller.observe(TargetsObserved("a", (at(1, 1),)))
+    controller.observe(radar_sees((1, 1)))
 
-    controller.observe(SourceLost("a"))
+    controller.observe(SourceLost("sim"))
 
-    assert controller.snapshot().targets == ()
-    assert not controller.snapshot().rooms[0].occupied
+    assert controller.snapshot().tracks == ()
+    assert controller.snapshot().rooms[0].status is Occupancy.UNKNOWN
+
+
+def test_other_sources_going_quiet_do_not_affect_the_room() -> None:
+    controller, _, _ = make()
+    controller.observe(radar_sees())
+
+    controller.observe(SourceLost("någon-annan"))
+
+    assert controller.snapshot().rooms[0].status is Occupancy.VACANT
 
 
 def test_lost_source_forgets_only_its_own_light_levels() -> None:
@@ -69,7 +80,7 @@ def test_broken_output_does_not_stop_the_others(caplog: pytest.LogCaptureFixture
     controller = Controller(one_room_home(), ManualClock(), [BrokenOutput(), lamps])
 
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+    controller.observe(radar_sees((1, 1)))
 
     assert lamps.states == {"taklampa": True}
     assert "kunde inte ta emot" in caplog.text
@@ -80,7 +91,7 @@ def test_log_says_which_lamp_but_not_where_someone_is(caplog: pytest.LogCaptureF
     controller, _, _ = make()
 
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+    controller.observe(radar_sees((1, 1)))
 
     assert "Tänder taklampa" in caplog.text
     assert "Vardagsrum" not in caplog.text
@@ -118,8 +129,8 @@ def test_listeners_are_told_about_changes_until_unsubscribed() -> None:
 def test_tick_before_wake_at_does_nothing() -> None:
     controller, clock, lamps = make()
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-    controller.observe(TargetsObserved("sim", (at(1, 1),)))
-    controller.observe(TargetsObserved("sim", ()))
+    controller.observe(radar_sees((1, 1)))
+    controller.observe(radar_sees())
     wake_at = controller.wake_at
     assert wake_at is not None
 
@@ -139,7 +150,7 @@ def test_manual_clock_cannot_go_backwards() -> None:
 def test_replaced_home_keeps_what_still_applies() -> None:
     controller, _, lamps = make()
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+    controller.observe(radar_sees((1, 1)))
     assert lamps.states == {"taklampa": True}
     changes: list[None] = []
     controller.subscribe(lambda: changes.append(None))
@@ -169,7 +180,7 @@ def test_replaced_home_keeps_what_still_applies() -> None:
 
 def test_person_outside_a_moved_room_leaves_it() -> None:
     controller, _, _ = make()
-    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+    controller.observe(radar_sees((1, 1)))
 
     home = one_room_home()
     floor = home.floors[0]
@@ -184,7 +195,7 @@ def test_person_outside_a_moved_room_leaves_it() -> None:
 def test_lamp_of_a_removed_room_is_turned_off() -> None:
     controller, _, lamps = make()
     controller.observe(LightLevelObserved("sim", "vardagsrum", 5))
-    controller.observe(TargetsObserved("sim", (at(1, 1),)))
+    controller.observe(radar_sees((1, 1)))
     assert lamps.states == {"taklampa": True}
 
     home = one_room_home()

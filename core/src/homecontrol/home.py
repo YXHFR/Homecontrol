@@ -14,8 +14,9 @@ Modellen är oföränderlig och kontrolleras när den skapas, oavsett om den
 kommer från databasen, en importerad fil eller koden.
 
 Några delar är förberedda för kommande steg och påverkar ännu inget:
-zonernas sorter, lampornas zon, rummens ljusgräns och nodernas placering.
-Regeln använder i dag bara rummens mörkergräns och fördröjning.
+lampornas zon och rummens ljusgräns. Regeln använder i dag bara rummens
+mörkergräns och fördröjning; zonerna, noderna och Wi-Fi-vikten används av
+sammanvägningen (fusion.py).
 """
 
 import math
@@ -51,6 +52,15 @@ MAX_DELAY_SECONDS = 24 * 60 * 60
 DEFAULT_DARK_BELOW_LUX = 30.0
 DEFAULT_BRIGHT_ABOVE_LUX = 100.0
 DEFAULT_OFF_AFTER_EMPTY_SECONDS = 180.0
+DEFAULT_WIFI_WEIGHT = 0.5
+
+# Radarns synfält (LD2450): så långt den ser och så många grader åt varje sida.
+RADAR_RANGE = 6.0
+RADAR_HALF_ANGLE = 60.0
+RADAR_MAX_TARGETS = 3
+"""Radarn följer högst så här många personer åt gången."""
+BODY_HEIGHT = 1.0
+"""Ungefär där radarn ser en person, i meter över golvet: mitt på kroppen."""
 
 
 def _on_plan(point: Point) -> Point:
@@ -104,7 +114,7 @@ class WallKind(StrEnum):
 
 
 class ZoneKind(StrEnum):
-    """Vad en zon betyder för närvaron. Används när sammanvägningen kommer (#37)."""
+    """Vad en zon betyder för närvaron (se fusion.py)."""
 
     NORMAL = "vanlig"
     STILL = "stillhet"
@@ -140,6 +150,14 @@ class RoomSettings(_Model):
         DEFAULT_OFF_AFTER_EMPTY_SECONDS
     )
     """Så länge rummet ska ha varit tomt innan lamporna släcks."""
+    wifi_weight: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)] = DEFAULT_WIFI_WEIGHT
+    """Hur mycket Wi-Fi-rörelse väger mot radarn, från 0 till 1.
+
+    0 betyder att Wi-Fi inte används. Annars förlänger Wi-Fi-rörelse närvaron
+    i stillhetszoner. Rörelse räknas som någon i rummet på egen hand först när
+    vikten gånger rörelsepoängen når 1, så under 1 startar Wi-Fi aldrig
+    närvaro ensam.
+    """
 
     @model_validator(mode="after")
     def _limits_in_order(self) -> Self:
@@ -155,6 +173,10 @@ class Zone(_Model):
     name: Name
     kind: ZoneKind
     polygon: Polygon
+
+    def contains(self, point: Point) -> bool:
+        """Om punkten är i zonen. Punkter på kanten räknas som inne."""
+        return _in_polygon(point, self.polygon)
 
 
 class Node(_Model):
@@ -176,6 +198,53 @@ class Node(_Model):
         if len(set(self.capabilities)) != len(self.capabilities):
             raise ValueError(f"Noden {self.id} har samma förmåga flera gånger")
         return self
+
+    # Radarns egna koordinater är meter i radarns plan: y rakt fram och x åt
+    # höger sett bakifrån radarn, alltså åt samma håll som den tittar. På ett
+    # spegelvänt kort är x åt vänster. Radarn sitter på monteringshöjden och
+    # ser en person mitt på kroppen, så avståndet den mäter är snett och lite
+    # längre än avståndet längs golvet.
+
+    def radar_to_home(self, x: float, y: float) -> Point:
+        """Var en punkt som radarn ser i (x, y) ligger i hemmets koordinater."""
+        slant = math.hypot(x, y)
+        drop = self.height - BODY_HEIGHT
+        scale = math.sqrt(max(0.0, slant**2 - drop**2)) / slant if slant > 0 else 0.0
+        side, ahead = self._axes()
+        across = x * scale * (-1 if self.mirrored else 1)
+        forward = y * scale
+        return Point(
+            self.position.x + forward * ahead.x + across * side.x,
+            self.position.y + forward * ahead.y + across * side.y,
+        )
+
+    def home_to_radar(self, point: Point) -> Point:
+        """Omvänt mot `radar_to_home`: var radarn ser en person som står i `point`."""
+        side, ahead = self._axes()
+        dx, dy = point.x - self.position.x, point.y - self.position.y
+        forward = dx * ahead.x + dy * ahead.y
+        across = dx * side.x + dy * side.y
+        floor_distance = math.hypot(forward, across)
+        drop = self.height - BODY_HEIGHT
+        scale = math.hypot(floor_distance, drop) / floor_distance if floor_distance > 0 else 0.0
+        return Point(across * scale * (-1 if self.mirrored else 1), forward * scale)
+
+    def radar_sees(self, x: float, y: float) -> bool:
+        """Om en punkt i radarns koordinater ligger i dess synfält."""
+        return (
+            y > 0
+            and math.hypot(x, y) <= RADAR_RANGE
+            and abs(math.degrees(math.atan2(x, y))) <= RADAR_HALF_ANGLE
+        )
+
+    def _axes(self) -> tuple[Point, Point]:
+        """Riktningen åt höger (sett bakifrån) och rakt fram, som enhetsvektorer i hemmet.
+
+        Rotationen är medurs och y växer nedåt, så höger är framåt vridet 90° medurs.
+        """
+        angle = math.radians(self.rotation)
+        ahead = Point(math.cos(angle), math.sin(angle))
+        return Point(-ahead.y, ahead.x), ahead
 
 
 class Lamp(_Model):

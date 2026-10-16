@@ -1,9 +1,12 @@
 """Hemmodellen: begrepp, koordinater och kontroller."""
 
+import math
+
 import pytest
 from pydantic import ValidationError
 
 from homecontrol.home import (
+    BODY_HEIGHT,
     Floor,
     Home,
     Lamp,
@@ -213,3 +216,75 @@ def test_walls_that_only_touch_at_a_corner_do_not_need_to_agree() -> None:
     concrete = diagonal.model_copy(update={"walls": (WallKind.CONCRETE,) * 4})
 
     assert Floor(id="plan", name="Plan", level=0, rooms=(first, concrete))
+
+
+# --- Radarns koordinater ---
+
+
+def node(*, rotation: float = 0, mirrored: bool = False, height: float = BODY_HEIGHT) -> Node:
+    """Ett rumskort i (5, 5). På kroppshöjd mäter radarn samma avstånd som längs golvet."""
+    return Node(
+        id="n", name="N", position=Point(5, 5), height=height, rotation=rotation, mirrored=mirrored
+    )
+
+
+def approx(point: Point) -> tuple[object, object]:
+    return (pytest.approx(point.x), pytest.approx(point.y))
+
+
+@pytest.mark.parametrize(
+    ("rotation", "ahead", "right"),
+    [
+        (0, Point(7, 5), Point(7, 6)),  # tittar åt höger; dess högra sida är nedåt på kartan
+        (90, Point(5, 7), Point(4, 7)),  # tittar nedåt; dess högra sida är åt vänster
+        (180, Point(3, 5), Point(3, 4)),
+        (270, Point(5, 3), Point(6, 3)),
+        (
+            45,
+            Point(5 + math.sqrt(2), 5 + math.sqrt(2)),
+            Point(5 + math.sqrt(2) - math.sqrt(0.5), 5 + math.sqrt(2) + math.sqrt(0.5)),
+        ),
+    ],
+)
+def test_radar_coordinates_follow_the_rotation(rotation: float, ahead: Point, right: Point) -> None:
+    """2 meter rakt fram, och 1 meter åt höger (sett bakifrån radarn) 2 meter fram."""
+    radar = node(rotation=rotation)
+
+    assert approx(radar.radar_to_home(0, 2)) == approx(ahead)
+    assert approx(radar.radar_to_home(1, 2)) == approx(right)
+
+
+def test_mirrored_radar_swaps_left_and_right() -> None:
+    radar = node(mirrored=True)
+
+    assert approx(radar.radar_to_home(0, 2)) == approx(Point(7, 5))
+    assert approx(radar.radar_to_home(1, 2)) == approx(Point(7, 4))
+
+
+def test_mounting_height_shortens_the_distance_along_the_floor() -> None:
+    """Radarn sitter en meter över kroppens mitt och mäter avståndet snett ned."""
+    radar = node(height=BODY_HEIGHT + 1)
+
+    assert approx(radar.radar_to_home(0, math.sqrt(5))) == approx(Point(7, 5))
+    # Rakt under radarn är avståndet längs golvet noll, inte negativt.
+    assert approx(radar.radar_to_home(0, 0.5)) == approx(Point(5, 5))
+
+
+@pytest.mark.parametrize("rotation", [0, 37, 90, 200, 359])
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_home_to_radar_is_the_reverse(rotation: float, mirrored: bool) -> None:
+    radar = node(rotation=rotation, mirrored=mirrored, height=2.4)
+
+    for point in (Point(6, 9), Point(1.5, 5.2), Point(5, 4)):
+        seen = radar.home_to_radar(point)
+        assert approx(radar.radar_to_home(*seen)) == approx(point)
+
+
+def test_radar_sees_6_meters_and_60_degrees_to_each_side() -> None:
+    radar = node()
+
+    assert radar.radar_sees(0, 5.9)
+    assert not radar.radar_sees(0, 6.1)
+    assert radar.radar_sees(1.7, 1)  # 59,5° åt sidan
+    assert not radar.radar_sees(1.8, 1)  # 61°
+    assert not radar.radar_sees(0, -1)  # bakom radarn

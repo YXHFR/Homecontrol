@@ -6,8 +6,11 @@ Protokollet är JSON. Kärnan skickar:
   exempel i kartredigeraren: våningarna med sina rum, väggar, zoner och lampor.
   Punkter är ``[x, y]`` i meter med origo uppe till vänster.
   En lampa som ingen riktig lamputgång styr är ``"virtual": true``.
-* ``{"type": "state", ...}`` vid anslutning och efter varje ändring. Fältet
-  ``simulation`` visar simuleringsläget, eller är null om det inte finns.
+* ``{"type": "state", ...}`` vid anslutning och efter varje ändring: spåren
+  (``held`` är ett spår som radarn har tappat men som hålls kvar), läget i
+  varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), lamporna
+  och simuleringen. Fältet ``simulation`` visar simuleringsläget, eller är
+  null om det inte finns.
 
 Livevyn skickar kommandon till simuleringen:
 
@@ -151,13 +154,20 @@ def home_message(home: Home, virtual_lamps: Set[str] = frozenset()) -> dict[str,
 def state_message(snapshot: Snapshot, simulation: SimulationView | None) -> dict[str, Any]:
     return {
         "type": "state",
-        "targets": [
-            {"floor_id": t.floor_id, "x": t.position.x, "y": t.position.y} for t in snapshot.targets
+        "tracks": [
+            {
+                "floor_id": track.floor_id,
+                "x": track.position.x,
+                "y": track.position.y,
+                "held": track.held,
+            }
+            for track in snapshot.tracks
         ],
         "rooms": [
-            {"id": room.room_id, "occupied": room.occupied, "lux": room.lux}
+            {"id": room.room_id, "status": room.status.value, "lux": room.lux}
             for room in snapshot.rooms
         ],
+        "zones": [{"id": zone.zone_id, "status": zone.status.value} for zone in snapshot.zones],
         "lamps": [
             {"id": lamp.lamp_id, "on": lamp.on, "explanation": lamp.explanation}
             for lamp in snapshot.lamps
