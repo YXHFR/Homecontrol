@@ -4,10 +4,13 @@
 
 services:
   core:
+    # Färdig avbild från releasen (amd64 och arm64). release-please byter
+    # versionen vid varje release. Finns avbilden inte att hämta byggs den
+    # på datorn från koden i repot; docker compose up --build bygger alltid själv.
+    image: ghcr.io/yxhfr/homecontrol:0.1.0 # x-release-please-version
     build:
       context: .
       dockerfile: core/Dockerfile
-    image: homecontrol-core:local
     restart: unless-stopped
     # Kärnan delar datorns nätverk, så att den hittar rumskorten med mDNS
     # (multicast når inte in i Dockers eget nät). Därför lyssnar den själv på

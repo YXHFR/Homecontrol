@@ -1,7 +1,8 @@
 name: Firmware
 
-# Validerar och bygger rumskortens firmware. På main publiceras dessutom
-# webbinstalleraren på GitHub Pages.
+# Validerar och bygger rumskortens firmware och lägger ihop den till
+# webbinstalleraren, som sparas som artefakten "webbinstallerare". Den
+# publiceras inte på webben än.
 
 on:
   push:
@@ -110,18 +111,13 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  pages:
-    name: Publicera webbinstalleraren
+  site:
+    name: Bygg webbinstalleraren
+    # Bara från main. En PR bygger bara ett rum, och en PR (även från en fork)
+    # ska inte kunna ladda upp en installerare som någon tar för den riktiga.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -148,8 +144,9 @@ jobs:
           ref=$(grep -oP '^\s+ref: \K[0-9a-f]{40}$' firmware/homecontrol.yaml)
           curl -sSfL "https://raw.githubusercontent.com/francescopace/espectre/${ref}/LICENSE" \
             -o site/LICENSE-GPL-3.0.txt
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
-          path: site
-      - id: deploy
-        uses: actions/deploy-pages@v5
+          name: webbinstallerare
+          path: site/
+          retention-days: 90
+          if-no-files-found: error
