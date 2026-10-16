@@ -49,6 +49,7 @@ class Harness:
         self.deferred: list[Callable[[], None]] = []
         self.published: list[tuple[str, dict[str, Any]]] = []
         self.reports: list[LampStateReported] = []
+        self.transactions: list[tuple[str, str]] = []
         self.output = ZigbeeOutput(
             home if home is not None else zigbee_home(),
             defer=self.deferred.append,
@@ -77,7 +78,13 @@ class Harness:
             self.deferred.pop(0)()
 
     def take(self) -> list[tuple[str, dict[str, Any]]]:
-        published = list(self.published)
+        """Det utgången har skickat sedan sist. Gruppändringarnas id sparas i `transactions`."""
+        published = []
+        for topic, payload in self.published:
+            if "transaction" in payload:
+                payload = dict(payload)
+                self.transactions.append((topic, payload.pop("transaction")))
+            published.append((topic, payload))
         self.published.clear()
         return published
 
@@ -479,12 +486,23 @@ def test_a_failed_group_change_is_tried_again_later() -> None:
     harness = Harness()
     harness.receive("start", "lampornas_svar", "grupp_skapad")
     harness.take()
+    refused = next(t for topic, t in harness.transactions if topic.endswith("members/add"))
 
-    harness.output.handle(
-        "zigbee2mqtt/bridge/response/group/members/add",
-        b'{"data": {"group": "homecontrol-vardagsrum", "device": "0x000b57fffe0000a1"}, '
-        b'"status": "error", "error": "Lampan svarade inte"}',
-    )
+    def refuse(transaction: str) -> None:
+        # Zigbee2MQTT skickar tillbaka id:t men inget om vilken ändring det gällde.
+        harness.output.handle(
+            "zigbee2mqtt/bridge/response/group/members/add",
+            json.dumps(
+                {
+                    "data": {},
+                    "status": "error",
+                    "error": "Lampan svarade inte",
+                    "transaction": transaction,
+                }
+            ).encode(),
+        )
+
+    refuse(refused)
     harness.output.tick()
     assert harness.take() == []
 
@@ -496,14 +514,13 @@ def test_a_failed_group_change_is_tried_again_later() -> None:
         {"group": "homecontrol-vardagsrum", "device": "0x000b57fffe0000a1"},
     )
     assert harness.take() == [retry]
-    harness.output.handle(
-        "zigbee2mqtt/bridge/response/group/members/add",
-        b'{"data": {"group": "homecontrol-vardagsrum", "device": "0x000b57fffe0000a1"}, '
-        b'"status": "error", "error": "Lampan svarade inte"}',
-    )
+    refuse(harness.transactions[-1][1])
     harness.now = 2 * READ_RETRY_SECONDS
     harness.output.tick()
     assert harness.take() == []
+    # En lyckad ändring av gruppen gör inte att den som fick nej skickas om direkt.
+    harness.receive("grupp_skapad")
+    assert retry not in harness.take()
     harness.now = 3 * READ_RETRY_SECONDS
     harness.output.tick()
     assert harness.take() == [retry]
@@ -879,12 +896,20 @@ def test_turning_on_a_dark_tradfri_with_a_colour_is_not_a_change_from_outside() 
     harness = started()
 
     harness.send(LampCommand(FONSTERLAMPA, on=True, reason="test", brightness=50, color_temp=2700))
+    # Lampan tänds först. Färgen skickas när övergången är klar, så att den inte avbryter den.
     assert [payload for _, payload in harness.take()] == [
         {"state": "ON", "brightness": 127, "transition": 1.0},
-        {"color_temp": 370, "transition": 0},
     ]
+    harness.now = 0.5
+    harness.output.tick()
+    assert harness.take() == []
+    harness.now = 1.0
+    harness.output.tick()
+    assert harness.take() == [
+        ("zigbee2mqtt/fonsterlampa/set", {"color_temp": 370, "transition": 0})
+    ]
+
     # Zigbee2MQTT upprepar först det gamla läget, sedan kommer lampans svar.
-    harness.now = 0.2
     harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "OFF", "color_temp": 370}')
     harness.now = 1.2
     harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 127}')
@@ -902,3 +927,28 @@ def test_a_lamp_that_rounds_its_brightness_is_not_read_again_and_again() -> None
     harness.output.tick()
 
     assert harness.take() == []
+
+
+def test_a_dimming_that_never_arrives_is_followed_up() -> None:
+    harness = started()
+    harness.send(on(TAKLAMPA, brightness=30))
+    # Bara ett eko av det gamla läget kommer; dimringen försvann i Zigbee-nätet.
+    harness.output.handle("zigbee2mqtt/0x000b57fffe0000a1", b'{"state": "ON", "brightness": 254}')
+    harness.take()
+
+    harness.now = 10
+    harness.output.tick()
+
+    assert harness.take() == [
+        ("zigbee2mqtt/0x000b57fffe0000a1/get", {"state": "", "brightness": ""})
+    ]
+
+
+def test_turning_off_by_remote_just_after_the_grace_is_a_change_from_outside() -> None:
+    harness = started()
+    harness.send(on(FONSTERLAMPA))
+
+    harness.now = 1.6
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "OFF"}')
+
+    assert harness.take_reports()[-1].external
