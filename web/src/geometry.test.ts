@@ -90,7 +90,15 @@ describe("parseServerMessage", () => {
   });
 
   it("känner igen läget och avvisar annat", () => {
-    const state = { type: "state", tracks: [], rooms: [], zones: [], lamps: [], simulation: null };
+    const state = {
+      type: "state",
+      tracks: [],
+      rooms: [],
+      zones: [],
+      lamps: [],
+      simulation: null,
+      cards: null,
+    };
     const simulation = { enabled: true, speed: 10, daylight: 5, persons: [] };
     expect(parseServerMessage(JSON.stringify(state))).toEqual(state);
     expect(parseServerMessage(JSON.stringify({ ...state, simulation }))).toEqual({
@@ -100,6 +108,8 @@ describe("parseServerMessage", () => {
     expect(parseServerMessage(JSON.stringify({ ...state, simulation: { ...simulation, speed: 2 } })))
       .toBeNull();
     expect(parseServerMessage('{"type":"state","tracks":[],"rooms":[],"zones":[],"lamps":[]}')).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...state, cards: "inga" }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...state, cards: [] }))).toEqual({ ...state, cards: [] });
     // Äldre kärnor skickade mål i stället för spår.
     expect(parseServerMessage('{"type":"state","targets":[],"rooms":[],"lamps":[],"simulation":null}')).toBeNull();
     expect(parseServerMessage('{"type":"state"}')).toBeNull();

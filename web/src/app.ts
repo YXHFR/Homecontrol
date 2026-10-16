@@ -2,6 +2,7 @@ import { LiveConnection, liveUrl, type ConnectionHandlers, type ConnectionStatus
 import { element } from "./dom";
 import { parkingSpot } from "./geometry";
 import type { ClientMessage, Floor, HomeMessage, StateMessage } from "./protocol";
+import { createCardsPanel } from "./cardsPanel";
 import { createSimulationPanel } from "./simulationPanel";
 import { OCCUPANCY_TEXT } from "./trackStyles";
 import { createKonvaView, type ViewFactory } from "./view";
@@ -56,6 +57,8 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     },
   );
 
+  const cards = createCardsPanel((message) => connection.send(message));
+
   root.replaceChildren(
     element("h1", {}, "Homecontrol – livevy"),
     status,
@@ -65,8 +68,10 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
       "p",
       { className: "legend" },
       "Prick: en person som radarn ser. Streckad ring: radarn har tappat personen, " +
-        "men den räknas som kvar en stund till.",
+        "men den räknas som kvar en stund till. Fyrkant: ett rumskort, rött med ⚠ om " +
+        "något på kortet inte svarar.",
     ),
+    cards.element,
     simulation.element,
     element("h2", {}, "Just nu"),
     roomsNow,
@@ -145,6 +150,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   const showState = (state: StateMessage) => {
     lastState = state;
     view.setState(state);
+    cards.show(state.cards);
     simulation.show(state.simulation);
     showRooms();
     showExplanations();

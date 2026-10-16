@@ -6,6 +6,7 @@
  * någon annan (till exempel ett annat fönster) hann göra först.
  */
 import type { HomeDocument } from "./homefile";
+import type { Card } from "./protocol";
 
 /** Kärnan sa nej eller gick inte att nå. Meddelandet går att visa för användaren. */
 export class CoreError extends Error {
@@ -32,6 +33,8 @@ export interface HomeApi {
   uploadPlanImage(floorId: string, image: Blob, width: number, revision: string): Promise<string>;
   deletePlanImage(floorId: string, revision: string): Promise<string>;
   planImageUrl(floorId: string): string;
+  /** De riktiga rumskorten som kärnan känner till, placerade eller inte. */
+  cards(): Promise<Card[]>;
 }
 
 const CONFLICT = 409;
@@ -104,4 +107,8 @@ export const coreApi: HomeApi = {
     return revisionOf(response);
   },
   planImageUrl: planImagePath,
+  async cards() {
+    const response = await ensureOk(fetch("/api/cards", { cache: "no-store" }));
+    return (await response.json()) as Card[];
+  },
 };

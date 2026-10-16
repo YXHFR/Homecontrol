@@ -25,6 +25,7 @@ describe("spåren i livevyn", () => {
       zones: [],
       lamps: [],
       simulation: null,
+      cards: null,
     };
 
     expect(tracksOnFloor(state, "uppe")).toEqual([{ floor_id: "uppe", x: 2, y: 2, held: true }]);

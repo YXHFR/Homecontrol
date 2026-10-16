@@ -4,6 +4,7 @@ import type { EditorScene, EditorViewCallbacks } from "./editorView";
 import { setPlanImage } from "./editing";
 import { CoreError, type HomeApi } from "./homeApi";
 import type { HomeDocument } from "./homefile";
+import type { Card } from "./protocol";
 
 function home(): HomeDocument {
   return {
@@ -44,6 +45,8 @@ class FakeCore {
   saved: HomeDocument[] = [];
   /** Svar att ge på de kommande anropen som ändrar något, i tur och ordning. */
   failures: (CoreError | null)[] = [];
+  /** Riktiga rumskort som kärnan har hittat. */
+  cards: Card[] = [];
 
   private change(revision: string, apply: () => void): Promise<string> {
     const failure = this.failures.shift() ?? null;
@@ -84,11 +87,13 @@ class FakeCore {
         this.document = setPlanImage(this.document, floorId, null);
       }),
     planImageUrl: (floorId) => `/bild/${floorId}`,
+    cards: () => Promise.resolve(structuredClone(this.cards)),
   };
 }
 
-async function setup() {
+async function setup(cards: Card[] = []) {
   const core = new FakeCore();
+  core.cards = cards;
   const scenes: EditorScene[] = [];
   let callbacks: EditorViewCallbacks | undefined;
   const deps: EditorDependencies = {
@@ -565,6 +570,39 @@ describe("kartredigeraren", () => {
     await settled();
     expect(nodes()).toEqual([]);
     expect(text(root, ".selection")).toMatch(/Inget valt/);
+  });
+
+  it("ett nytt riktigt kort placeras med sitt namn som id och försvinner ur listan", async () => {
+    const card: Card = {
+      id: "homecontrol-kok",
+      name: "Homecontrol kok",
+      placed: false,
+      online: false,
+      problems: [],
+      calibrating: false,
+      wifi_signal: null,
+      firmware_version: null,
+      update: null,
+    };
+    const { root, core, map, click, settled } = await setup([card, { ...card, id: "homecontrol-hall", placed: true }]);
+    await vi.waitFor(() => expect(root.querySelector('[data-card="homecontrol-kok"]')).not.toBeNull());
+    // Ett kort som redan är placerat visas inte.
+    expect(root.querySelector('[data-card="homecontrol-hall"]')).toBeNull();
+
+    click("Placera Homecontrol kok");
+    expect(text(root, ".instruction")).toMatch(/Klicka där Homecontrol kok sitter/);
+    map.onPointerDown({ x: 1.5, y: 1 });
+    await settled();
+
+    const nodes = core.document.home.floors[0].rooms[0].nodes ?? [];
+    expect(nodes).toMatchObject([{ id: "homecontrol-kok", name: "Homecontrol kok", position: [1.5, 1] }]);
+    expect(root.querySelector('[data-card="homecontrol-kok"]')).toBeNull();
+
+    // Nästa rumskort är ett vanligt, simulerat kort.
+    click("Rumskort (ESP32)");
+    map.onPointerDown({ x: 2.5, y: 1 });
+    await settled();
+    expect((core.document.home.floors[0].rooms[0].nodes ?? [])[1]).toMatchObject({ id: "rumskort-1" });
   });
 
   it("rumskort och lampor går inte att placera utanför rummen", async () => {

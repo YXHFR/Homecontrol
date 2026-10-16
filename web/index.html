@@ -45,11 +45,25 @@
       .persons li {
         margin: 4px 0;
       }
-      .simulation {
+      .simulation,
+      .cards-panel {
         margin: 12px 0;
         padding: 0 12px 4px;
         border: 1px solid #ddd;
         border-radius: 8px;
+      }
+      .cards li {
+        margin: 6px 0;
+      }
+      .cards li[data-warning="true"] strong {
+        color: #c62828;
+      }
+      .help {
+        color: #555;
+      }
+      .speeds button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
       }
       .floors button,
       .speeds button {
