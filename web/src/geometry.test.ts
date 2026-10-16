@@ -12,6 +12,7 @@ const room: Room = {
     [0, 4],
   ],
   walls: ["betong", "glas", "gips", "dörröppning"],
+  zones: [],
 };
 const width = 5;
 

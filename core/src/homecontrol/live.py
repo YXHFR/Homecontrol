@@ -3,7 +3,7 @@
 Protokollet är JSON. Kärnan skickar:
 
 * ``{"type": "home", ...}`` vid anslutning och när hemmet har ändrats, till
-  exempel i kartredigeraren: våningarna med sina rum, väggar och lampor.
+  exempel i kartredigeraren: våningarna med sina rum, väggar, zoner och lampor.
   Punkter är ``[x, y]`` i meter med origo uppe till vänster.
   En lampa som ingen riktig lamputgång styr är ``"virtual": true``.
 * ``{"type": "state", ...}`` vid anslutning och efter varje ändring. Fältet
@@ -118,6 +118,15 @@ def home_message(home: Home, virtual_lamps: Set[str] = frozenset()) -> dict[str,
                         "name": room.name,
                         "polygon": [list(point) for point in room.polygon],
                         "walls": [kind.value for kind in room.walls],
+                        "zones": [
+                            {
+                                "id": zone.id,
+                                "name": zone.name,
+                                "kind": zone.kind.value,
+                                "polygon": [list(point) for point in zone.polygon],
+                            }
+                            for zone in room.zones
+                        ],
                     }
                     for room in floor.rooms
                 ],

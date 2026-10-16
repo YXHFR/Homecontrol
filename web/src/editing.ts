@@ -42,10 +42,68 @@ export function polygonArea(points: Point[]): number {
   return Math.abs(twice) / 2;
 }
 
+/** Om punkten är i ytan. Punkter på kanten räknas som inne, som i kärnan (home.py). */
+export function inPolygon(point: Point, polygon: Point[]): boolean {
+  let inside = false;
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    if (onSegment(point, a, b)) {
+      return true;
+    }
+    // Strålmetoden: räkna hur många sidor en stråle åt höger från punkten korsar.
+    if (a.y > point.y !== b.y > point.y) {
+      const crossingX = a.x + ((point.y - a.y) * (b.x - a.x)) / (b.y - a.y);
+      if (point.x < crossingX) {
+        inside = !inside;
+      }
+    }
+  }
+  return inside;
+}
+
 function crosses(a: Point, b: Point, c: Point, d: Point): boolean {
   const side = (p: Point, q: Point, r: Point) =>
     (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
   return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
+}
+
+/** Om punkten ligger på sträckan a–b, som `_on_segment` i kärnan. */
+function onSegment(point: Point, a: Point, b: Point): boolean {
+  const tolerance = 1e-9;
+  const cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+  return (
+    Math.abs(cross) <= tolerance &&
+    Math.min(a.x, b.x) - tolerance <= point.x &&
+    point.x <= Math.max(a.x, b.x) + tolerance &&
+    Math.min(a.y, b.y) - tolerance <= point.y &&
+    point.y <= Math.max(a.y, b.y) + tolerance
+  );
+}
+
+/** Sidorna i ytan, var och en som sitt start- och sluthörn. */
+function edges(points: Point[]): [Point, Point][] {
+  return points.map((a, i) => [a, points[(i + 1) % points.length]]);
+}
+
+/**
+ * Om ytan `inner` ligger i `outer`, på samma sätt som i kärnan (home.py):
+ * alla hörn och mitten av alla kanter är inne, ingen kant korsar en vägg och
+ * inget av hörnen i `outer` ligger inne i `inner` (ett spetsigt hack).
+ * Kanter längs med väggen räknas som inne.
+ */
+export function polygonWithin(inner: Point[], outer: Point[]): boolean {
+  const innerEdges = edges(inner);
+  return (
+    inner.every((corner) => inPolygon(corner, outer)) &&
+    innerEdges.every(([a, b]) => inPolygon({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, outer)) &&
+    !innerEdges.some(([a, b]) => edges(outer).some(([c, d]) => crosses(a, b, c, d))) &&
+    !outer.some((corner) => inPolygon(corner, inner) && !onBoundary(corner, inner))
+  );
+}
+
+function onBoundary(point: Point, polygon: Point[]): boolean {
+  return edges(polygon).some(([a, b]) => onSegment(point, a, b));
 }
 
 /** Om två sidor som inte sitter ihop korsar varandra, som i en åtta. */
@@ -90,7 +148,7 @@ export function rectangleCorners(a: Point, b: Point): Point[] {
   ];
 }
 
-function allIds(document: HomeDocument): Set<string> {
+export function allIds(document: HomeDocument): Set<string> {
   const ids = new Set<string>();
   const add = (items: unknown[] | undefined) => {
     for (const item of items ?? []) {
@@ -160,6 +218,14 @@ export function updateRoom(
     ...floor,
     rooms: floor.rooms.map((room) => (room.id === roomId ? update(room) : room)),
   }));
+}
+
+/** Alla hörn på våningen, i rummen och i zonerna, som ett nytt hörn kan dras till. */
+export function cornersOnFloor(floor: FloorModel): Point[] {
+  return floor.rooms.flatMap((room) => [
+    ...room.polygon.map(toPoint),
+    ...(room.zones ?? []).flatMap((zone) => zone.polygon.map(toPoint)),
+  ]);
 }
 
 export function findRoom(document: HomeDocument, roomId: string | null): RoomModel | null {

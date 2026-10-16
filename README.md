@@ -99,14 +99,31 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    rummet genom att klicka på det första hörnet igen (passar L-formade rum).
    **Rum, rektangel**: dra från ett hörn till hörnet snett emot. Ett klick
    nära ett hörn som redan finns hamnar exakt på det, så att rummen möts.
-4. **Välj och flytta**: klicka på ett rum för att byta namn på det eller ta
-   bort det, och dra det för att flytta det. Här ställer du också in rummets
-   ljus: under vilken ljusnivå lamporna tänds, över vilken nivå dagsljuset
-   räcker och hur många minuter rummet ska ha varit tomt innan de släcks.
+4. **Välj och flytta**: klicka på ett rum eller en zon för att byta namn på
+   det eller ta bort det, och dra ett rum för att flytta det; zonerna i
+   rummet följer med. En zon kan också byta sort, och ett klick till på en
+   vald zon väljer rummet under den. För ett valt rum ställer du också in
+   rummets ljus: under vilken ljusnivå lamporna tänds, över vilken nivå
+   dagsljuset räcker och hur många minuter rummet ska ha varit tomt innan de
+   släcks.
 5. **Väggar och dörrar**: klicka på en vägg för att byta material, ett steg
    per klick: gips → betong → trä → glas → dörröppning och sedan gips igen.
    En vägg som två rum delar byts i båda.
-6. **Placera** rumskort, routrar och lampor genom att välja verktyget och
+6. **Zoner**: välj sort under **Zoner** bland verktygen och klicka ut hörnen
+   inne i ett rum, på samma sätt som ett rum med fri form. Varje sorts zon
+   har en egen färg:
+   - **Vanlig zon**: en plats som systemet ska känna till, till exempel
+     skrivbordet.
+   - **Stillhetszon**: där man sitter eller ligger still, till exempel
+     soffan och sängen. Där ska närvaron hållas kvar även när radarn tappar
+     personen.
+   - **Ignorera-zon**: störkällor som en fläkt, en gardin eller en växt.
+   - **Entrézon**: vid en dörr, där den som försvinner ur sikte har gått ut.
+
+   Zonen ska ligga i ett rum; ett hörn nära en vägg hamnar på väggen. Zonerna
+   syns i livevyn, men närvaron tar hänsyn till dem först i en kommande
+   version.
+7. **Placera** rumskort, routrar och lampor genom att välja verktyget och
    klicka på kartan. Rumskort och lampor placeras inne i ett rum och hör till
    det rummet. Den ljusa tårtbiten framför ett rumskort är vad radarn ser
    (6 meter, 60° åt vardera hållet). Välj kortet med **Välj och flytta** och
@@ -116,13 +133,13 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
 
 Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
 Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
-och Enter stänger rummet.
+och Enter stänger rummet eller zonen.
 
 Allt sparas direkt, och livevyn visar ändringen utan omstart. Har du
 redigeraren öppen i två fönster och ändrar i båda, visar det ena fönstret
 det andras ändring i stället för att skriva över den. Under
 **Hemmet** står hur många rum, zoner, rumskort, routrar och lampor hemmet
-har. Zoner ritas i en kommande version.
+har.
 
 ### Hemmet: spara, flytta och läsa in
 
@@ -164,7 +181,10 @@ Så läser du filen:
   `bright_above_lux` som ljust av dagsljus, och lamporna släcks när rummet har
   varit tomt i `off_after_empty_seconds` sekunder.
 - `zones` är delar av ett rum: `vanlig`, `stillhet` (soffa, säng),
-  `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr).
+  `ignorera` (störkällor som en fläkt) eller `entré` (vid en dörr). En zon
+  ska ligga i sitt rum och får inte gå ut genom någon vägg (längs väggen går
+  bra). Har ett sparat hem en zon som går utanför, startar kärnan inte utan
+  säger vilken zon det gäller. Rätta filen och läs in den igen.
 - `nodes` är rumskorten: var de sitter (`position`), monteringshöjd i
   meter (`height`), åt vilket håll radarn tittar i grader medurs där 0 är
   åt höger (`rotation`), om kortet sitter upp och ned (`mirrored`) och vad

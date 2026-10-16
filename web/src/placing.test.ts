@@ -40,6 +40,9 @@ function home(): HomeDocument {
               walls: ["gips", "gips", "gips", "gips"],
               zones: [
                 {
+                  id: "bank",
+                  name: "Bänk",
+                  kind: "vanlig",
                   polygon: [
                     [0, 0],
                     [1, 0],

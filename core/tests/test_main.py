@@ -4,11 +4,12 @@ import io
 from pathlib import Path
 
 import pytest
+from psycopg.types.json import Jsonb
 
 from homecontrol import store
 from homecontrol.__main__ import load_or_seed_home, main
 from homecontrol.config import Settings
-from homecontrol.homefile import dumps, example_home, loads
+from homecontrol.homefile import dumps, example_home, loads, to_document
 from homes import one_room_home
 
 
@@ -32,6 +33,21 @@ def test_first_start_saves_the_example_home(database: str) -> None:
     assert load_or_seed_home(settings) == example_home()
     with store.connect(database, attempts=1) as conn:
         assert store.load_home(conn) == example_home()
+
+
+def test_start_stops_with_an_explanation_if_the_saved_home_is_invalid(database: str) -> None:
+    document = to_document(one_room_home())
+    # En zon som sticker ut genom väggen, som en äldre version kunde spara.
+    document["home"]["floors"][0]["rooms"][0]["zones"] = [
+        {"id": "z", "name": "Z", "kind": "vanlig", "polygon": [[4, 1], [6, 1], [6, 2], [4, 2]]}
+    ]
+    with store.connect(database, attempts=1) as conn:
+        store.migrate(conn)
+        conn.execute("INSERT INTO home (document) VALUES (%s)", (Jsonb(document),))
+    settings = Settings(host="127.0.0.1", port=8000, web_dir=Path("web"), database=database)
+
+    with pytest.raises(SystemExit, match=r"(?s)går utanför rummet.*homecontrol importera"):
+        load_or_seed_home(settings)
 
 
 def test_start_uses_the_saved_home(database: str) -> None:

@@ -6,19 +6,26 @@
 import Konva from "konva";
 import { toPoint } from "./editing";
 import { drawItems, drawWalls, type ItemCallbacks } from "./editorItems";
-import type { FloorModel, PlanImage } from "./homefile";
+import type { FloorModel, PlanImage, RoomModel } from "./homefile";
 import type { Point } from "./protocol";
 import type { Draft, ToolName } from "./tools";
+import { ZONE_STYLES } from "./zoneStyles";
+
+/**
+ * Det som är valt med verktyget Välj, eller null. "item" är ett rumskort, en
+ * router eller en lampa (se editorItems.ts).
+ */
+export type Selection = { kind: "room" | "zone" | "item"; id: string } | null;
 
 /** Det kartredigeraren vill visa på kartan. */
 export interface EditorScene {
   floor: FloorModel;
   /** Planritningen och adressen till bilden, eller null om våningen saknar bild. */
   planImage: { url: string; plan: PlanImage } | null;
-  selectedRoomId: string | null;
-  /** Det valda rumskortet, den valda routern eller lampan. */
-  selectedItemId: string | null;
+  selection: Selection;
   tool: ToolName;
+  /** Färgen på det som håller på att ritas med fri form, eller null för den vanliga. */
+  draftColor: string | null;
   draft: Draft;
 }
 
@@ -27,8 +34,11 @@ export interface EditorViewCallbacks extends ItemCallbacks {
   onPointerDown(point: Point): void;
   onPointerMove(point: Point): void;
   onPointerUp(point: Point): void;
-  /** Ett rum (eller inget, vid klick bredvid) har valts med verktyget Välj. */
-  onSelectRoom(roomId: string | null): void;
+  /**
+   * Ett rum, en zon eller inget (vid klick bredvid) har valts med verktyget
+   * Välj. Rumskort, routrar och lampor väljs med onSelectItem.
+   */
+  onSelect(selection: Selection): void;
   /** Det valda rummet har dragits så här många meter. */
   onMoveRoom(roomId: string, dx: number, dy: number): void;
 }
@@ -56,6 +66,9 @@ const MIN_ZOOM = 2; // pixlar per meter
 const MAX_ZOOM = 400;
 const PLAN_IMAGE_OPACITY = 0.55;
 const HANDLE_RADIUS_PX = 6;
+/** Genomskinligheten på en zons yta (som tvåsiffrigt hextal efter färgen), och på en vald zons. */
+const ZONE_ALPHA = "38";
+const ZONE_SELECTED_ALPHA = "66";
 
 const COLORS = {
   /** Utanför planet, där inget kan ritas. */
@@ -221,7 +234,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     roomLayer.destroyChildren();
     const metersPerScreenPixel = 1 / pixelsPerMeter();
     for (const room of current.floor.rooms) {
-      const selected = room.id === current.selectedRoomId;
+      const selected = current.selection?.kind === "room" && current.selection.id === room.id;
       const group = new Konva.Group({ draggable: selected && current.tool === "select" });
       group.add(
         new Konva.Line({
@@ -235,6 +248,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
           // Ett rum som ritas över ett annat ska gå att börja inne i det.
           listening: current.tool === "select",
         }),
+        ...drawZones(room, current, metersPerScreenPixel),
         new Konva.Text({
           x: Math.min(...room.polygon.map(([x]) => x)) + 8 * metersPerScreenPixel,
           y: Math.min(...room.polygon.map(([, y]) => y)) + 8 * metersPerScreenPixel,
@@ -246,7 +260,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
       );
       group.on("pointerclick", () => {
         if (current.tool === "select") {
-          callbacks.onSelectRoom(room.id);
+          callbacks.onSelect({ kind: "room", id: room.id });
         }
       });
       group.on("mouseenter", () => {
@@ -263,6 +277,58 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
       roomLayer.add(group);
     }
   };
+
+  /** Rummets zoner i sina färger. De ritas i rummets grupp, så att de följer med när det dras. */
+  const drawZones = (
+    room: RoomModel,
+    current: EditorScene,
+    metersPerScreenPixel: number,
+  ): Konva.Shape[] =>
+    (room.zones ?? []).flatMap((zone) => {
+      const selected = current.selection?.kind === "zone" && current.selection.id === zone.id;
+      const color = ZONE_STYLES[zone.kind].color;
+      const xs = zone.polygon.map(([x]) => x);
+      const ys = zone.polygon.map(([, y]) => y);
+      const fontSize = 12 * metersPerScreenPixel;
+      const area = new Konva.Line({
+        points: zone.polygon.flat(),
+        closed: true,
+        fill: color + (selected ? ZONE_SELECTED_ALPHA : ZONE_ALPHA),
+        stroke: selected ? COLORS.selected : color,
+        strokeWidth: selected ? 3 : 2,
+        strokeScaleEnabled: false,
+        dash: selected ? undefined : [6 * metersPerScreenPixel, 4 * metersPerScreenPixel],
+        listening: current.tool === "select",
+      });
+      area.on("pointerclick", (event) => {
+        if (current.tool === "select") {
+          event.cancelBubble = true; // annars väljs rummet under zonen
+          // Ett klick till på en vald zon väljer rummet, som annars kan vara helt täckt av zoner.
+          callbacks.onSelect(
+            selected ? { kind: "room", id: room.id } : { kind: "zone", id: zone.id },
+          );
+        }
+      });
+      area.on("mouseenter", () => {
+        if (current.tool === "select") {
+          container.style.cursor = "pointer";
+        }
+      });
+      const label = new Konva.Text({
+        x: Math.min(...xs),
+        y: (Math.min(...ys) + Math.max(...ys)) / 2 - fontSize / 2,
+        width: Math.max(...xs) - Math.min(...xs),
+        align: "center",
+        text: zone.name,
+        wrap: "none",
+        ellipsis: true,
+        fontSize,
+        fill: color,
+        fontStyle: "bold",
+        listening: false,
+      });
+      return [area, label];
+    });
 
   const drawDraft = (current: EditorScene) => {
     draftLayer.destroyChildren();
@@ -288,15 +354,16 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
       });
     switch (draft.kind) {
       case "polygon": {
+        const color = current.draftColor ?? COLORS.draft;
         const path = draft.pointer === null ? draft.points : [...draft.points, draft.pointer];
-        draftLayer.add(line(path, COLORS.draft));
+        draftLayer.add(line(path, color));
         draft.points.forEach((p, i) =>
-          // Det första hörnet är större: där stängs rummet.
+          // Det första hörnet är större: där stängs rummet eller zonen.
           draftLayer.add(
             dot(
               p,
               i === 0 && draft.points.length >= 3 ? 2 * HANDLE_RADIUS_PX : HANDLE_RADIUS_PX,
-              COLORS.draft,
+              color,
             ),
           ),
         );
@@ -330,8 +397,12 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     drawGrid();
     drawImage(scene);
     drawRooms(scene);
-    drawWalls(wallLayer, scene, callbacks, container);
-    drawItems(itemLayer, scene, callbacks, container, stage);
+    const itemScene = {
+      ...scene,
+      selectedItemId: scene.selection?.kind === "item" ? scene.selection.id : null,
+    };
+    drawWalls(wallLayer, itemScene, callbacks, container);
+    drawItems(itemLayer, itemScene, callbacks, container, stage);
     drawDraft(scene);
   };
 
@@ -346,7 +417,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
   stage.on("pointerup", forward(callbacks.onPointerUp));
   stage.on("pointerclick", (event) => {
     if (event.target === stage && scene?.tool === "select") {
-      callbacks.onSelectRoom(null);
+      callbacks.onSelect(null);
     }
   });
 

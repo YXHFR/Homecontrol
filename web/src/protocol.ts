@@ -11,6 +11,17 @@ export interface Point {
 /** Vad en vägg är gjord av, eller att den är en dörröppning. */
 export type WallKind = "gips" | "betong" | "trä" | "glas" | "dörröppning";
 
+/** Vad en zon betyder för närvaron (se ZoneKind i core/src/homecontrol/home.py). */
+export type ZoneKind = "vanlig" | "stillhet" | "ignorera" | "entré";
+
+export interface Zone {
+  id: string;
+  name: string;
+  kind: ZoneKind;
+  /** Hörnen i ordning som [x, y]. De ligger alla i zonens rum. */
+  polygon: [number, number][];
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -18,6 +29,7 @@ export interface Room {
   polygon: [number, number][];
   /** En vägg per sida: väggen från hörn i till hörn i + 1. */
   walls: WallKind[];
+  zones: Zone[];
 }
 
 export interface Lamp {

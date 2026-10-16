@@ -1,6 +1,7 @@
 import Konva from "konva";
 import { corners, fitTransform, wallSegments, type Transform } from "./geometry";
 import type { Floor, Person, Point, StateMessage, WallKind } from "./protocol";
+import { ZONE_STYLES } from "./zoneStyles";
 
 export interface LiveViewCallbacks {
   /** En låtsasperson har dragits till en ny plats, i hemmets meter. */
@@ -27,6 +28,9 @@ const PERSON_RADIUS = 12;
 /** Extra yta runt personen som går att ta tag i, så att den är lätt att dra med fingret. */
 const PERSON_HIT_WIDTH = 24;
 const TARGET_RADIUS = 5;
+/** Hur genomskinlig en zons yta är. Zonerna ska synas men inte ta över kartan. */
+const ZONE_OPACITY = 0.18;
+const ZONE_FONT_SIZE = 12;
 const LAMP_RADIUS = 14;
 /** Hur bred lampans namnetikett får vara, i pixlar. Den centreras under lampan. */
 const LAMP_LABEL_WIDTH = 120;
@@ -77,6 +81,42 @@ function drawRoomFloors(
         }),
         closed: true,
         fill: occupied ? COLORS.occupied : COLORS.floor,
+      }),
+    );
+  }
+}
+
+/** Zonerna i sina färger, med streckad kant och namnet i mitten. */
+function drawZones(layer: Konva.Layer, t: Transform, floor: Floor) {
+  for (const zone of floor.rooms.flatMap((room) => room.zones)) {
+    const points = zone.polygon.map(([x, y]) => t.toScreen({ x, y }));
+    const color = ZONE_STYLES[zone.kind].color;
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    layer.add(
+      new Konva.Line({
+        points: points.flatMap((p) => [p.x, p.y]),
+        closed: true,
+        fill: color,
+        opacity: ZONE_OPACITY,
+      }),
+      new Konva.Line({
+        points: points.flatMap((p) => [p.x, p.y]),
+        closed: true,
+        stroke: color,
+        strokeWidth: 1.5,
+        dash: [5, 4],
+      }),
+      new Konva.Text({
+        x: Math.min(...xs),
+        y: (Math.min(...ys) + Math.max(...ys)) / 2 - ZONE_FONT_SIZE / 2,
+        width: Math.max(...xs) - Math.min(...xs),
+        align: "center",
+        text: zone.name,
+        wrap: "none",
+        ellipsis: true,
+        fontSize: ZONE_FONT_SIZE,
+        fill: color,
       }),
     );
   }
@@ -271,6 +311,7 @@ export const createKonvaView: ViewFactory = (container, callbacks) => {
 
     roomLayer.destroyChildren();
     drawRoomFloors(roomLayer, transform, shownFloor, state);
+    drawZones(roomLayer, transform, shownFloor);
     drawWalls(roomLayer, transform, shownFloor);
     drawRoomNames(roomLayer, transform, shownFloor);
     drawLamps(roomLayer, transform, shownFloor, state);

@@ -24,6 +24,23 @@ describe("fri form", () => {
     expect(drawing.draft).toEqual({ kind: "none" });
   });
 
+  it("med verktyget Zon blir det en zon i stället för ett rum", () => {
+    const drawing = new Drawing();
+    drawing.setTool("zone");
+    drawing.pointerDown({ x: 0, y: 0 }, CLOSE);
+    drawing.pointerDown({ x: 1, y: 0 }, CLOSE);
+    drawing.pointerDown({ x: 1, y: 1 }, CLOSE);
+
+    expect(drawing.finish()).toEqual({
+      kind: "zone",
+      corners: [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 1, y: 1 },
+      ],
+    });
+  });
+
   it("ett klick på första hörnet stänger inte förrän det finns tre hörn", () => {
     const drawing = new Drawing();
     drawing.setTool("polygon");

@@ -14,9 +14,10 @@ from homecontrol.clock import SystemClock
 from homecontrol.connectors import LightLevelObserved, TargetsObserved
 from homecontrol.controller import Controller
 from homecontrol.home import DEFAULT_OFF_AFTER_EMPTY_SECONDS as OFF_AFTER_EMPTY_SECONDS
-from homecontrol.live import create_live_router, run_timer
+from homecontrol.home import Floor, Home, Zone, ZoneKind, rectangle
+from homecontrol.live import create_live_router, home_message, run_timer
 from homecontrol.simulation import DEFAULT_DAYLIGHT_LUX, SimulatedLampOutput
-from homes import FLOOR, at, one_room_home
+from homes import FLOOR, at, one_room_home, room
 
 
 def app() -> FastAPI:
@@ -38,6 +39,7 @@ def test_streams_home_and_state_and_lights_the_lamp() -> None:
         assert floor["rooms"][0]["id"] == "vardagsrum"
         assert floor["rooms"][0]["polygon"] == [[0, 0], [5, 0], [5, 4], [0, 4]]
         assert floor["rooms"][0]["walls"] == ["gips"] * 4
+        assert floor["rooms"][0]["zones"] == []
         assert floor["lamps"][0] == {
             "id": "taklampa",
             "name": "Taklampa",
@@ -311,3 +313,20 @@ def test_timer_follows_a_faster_clock() -> None:
         timer.cancel()
 
     asyncio.run(scenario())
+
+
+def test_home_message_shows_the_zones_of_each_room() -> None:
+    sofa = Zone(id="soffa", name="Soffa", kind=ZoneKind.STILL, polygon=rectangle(1, 1, 2, 1))
+    living = room("vardagsrum", "Vardagsrum", 0, 0, 5, 4).model_copy(update={"zones": (sofa,)})
+    home = Home(name="Hem", floors=(Floor(id=FLOOR, name="Plan 1", level=0, rooms=(living,)),))
+
+    rooms = home_message(home)["floors"][0]["rooms"]
+
+    assert rooms[0]["zones"] == [
+        {
+            "id": "soffa",
+            "name": "Soffa",
+            "kind": "stillhet",
+            "polygon": [[1, 1], [3, 1], [3, 2], [1, 2]],
+        }
+    ]

@@ -10,6 +10,7 @@ export interface HomeDocument {
         id: string;
         name: string;
         polygon: [number, number][];
+        zones?: { id: string; name: string; kind: string; polygon: [number, number][] }[];
         nodes?: {
           id: string;
           name: string;
@@ -58,12 +59,18 @@ export async function waitUntilSaved(page: Page): Promise<void> {
   savesSeen.set(page, next);
 }
 
-/** En punkt på kartan, som andel av kartans bredd och höjd (0–1). */
+/**
+ * En punkt på kartan, som andel av kartans bredd och höjd (0–1). Kartan rullas
+ * först till mitten av fönstret, eftersom verktygslådan bredvid är högre än
+ * fönstret och ett klick på en knapp längre ned annars lämnar kartans överkant
+ * utanför.
+ */
 export async function onMap(
   map: Locator,
   fx: number,
   fy: number,
 ): Promise<{ x: number; y: number }> {
+  await map.evaluate((node) => node.scrollIntoView({ block: "center" }));
   const box = await map.boundingBox();
   if (box === null) {
     throw new Error("Kartan syns inte");

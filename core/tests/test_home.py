@@ -108,6 +108,41 @@ def test_lamp_zone_must_be_in_the_same_room() -> None:
     assert l_room(zones=(sofa,), lamps=(lamp,)).lamps[0].zone_id == "soffa"
 
 
+def test_zone_must_be_inside_its_room() -> None:
+    def zone(polygon: tuple[Point, ...]) -> Zone:
+        return Zone(id="z", name="Z", kind=ZoneKind.IGNORE, polygon=polygon)
+
+    # Längs väggen är fortfarande i rummet, till exempel en entrézon vid dörren.
+    assert l_room(zones=(zone(rectangle(0, 3, 2, 1)),)).zones
+    with pytest.raises(ValidationError, match="går utanför rummet"):
+        l_room(zones=(zone(rectangle(3, 3, 0.5, 0.5)),))  # i hacket
+    with pytest.raises(ValidationError, match="går utanför rummet"):
+        l_room(zones=(zone(rectangle(3, 1, 2, 0.5)),))  # sticker ut genom väggen
+    # Hörnen ligger i båda benen av L:et, men kanten mellan dem går genom hacket.
+    across = (Point(1, 1), Point(3.5, 1), Point(1, 3.5))
+    with pytest.raises(ValidationError, match="går utanför rummet"):
+        l_room(zones=(zone(across),))
+
+    # I ett U-format rum kan en kant gå genom två av rummets hörn, (2, 2) och
+    # (4, 4), och ta en genväg över hacket utan att korsa någon vägg.
+    u_shape = (
+        *(Point(0, 0), Point(6, 0), Point(6, 4), Point(4, 4)),
+        *(Point(4, 2), Point(2, 2), Point(2, 4), Point(0, 4)),
+    )
+    shortcut = (Point(1, 1), Point(4, 4), Point(5, 1))
+    with pytest.raises(ValidationError, match="går utanför rummet"):
+        l_room(polygon=u_shape, walls=(WallKind.PLASTERBOARD,) * 8, zones=(zone(shortcut),))
+    # Ett spetsigt hack (4, 5)–(5, 3)–(6, 5) som zonens överkant bara nuddar.
+    spike = (
+        *(Point(0, 0), Point(20, 0), Point(20, 10), Point(6, 10), Point(6, 5)),
+        *(Point(5, 3), Point(4, 5), Point(4, 10), Point(0, 10)),
+    )
+    with pytest.raises(ValidationError, match="går utanför rummet"):
+        l_room(
+            polygon=spike, walls=(WallKind.PLASTERBOARD,) * 9, zones=(zone(rectangle(1, 5, 18, 4)),)
+        )
+
+
 def test_room_settings_have_defaults_and_keep_the_limits_in_order() -> None:
     assert RoomSettings() == RoomSettings(
         dark_below_lux=30, bright_above_lux=100, off_after_empty_seconds=180

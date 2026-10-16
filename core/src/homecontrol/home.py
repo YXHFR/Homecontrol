@@ -149,6 +149,8 @@ class RoomSettings(_Model):
 
 
 class Zone(_Model):
+    """En del av ett rum som betyder något särskilt för närvaron. Hörnen ligger i rummet."""
+
     id: Id
     name: Name
     kind: ZoneKind
@@ -202,6 +204,11 @@ class Room(_Model):
             raise ValueError(
                 f"Rummet {self.id} har {len(self.polygon)} sidor men {len(self.walls)} väggar"
             )
+        for zone in self.zones:
+            if not _polygon_within(zone.polygon, self.polygon):
+                raise ValueError(
+                    f"Zonen {zone.id} går utanför rummet {self.id}. Flytta zonens hörn in i rummet."
+                )
         zone_ids = {zone.id for zone in self.zones}
         for lamp in self.lamps:
             if lamp.zone_id is not None and lamp.zone_id not in zone_ids:
@@ -368,6 +375,40 @@ def _in_polygon(point: Point, polygon: Sequence[Point]) -> bool:
             if point.x < crossing_x:
                 inside = not inside
     return inside
+
+
+def _polygon_within(inner: Sequence[Point], outer: Sequence[Point]) -> bool:
+    """Om ytan `inner` ligger i `outer`. Kanter längs med varandra räknas som inne.
+
+    Hörnen räcker inte i ett L-format rum, där en kant kan gå genom hacket.
+    Därför får ingen kant heller korsa en vägg, och inget av rummets hörn får
+    ligga inne i ytan (ett spetsigt hack som bara nuddar kanten). En kant som
+    går precis genom två av rummets hörn korsar ingen vägg men kan ändå gå
+    över ett hack, så mitten av varje kant ska också vara inne.
+    """
+    inner_edges = list(zip(inner, (*inner[1:], inner[0]), strict=True))
+    outer_edges = list(zip(outer, (*outer[1:], outer[0]), strict=True))
+    return (
+        all(_in_polygon(corner, outer) for corner in inner)
+        and all(_in_polygon(Point((a.x + b.x) / 2, (a.y + b.y) / 2), outer) for a, b in inner_edges)
+        and not any(_crossing(a, b, c, d) for a, b in inner_edges for c, d in outer_edges)
+        and not any(_strictly_inside(corner, inner) for corner in outer)
+    )
+
+
+def _strictly_inside(point: Point, polygon: Sequence[Point]) -> bool:
+    """Om punkten är inne i ytan och inte på dess kant."""
+    edges = zip(polygon, (*polygon[1:], polygon[0]), strict=True)
+    return _in_polygon(point, polygon) and not any(_on_segment(point, a, b) for a, b in edges)
+
+
+def _crossing(a: Point, b: Point, c: Point, d: Point) -> bool:
+    """Om sträckorna a–b och c–d korsar varandra. Att de bara nuddar räknas inte."""
+
+    def side(p: Point, q: Point, r: Point) -> float:
+        return (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+
+    return side(a, b, c) * side(a, b, d) < 0 and side(c, d, a) * side(c, d, b) < 0
 
 
 def _overlapping(a: Point, b: Point, c: Point, d: Point, tolerance: float = 1e-6) -> bool:

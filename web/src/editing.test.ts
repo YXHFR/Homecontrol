@@ -4,6 +4,7 @@ import {
   deleteRoom,
   moveRoom,
   polygonArea,
+  polygonWithin,
   rectangleCorners,
   renameRoom,
   roomProblem,
@@ -38,6 +39,9 @@ function home(): HomeDocument {
               walls: ["gips", "betong", "gips", "dörröppning"],
               zones: [
                 {
+                  id: "spis",
+                  name: "Spis",
+                  kind: "ignorera",
                   polygon: [
                     [2, 2],
                     [3, 2],
@@ -145,6 +149,50 @@ describe("ytor", () => {
     expect(roomProblem(rectangleCorners({ x: 0, y: 0 }, { x: 0.1, y: 0.1 }))).toMatch(/litet/);
     const bowtie = [square[0], square[2], square[1], square[3]];
     expect(roomProblem(bowtie)).toMatch(/korsar/);
+  });
+
+  it("en yta i ett U-format rum får inte ta en genväg över hacket", () => {
+    const u = [
+      [0, 0],
+      [6, 0],
+      [6, 4],
+      [4, 4],
+      [4, 2],
+      [2, 2],
+      [2, 4],
+      [0, 4],
+    ].map(([x, y]) => ({ x, y }));
+    const inside = [
+      { x: 1, y: 1 },
+      { x: 5, y: 1 },
+      { x: 5, y: 3 },
+      { x: 4.5, y: 1.8 },
+      { x: 1.5, y: 1.8 },
+    ];
+    // Kanten (1, 1)–(4, 4) går genom rummets hörn (2, 2) och (4, 4) och korsar ingen vägg.
+    const shortcut = [
+      { x: 1, y: 1 },
+      { x: 4, y: 4 },
+      { x: 5, y: 1 },
+    ];
+    expect(polygonWithin(inside, u)).toBe(true);
+    expect(polygonWithin(shortcut, u)).toBe(false);
+  });
+
+  it("en yta får inte täcka ett spetsigt hack som bara nuddar dess kant", () => {
+    const spike = [
+      [0, 0],
+      [20, 0],
+      [20, 10],
+      [6, 10],
+      [6, 5],
+      [5, 3],
+      [4, 5],
+      [4, 10],
+      [0, 10],
+    ].map(([x, y]) => ({ x, y }));
+    expect(polygonWithin(rectangleCorners({ x: 1, y: 1 }, { x: 19, y: 5 }), spike)).toBe(false);
+    expect(polygonWithin(rectangleCorners({ x: 1, y: 1 }, { x: 19, y: 2 }), spike)).toBe(true);
   });
 
   it("en rektangel går att dra åt vilket håll som helst", () => {

@@ -23,6 +23,7 @@ function rectangle(id: string, name: string): Room {
       [0, 4],
     ],
     walls: ["gips", "gips", "gips", "dörröppning"],
+    zones: [],
   };
 }
 

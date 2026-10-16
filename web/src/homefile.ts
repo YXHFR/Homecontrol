@@ -2,11 +2,11 @@
  * Hemmet som kartredigeraren läser och sparar: samma form som exportfilen
  * (se core/src/homecontrol/homefile.py och home.py).
  *
- * Det redigeraren inte själv ändrar (till exempel zonerna och nodernas
- * förmågor) följer med oförändrat, så typerna här beskriver bara det som
- * redigeraren läser eller skriver.
+ * Det redigeraren inte själv ändrar (till exempel nodernas förmågor) följer
+ * med oförändrat, så typerna här beskriver bara det som redigeraren läser
+ * eller skriver.
  */
-import type { WallKind } from "./protocol";
+import type { WallKind, ZoneKind } from "./protocol";
 
 export type XY = [number, number];
 
@@ -59,9 +59,17 @@ export interface RoomModel {
   /** En vägg per sida: väggen från hörn i till hörn i + 1. */
   walls: WallKind[];
   settings?: RoomSettings;
-  zones?: { polygon: XY[] }[];
+  zones?: ZoneModel[];
   nodes?: NodeModel[];
   lamps?: LampModel[];
+}
+
+export interface ZoneModel {
+  id: string;
+  name: string;
+  kind: ZoneKind;
+  /** Hörnen i ordning. Alla ligger i rummet. */
+  polygon: XY[];
 }
 
 export interface PlanImage {

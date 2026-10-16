@@ -2,7 +2,8 @@
  * Kartredigeraren: verktygen till vänster, kartan i mitten och egenskaperna
  * till höger (se #34). På en smal skärm staplas de. Väggar, rumskort,
  * routrar och lampor ändras med placing.ts och visas med editorItems.ts och
- * itemPanel.ts (se #35).
+ * itemPanel.ts (se #35). Zonerna (#36) har sina delar i zones.ts och
+ * zonePanel.ts.
  *
  * Varje ändring sparas direkt i kärnan, som kontrollerar hemmet och visar det
  * i livevyn. Säger kärnan nej visas varför, och kartan läses om från kärnan,
@@ -14,6 +15,7 @@
 import "./editor.css";
 import {
   addRoom,
+  cornersOnFloor,
   deleteRoom,
   distance,
   findRoom,
@@ -27,8 +29,8 @@ import {
   toPoint,
   toXY,
 } from "./editing";
-import { createKonvaEditorView, type EditorViewFactory } from "./editorView";
 import { button, element } from "./dom";
+import { createKonvaEditorView, type EditorViewFactory, type Selection } from "./editorView";
 import { coreApi, CoreError, type HomeApi } from "./homeApi";
 import type { FloorModel, HomeDocument } from "./homefile";
 import { itemProperties, type PanelActions, roomSettingsForm } from "./itemPanel";
@@ -42,7 +44,7 @@ import {
   placeItem,
   updateItem,
 } from "./placing";
-import type { Point } from "./protocol";
+import type { Point, ZoneKind } from "./protocol";
 import {
   Drawing,
   INSTRUCTIONS,
@@ -51,6 +53,9 @@ import {
   type Outcome,
   type ToolName,
 } from "./tools";
+import { zoneInstruction, zoneProperties, zoneTools } from "./zonePanel";
+import { findZone, nearestOnWall, planZone } from "./zones";
+import { ZONE_STYLES } from "./zoneStyles";
 
 /** En bild som är klar att skickas till kärnan, och hur många bildpunkter bred den är. */
 export interface PreparedImage {
@@ -113,6 +118,7 @@ const TOOL_LABELS: Record<ToolName, string> = {
   rectangle: "Rum, rektangel",
   scale: "Skala bilden",
   walls: "Väggar och dörrar",
+  zone: "Zon", // visas inte: zonerna har en knapp per sort (zonePanel.ts)
   node: `${ITEM_LABELS.node} (ESP32)`,
   router: ITEM_LABELS.router,
   lamp: ITEM_LABELS.lamp,
@@ -124,6 +130,25 @@ function errorText(error: unknown): string {
 
 function formatNumber(value: number, decimals = 1): string {
   return value.toLocaleString("sv-SE", { maximumFractionDigits: decimals });
+}
+
+/** Om det valda finns i hemmet. En ny sort som går att välja måste läggas till här. */
+function stillThere(document: HomeDocument, selection: Selection): boolean {
+  if (selection === null) {
+    return true;
+  }
+  switch (selection.kind) {
+    case "room":
+      return findRoom(document, selection.id) !== null;
+    case "zone":
+      return findZone(document, selection.id) !== null;
+    case "item":
+      return findItem(document, selection.id) !== null;
+    default: {
+      const unknown: never = selection.kind;
+      throw new Error(`Okänd sort att välja: ${String(unknown)}`);
+    }
+  }
 }
 
 export function mountEditor(
@@ -139,9 +164,10 @@ export function mountEditor(
   /** Det som visas: det sparade med de väntande ändringarna ovanpå. */
   let shown: HomeDocument | null = null;
   let floorId: string | null = null;
-  let selectedRoomId: string | null = null;
-  /** Det valda rumskortet, den valda routern eller lampan. Ett rum och en sak väljs inte samtidigt. */
-  let selectedItemId: string | null = null;
+  /** Det valda rummet, zonen, rumskortet, routern eller lampan. Bara en sak väljs åt gången. */
+  let selection: Selection = null;
+  /** Sorten av zon som ritas med verktyget Zon. */
+  let zoneKind: ZoneKind = "vanlig";
   /** Punkterna som ska skalas mellan, när användaren har klickat ut två. */
   let scalePoints: { a: Point; b: Point } | null = null;
   /** Ändras när en ny bild laddas upp, så att webbläsaren inte visar den gamla. */
@@ -152,6 +178,10 @@ export function mountEditor(
 
   // --- Verktygen ---
   const toolButtons = new Map<ToolName, HTMLButtonElement>();
+  const zoneToolbox = zoneTools((kind) => {
+    zoneKind = kind;
+    chooseTool("zone");
+  });
   const toolButton = (tool: ToolName) => {
     const node = button(TOOL_LABELS[tool], () => chooseTool(tool), "tool");
     node.dataset.tool = tool;
@@ -175,6 +205,7 @@ export function mountEditor(
     toolButton("polygon"),
     toolButton("rectangle"),
     toolButton("walls"),
+    ...zoneToolbox.nodes,
     element("h2", {}, "Placera"),
     toolButton("node"),
     toolButton("router"),
@@ -210,13 +241,13 @@ export function mountEditor(
   // --- Egenskaperna ---
   const instruction = element("p", { className: "instruction" });
   const draftActions = element("div", { className: "actions" });
-  const selection = element("div", { className: "selection" });
+  const selectionPanel = element("div", { className: "selection" });
   const summary = element("dl", { className: "summary" });
   const properties = element(
     "aside",
     { className: "properties" },
     element("section", {}, element("h2", {}, "Instruktion"), instruction, draftActions),
-    element("section", {}, element("h2", {}, "Valt på kartan"), selection),
+    element("section", {}, element("h2", {}, "Valt på kartan"), selectionPanel),
     element("section", {}, element("h2", {}, "Hemmet"), summary),
   );
 
@@ -238,6 +269,7 @@ export function mountEditor(
     for (const [tool, node] of toolButtons) {
       node.setAttribute("aria-pressed", String(tool === drawing.tool));
     }
+    zoneToolbox.render(drawing.tool === "zone" ? zoneKind : null);
     // Medan en bild laddas upp eller tas bort visar kartan fortfarande den
     // gamla, så den går inte att skala eller ta bort förrän kärnan är klar.
     const imageChanging = waiting.some((change) => change.kind === "image");
@@ -252,10 +284,13 @@ export function mountEditor(
 
   const renderInstruction = () => {
     const draft = drawing.draft;
-    instruction.textContent = INSTRUCTIONS[drawing.tool];
+    instruction.textContent =
+      drawing.tool === "zone" ? zoneInstruction(zoneKind) : INSTRUCTIONS[drawing.tool];
     draftActions.replaceChildren();
     if (draft.kind === "polygon") {
-      const done = button("Stäng rummet", () => handle(drawing.finish()));
+      const done = button(drawing.tool === "zone" ? "Stäng zonen" : "Stäng rummet", () =>
+        handle(drawing.finish()),
+      );
       done.disabled = draft.points.length < 3;
       draftActions.append(
         done,
@@ -303,23 +338,37 @@ export function mountEditor(
     commit: (edit) => commit(edit),
     showMessage: (text) => showMessage(text),
     deselect: () => {
-      selectedItemId = null;
+      selection = null;
     },
   };
 
   const renderSelection = () => {
-    const item = shown === null ? null : findItem(shown, selectedItemId);
-    if (item !== null) {
-      selection.replaceChildren(...itemProperties(item, panelActions));
+    const zone =
+      selection?.kind === "zone" && shown !== null
+        ? zoneProperties(shown, selection.id, {
+            commit,
+            deselect: () => (selection = null),
+            showMessage,
+          })
+        : null;
+    if (zone !== null) {
+      selectionPanel.replaceChildren(...zone);
       return;
     }
-    const room = selectedRoomId === null || shown === null ? null : findRoom(shown, selectedRoomId);
+    const item =
+      selection?.kind === "item" && shown !== null ? findItem(shown, selection.id) : null;
+    if (item !== null) {
+      selectionPanel.replaceChildren(...itemProperties(item, panelActions));
+      return;
+    }
+    const room =
+      selection?.kind === "room" && shown !== null ? findRoom(shown, selection.id) : null;
     if (room === null) {
-      selection.replaceChildren(
+      selectionPanel.replaceChildren(
         element(
           "p",
           { className: "muted" },
-          "Inget valt. Välj ett rum, ett rumskort, en router eller en lampa på kartan.",
+          "Inget valt. Välj ett rum, en zon, ett rumskort, en router eller en lampa på kartan.",
         ),
       );
       return;
@@ -339,7 +388,7 @@ export function mountEditor(
         name.blur();
       }
     });
-    selection.replaceChildren(
+    selectionPanel.replaceChildren(
       element("label", {}, "Namn ", name),
       element(
         "p",
@@ -351,7 +400,7 @@ export function mountEditor(
         "Ta bort rummet",
         () => {
           if (shown !== null) {
-            selectedRoomId = null;
+            selection = null;
             commit((document) => deleteRoom(document, room.id));
           }
         },
@@ -385,7 +434,7 @@ export function mountEditor(
       ...floors.map((floor) => {
         const node = button(floor.name, () => {
           floorId = floor.id;
-          selectedRoomId = null;
+          selection = null;
           cancelDrawing();
         });
         node.setAttribute("aria-pressed", String(floor.id === floorId));
@@ -407,9 +456,9 @@ export function mountEditor(
         floor.plan_image == null
           ? null
           : { url: `${deps.api.planImageUrl(floor.id)}?v=${imageVersion}`, plan: floor.plan_image },
-      selectedRoomId,
-      selectedItemId,
+      selection,
       tool: drawing.tool,
+      draftColor: drawing.tool === "zone" ? ZONE_STYLES[zoneKind].color : null,
       draft: drawing.draft,
     });
   };
@@ -429,7 +478,7 @@ export function mountEditor(
     root.dataset.busy = String(busy);
   };
 
-  /** Räknar fram det som visas och glömmer ett valt rum som inte längre finns. */
+  /** Räknar fram det som visas och glömmer det valda om det inte längre finns. */
   const refreshShown = () => {
     shown = saved;
     for (const change of waiting) {
@@ -437,11 +486,8 @@ export function mountEditor(
         shown = change.edit(shown);
       }
     }
-    if (selectedRoomId !== null && shown !== null && findRoom(shown, selectedRoomId) === null) {
-      selectedRoomId = null;
-    }
-    if (selectedItemId !== null && shown !== null && findItem(shown, selectedItemId) === null) {
-      selectedItemId = null;
+    if (shown !== null && !stillThere(shown, selection)) {
+      selection = null;
     }
   };
 
@@ -523,8 +569,7 @@ export function mountEditor(
     drawing.setTool(tool);
     scalePoints = null;
     if (tool !== "select") {
-      selectedRoomId = null;
-      selectedItemId = null;
+      selection = null;
     }
     render();
   };
@@ -538,13 +583,14 @@ export function mountEditor(
   }
 
   /**
-   * Drar punkten till ett hörn som redan finns om den är nära, annars till hela
-   * centimeter. Punkter utanför planet (till vänster om eller ovanför origo)
+   * Drar punkten till ett hörn som redan finns om den är nära, för en zon
+   * annars till en vägg som är nära, och annars till hela centimeter. Punkter utanför planet (till vänster om eller ovanför origo)
    * flyttas in till kanten.
    */
   const snap = (point: Point): Point => {
     const radius = SNAP_PIXELS * view.metersPerPixel();
-    const corners = currentFloor()?.rooms.flatMap((room) => room.polygon.map(toPoint)) ?? [];
+    const floor = currentFloor();
+    const corners = floor === null ? [] : cornersOnFloor(floor);
     let best: Point | null = null;
     for (const corner of corners) {
       if (
@@ -553,6 +599,9 @@ export function mountEditor(
       ) {
         best = corner;
       }
+    }
+    if (best === null && floor !== null && drawing.tool === "zone") {
+      best = nearestOnWall(floor, point, radius);
     }
     return best ?? toPoint(toXY(point));
   };
@@ -565,10 +614,21 @@ export function mountEditor(
         showMessage(problem);
       } else if (shown !== null && floor !== null) {
         const { roomId, name } = addRoom(shown, floor.id, outcome.corners);
-        selectedRoomId = roomId;
+        selection = { kind: "room", id: roomId };
         commit(
           (document) => addRoom(document, floor.id, outcome.corners, { roomId, name }).document,
         );
+        return;
+      }
+    } else if (outcome?.kind === "zone") {
+      const floor = currentFloor();
+      const plan =
+        shown === null || floor === null ? null : planZone(shown, floor, zoneKind, outcome.corners);
+      if (plan !== null && "problem" in plan) {
+        showMessage(plan.problem);
+      } else if (plan !== null) {
+        selection = { kind: "zone", id: plan.zoneId };
+        commit(plan.edit);
         return;
       }
     } else if (outcome?.kind === "scale") {
@@ -590,7 +650,7 @@ export function mountEditor(
       render();
       return;
     }
-    selectedItemId = placed.id;
+    selection = { kind: "item", id: placed.id };
     // Ändringen görs om på det sparade hemmet när den står på tur. Samma id
     // gör att den nya saken förblir vald.
     const given = { id: placed.id, name: placed.name };
@@ -705,19 +765,16 @@ export function mountEditor(
         handle(drawing.pointerUp(snap(point)));
       }
     },
-    onSelectRoom: (roomId) => {
-      selectedRoomId = roomId;
-      selectedItemId = null;
+    onSelect: (next) => {
+      selection = next;
       render();
     },
     onSelectItem: (itemId) => {
-      selectedItemId = itemId;
-      selectedRoomId = null;
+      selection = { kind: "item", id: itemId };
       render();
     },
     onMoveItem: (itemId, point) => {
-      selectedItemId = itemId;
-      selectedRoomId = null;
+      selection = { kind: "item", id: itemId };
       commit((document) => moveItem(document, itemId, point));
     },
     onRotateNode: (nodeId, rotation) => {
