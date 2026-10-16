@@ -630,7 +630,7 @@ describe("kartredigeraren", () => {
     expect(kinds).toEqual(["betong", "trä", "glas", "dörröppning", "gips"]);
   });
 
-  it("ett valt rum får mörker- och ljusgräns och fördröjning", async () => {
+  it("ett valt rum får ljusgränser, fördröjningar, dimring och fönsterlöst", async () => {
     const { root, core, map, settled } = await setup();
     map.onSelect({ kind: "room", id: "kok" });
     const field = (name: string) => {
@@ -643,6 +643,8 @@ describe("kartredigeraren", () => {
     expect(field("dark_below_lux").value).toBe("30");
     expect(field("off_after_empty_minutes").value).toBe("3");
     expect(field("wifi_weight").value).toBe("0.5");
+    expect(field("daylight_off_after_minutes").value).toBe("10");
+    expect(field("dim_percent").value).toBe("50");
 
     field("dark_below_lux").value = "15";
     field("dark_below_lux").dispatchEvent(new Event("change"));
@@ -650,11 +652,21 @@ describe("kartredigeraren", () => {
     field("off_after_empty_minutes").value = "5";
     field("off_after_empty_minutes").dispatchEvent(new Event("change"));
     await settled();
+    field("dim_before_off_seconds").value = "20";
+    field("dim_before_off_seconds").dispatchEvent(new Event("change"));
+    await settled();
+    field("windowless").checked = true;
+    field("windowless").dispatchEvent(new Event("change"));
+    await settled();
     expect(core.document.home.floors[0].rooms[0].settings).toEqual({
       dark_below_lux: 15,
       bright_above_lux: 100,
       off_after_empty_seconds: 300,
       wifi_weight: 0.5,
+      dim_before_off_seconds: 20,
+      dim_percent: 50,
+      daylight_off_after_seconds: 600,
+      windowless: true,
     });
 
     // Mörkergränsen över ljusgränsen sparas inte.
@@ -662,6 +674,6 @@ describe("kartredigeraren", () => {
     field("dark_below_lux").dispatchEvent(new Event("change"));
     expect(text(root, ".message")).toMatch(/lägre än ljusgränsen/);
     expect(field("dark_below_lux").value).toBe("15");
-    expect(core.saved).toHaveLength(2);
+    expect(core.saved).toHaveLength(4);
   });
 });

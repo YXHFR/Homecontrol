@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { HomeDocument } from "./homefile";
+import type { HomeDocument, RoomSettings } from "./homefile";
 import {
+  DEFAULT_SETTINGS,
+  roomSettings,
   bearing,
   cycleWall,
   deleteItem,
@@ -223,26 +225,37 @@ describe("att ändra det som är placerat", () => {
 describe("rummens inställningar", () => {
   it("sparas i rummet", () => {
     const settings = {
+      ...DEFAULT_SETTINGS,
       dark_below_lux: 20,
       bright_above_lux: 150,
       off_after_empty_seconds: 300,
-      wifi_weight: 0.5,
+      windowless: true,
     };
     expect(rooms(setRoomSettings(home(), "hall", settings))[1].settings).toEqual(settings);
   });
 
   it("mörkergränsen måste vara lägre än ljusgränsen, fördröjningen mer än noll och Wi-Fi-vikten 0–1", () => {
-    const ok = {
-      dark_below_lux: 30,
-      bright_above_lux: 100,
-      off_after_empty_seconds: 180,
-      wifi_weight: 0.5,
-    };
+    const ok = DEFAULT_SETTINGS;
     expect(settingsProblem(ok)).toBeNull();
     expect(settingsProblem({ ...ok, dark_below_lux: 100 })).toMatch(/lägre än ljusgränsen/);
     expect(settingsProblem({ ...ok, off_after_empty_seconds: 0 })).toMatch(/Fördröjningen/);
     expect(settingsProblem({ ...ok, bright_above_lux: NaN })).toMatch(/alla värdena/);
     expect(settingsProblem({ ...ok, wifi_weight: 1.5 })).toMatch(/Wi-Fi-vikten/);
     expect(settingsProblem({ ...ok, wifi_weight: 1 })).toBeNull();
+  });
+
+  it("dimringen är 0 sekunder till ett dygn med 1–100 %, och dagsljustiden mer än noll", () => {
+    const ok = DEFAULT_SETTINGS;
+    expect(settingsProblem({ ...ok, dim_before_off_seconds: 0 })).toBeNull();
+    expect(settingsProblem({ ...ok, dim_before_off_seconds: -1 })).toMatch(/Varningsdimringen/);
+    expect(settingsProblem({ ...ok, dim_percent: 0 })).toMatch(/1 till 100/);
+    expect(settingsProblem({ ...ok, dim_percent: 12.5 })).toMatch(/heltal/);
+    expect(settingsProblem({ ...ok, daylight_off_after_seconds: 0 })).toMatch(/dagsljuset/);
+  });
+
+  it("ett rum från en äldre kärna får standardvärdena för det som saknas", () => {
+    const old = { dark_below_lux: 20, bright_above_lux: 150, off_after_empty_seconds: 300, wifi_weight: 1 };
+    const room = { ...rooms(home())[0], settings: old as RoomSettings };
+    expect(roomSettings(room)).toEqual({ ...DEFAULT_SETTINGS, ...old });
   });
 });

@@ -186,77 +186,114 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
   return parts;
 }
 
-/** Ljusgränserna, fördröjningen och Wi-Fi-vikten för ett valt rum. */
+/**
+ * Ett tal i formuläret för rummets inställningar. `scale` är hur många av
+ * inställningens enheter ett steg i fältet är, till exempel 60 sekunder per minut.
+ */
+interface NumberSetting {
+  key: Exclude<keyof RoomSettings, "windowless">;
+  name: string;
+  label: string;
+  min: string;
+  max?: string;
+  step: string;
+  scale?: number;
+}
+
+const NUMBER_SETTINGS: NumberSetting[] = [
+  { key: "dark_below_lux", name: "dark_below_lux", label: "Tänd när det är mörkare än (lux)", min: "0", step: "1" },
+  {
+    key: "bright_above_lux",
+    name: "bright_above_lux",
+    label: "Släck när dagsljuset är över (lux)",
+    min: "0",
+    step: "1",
+  },
+  {
+    key: "daylight_off_after_seconds",
+    name: "daylight_off_after_minutes",
+    label: "… i sträck i (minuter)",
+    min: "0.5",
+    step: "0.5",
+    scale: 60,
+  },
+  {
+    key: "off_after_empty_seconds",
+    name: "off_after_empty_minutes",
+    label: "Släck när rummet varit tomt i (minuter)",
+    min: "0.5",
+    step: "0.5",
+    scale: 60,
+  },
+  {
+    key: "dim_before_off_seconds",
+    name: "dim_before_off_seconds",
+    label: "Dimra som varning innan dess i (sekunder, 0 = aldrig)",
+    min: "0",
+    step: "5",
+  },
+  { key: "dim_percent", name: "dim_percent", label: "Dimra till (%)", min: "1", max: "100", step: "5" },
+  { key: "wifi_weight", name: "wifi_weight", label: "Wi-Fi-rörelsens vikt (0–1)", min: "0", max: "1", step: "0.1" },
+];
+
+/** Ljusreglerna och Wi-Fi-vikten för ett valt rum. */
 export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLElement {
   const current = roomSettings(room);
-  const inputs = {
-    dark: element("input", {
+  const numbers = NUMBER_SETTINGS.map((setting) => ({
+    setting,
+    input: element("input", {
       type: "number",
-      min: "0",
-      step: "1",
-      value: format(current.dark_below_lux),
-      name: "dark_below_lux",
+      min: setting.min,
+      ...(setting.max === undefined ? {} : { max: setting.max }),
+      step: setting.step,
+      name: setting.name,
     }),
-    bright: element("input", {
-      type: "number",
-      min: "0",
-      step: "1",
-      value: format(current.bright_above_lux),
-      name: "bright_above_lux",
-    }),
-    minutes: element("input", {
-      type: "number",
-      min: "0.5",
-      step: "0.5",
-      value: format(current.off_after_empty_seconds / 60),
-      name: "off_after_empty_minutes",
-    }),
-    wifi: element("input", {
-      type: "number",
-      min: "0",
-      max: "1",
-      step: "0.1",
-      value: format(current.wifi_weight),
-      name: "wifi_weight",
-    }),
+  }));
+  const windowless = element("input", { type: "checkbox", name: "windowless" });
+  const show = () => {
+    for (const { setting, input } of numbers) {
+      input.value = format(current[setting.key] / (setting.scale ?? 1));
+    }
+    windowless.checked = current.windowless;
   };
+  show();
+
   const save = () => {
-    const next: RoomSettings = {
-      dark_below_lux: inputs.dark.valueAsNumber,
-      bright_above_lux: inputs.bright.valueAsNumber,
-      off_after_empty_seconds: Math.round(inputs.minutes.valueAsNumber * 60),
-      wifi_weight: inputs.wifi.valueAsNumber,
-    };
+    const next: RoomSettings = { ...current, windowless: windowless.checked };
+    for (const { setting, input } of numbers) {
+      const scale = setting.scale ?? 1;
+      next[setting.key] = scale === 1 ? input.valueAsNumber : Math.round(input.valueAsNumber * scale);
+    }
     const problem = settingsProblem(next);
     if (problem !== null) {
       actions.showMessage(problem);
-      inputs.dark.value = format(current.dark_below_lux);
-      inputs.bright.value = format(current.bright_above_lux);
-      inputs.minutes.value = format(current.off_after_empty_seconds / 60);
-      inputs.wifi.value = format(current.wifi_weight);
+      show();
       return;
     }
     if (JSON.stringify(next) !== JSON.stringify(current)) {
       actions.commit((document) => setRoomSettings(document, room.id, next));
     }
   };
-  for (const input of Object.values(inputs)) {
+  for (const input of [...numbers.map(({ input }) => input), windowless]) {
     input.addEventListener("change", save);
   }
   return element(
     "fieldset",
     { className: "room-settings" },
     element("legend", {}, "Ljus och fördröjning"),
-    element("label", {}, "Tänd när det är mörkare än (lux) ", inputs.dark),
-    element("label", {}, "Släck när dagsljuset är över (lux) ", inputs.bright),
-    element("label", {}, "Släck när rummet varit tomt i (minuter) ", inputs.minutes),
-    element("label", {}, "Wi-Fi-rörelsens vikt (0–1) ", inputs.wifi),
+    ...numbers.map(({ setting, input }) => element("label", {}, `${setting.label} `, input)),
+    element("label", {}, windowless, " Rummet har inga fönster (alltid mörkt)"),
+    element(
+      "p",
+      { className: "muted" },
+      "Ljusnivåerna räknas utan lampornas eget ljus. Ett klick på en lampa i livevyn pausar " +
+        "automatiken i rummet tills det har varit tomt i hela fördröjningen.",
+    ),
     element(
       "p",
       { className: "muted" },
       "Wi-Fi-rörelse håller kvar den som sitter still i en stillhetszon. Vid 0 används " +
         "inte Wi-Fi, och först vid 1 räcker rörelsen ensam för att rummet ska räknas som upptaget.",
     ),
-    element("p", { className: "muted" }, "Dagsljusgränsen används när dagsljusregeln kommer."),
   );
 }

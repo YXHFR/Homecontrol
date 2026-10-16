@@ -41,3 +41,25 @@ test("en simulerad person i hallen ger ett spår, och när den går hålls spår
   await expect(hallNow).toHaveAttribute("data-status", "upptaget");
   await expect(hallNow).toHaveAttribute("data-status", "tomt", { timeout: 15_000 });
 });
+
+test("ett klick på en lampa styr den för hand, och rummet visar manuellt läge tills automatiken tar över", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+  const kitchen = page.locator(".rooms-now li", { hasText: "Kök:" });
+  const lamp = kitchen.getByRole("button", { name: /^Taklampa: släckt/ });
+  await expect(kitchen).toHaveAttribute("data-manual", "false");
+
+  await lamp.click();
+
+  await expect(kitchen.getByRole("button", { name: "Taklampa: tänd" })).toBeVisible();
+  await expect(kitchen).toHaveAttribute("data-manual", "true");
+  await expect(kitchen.locator(".badge")).toHaveText("Manuellt läge");
+  await expect(page.locator(".events li").first()).toContainText("Kök: Tändes för hand: Taklampa.");
+
+  // Automatiken tar över igen direkt, utan att vänta tills köket varit tomt.
+  await kitchen.getByRole("button", { name: "Automatik igen" }).click();
+  await expect(kitchen).toHaveAttribute("data-manual", "false");
+  await expect(page.locator(".events li").first()).toContainText("återställdes för hand");
+});

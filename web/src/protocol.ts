@@ -91,13 +91,45 @@ export interface Simulation {
   persons: Person[];
 }
 
+export interface RoomState {
+  id: string;
+  status: Occupancy;
+  /** Uppmätt ljusnivå i lux, eller null om ingen har mätt den. */
+  lux: number | null;
+  /** Ljusnivån med rummets egna lampors ljus avräknat; den som reglerna använder. */
+  adjusted_lux: number | null;
+  /** Någon har styrt en lampa i rummet för hand, och automatiken pausar. */
+  manual: boolean;
+  /** Varför rummets lampor är som de är, i klartext. */
+  explanation: string;
+}
+
+export interface LampState {
+  id: string;
+  /** Null när lampans läge är okänt. */
+  on: boolean | null;
+  /** Ljusstyrkan i procent när lampan lyser, lägre under en dimring. */
+  brightness: number;
+  explanation: string;
+}
+
+/** Något som hände med lamporna, för listan "Varför hände det?". */
+export interface LampEvent {
+  /** Klockslaget som Unix-tid i sekunder. */
+  at: number;
+  room_id: string;
+  text: string;
+}
+
 export interface StateMessage {
   type: "state";
   /** Spåren från alla källor, även de som låtsaspersonerna ger. */
   tracks: Track[];
-  rooms: { id: string; status: Occupancy; lux: number | null }[];
+  rooms: RoomState[];
   zones: { id: string; status: Occupancy }[];
-  lamps: { id: string; on: boolean; explanation: string }[];
+  lamps: LampState[];
+  /** De senaste händelserna, äldst först. */
+  events: LampEvent[];
   /** Simuleringsläget, eller null om kärnan inte har någon simulering. */
   simulation: Simulation | null;
 }
@@ -105,6 +137,8 @@ export interface StateMessage {
 export type ServerMessage = HomeMessage | StateMessage;
 
 export type ClientMessage =
+  | { type: "set_lamp"; lamp_id: string; on: boolean }
+  | { type: "resume_automation"; room_id: string }
   | { type: "set_simulation"; enabled: boolean }
   | { type: "add_person"; floor_id: string; x: number; y: number }
   | { type: "move_person"; person_id: string; floor_id: string; x: number; y: number }
@@ -130,6 +164,7 @@ export function parseServerMessage(text: string): ServerMessage | null {
     lamps?: unknown;
     tracks?: unknown;
     zones?: unknown;
+    events?: unknown;
     simulation?: unknown;
   };
   if (message.type === "home" && Array.isArray(message.floors) && message.floors.length > 0) {
@@ -141,6 +176,7 @@ export function parseServerMessage(text: string): ServerMessage | null {
     Array.isArray(message.rooms) &&
     Array.isArray(message.zones) &&
     Array.isArray(message.lamps) &&
+    Array.isArray(message.events) &&
     (message.simulation === null || isSimulation(message.simulation))
   ) {
     return data as StateMessage;
