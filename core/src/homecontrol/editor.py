@@ -18,7 +18,9 @@ Den som skickar med revisionen i ``If-Match`` får svar 409 om någon annan
 stället för att skriva över den ändringen.
 
 Ett sparat hem lämnas till kärnan direkt (`Controller.replace_home`), så att
-livevyn visar ändringen utan omstart.
+livevyn visar ändringen utan omstart. Andra delar av kärnan som ändrar hemmet,
+som lampkalibreringen, gör det genom samma `HomeChanges`, så att revisionen
+stämmer och redigeraren inte skriver över ändringen.
 """
 
 import asyncio
@@ -92,17 +94,75 @@ class MemoryStore:
         return self.images.get(floor_id)
 
 
-def create_editor_router(
-    controller: Controller,
-    home_store: HomeStore,
-    allowed_hosts: Set[str] = frozenset(),
-    on_home_replaced: Callable[[Home], None] | None = None,
-) -> APIRouter:
-    """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som kärnan får nås på.
+class Conflict(Exception):
+    """Hemmet har ändrats sedan revisionen som ändringen gällde."""
+
+
+class StoreUnavailable(Exception):
+    """Lagringen svarade inte, så ändringen sparades inte."""
+
+
+class HomeChanges:
+    """Ändrar hemmet: en ändring i taget, sparad och lämnad till kärnan, med en ny revision.
 
     `on_home_replaced` anropas med det nya hemmet efter varje ändring, för det
     utöver kärnan som behöver veta vilka rum och våningar som finns (simuleringen).
     """
+
+    def __init__(
+        self,
+        controller: Controller,
+        store: HomeStore,
+        on_home_replaced: Callable[[Home], None] | None = None,
+    ) -> None:
+        self.controller = controller
+        self.store = store
+        self._on_home_replaced = on_home_replaced
+        # En ändring i taget, så att databasen och kärnan alltid får dem i samma ordning.
+        self._lock = asyncio.Lock()
+        # Revisionen börjar om när kärnan startar; den slumpade delen gör att en
+        # revision från förra gången aldrig råkar stämma.
+        self._startup_id = secrets.token_hex(4)
+        self._count = 0
+
+    def revision(self) -> str:
+        return f'"{self._startup_id}-{self._count}"'
+
+    async def change(
+        self,
+        update: Callable[[Home], Home],
+        store: Callable[[Home], None],
+        if_match: str | None = None,
+    ) -> Home:
+        """Ändrar hemmet med `update`, sparar det med `store` och lämnar det till kärnan.
+
+        Med `if_match` görs ändringen bara om revisionen stämmer (annars
+        `Conflict`). Når `store` inte lagringen blir det `StoreUnavailable`.
+        """
+        async with self._lock:
+            if if_match is not None and if_match != self.revision():
+                raise Conflict
+            home = update(self.controller.home)
+            try:
+                await anyio.to_thread.run_sync(store, home)
+            except Exception as error:
+                logger.exception("Kunde inte nå lagringen")
+                raise StoreUnavailable from error
+            # Nu är hemmet sparat och har en ny revision, vad som än händer i kärnan.
+            self._count += 1
+            self.controller.replace_home(home)
+            if self._on_home_replaced is not None:
+                self._on_home_replaced(home)
+            return home
+
+
+_UNAVAILABLE = "Kunde inte nå databasen. Försök igen om en stund."
+
+
+def create_editor_router(changes: HomeChanges, allowed_hosts: Set[str] = frozenset()) -> APIRouter:
+    """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som kärnan får nås på."""
+    controller = changes.controller
+    home_store = changes.store
 
     def only_trusted(request: Request) -> None:
         # Utan kontrollen kunde en främmande sida som någon i hemmet besöker
@@ -111,45 +171,29 @@ def create_editor_router(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Okänd adress eller avsändare")
 
     router = APIRouter(prefix="/api", dependencies=[Depends(only_trusted)])
-    # En ändring i taget, så att databasen och kärnan alltid får dem i samma ordning.
-    change_lock = asyncio.Lock()
-    # Revisionen börjar om när kärnan startar; den slumpade delen gör att en
-    # revision från förra gången aldrig råkar stämma.
-    startup_id = secrets.token_hex(4)
-    change_count = 0
-
-    def revision() -> str:
-        return f'"{startup_id}-{change_count}"'
+    revision = changes.revision
 
     async def in_store(call: Callable[..., T], *args: Any) -> T:
         try:
             return await anyio.to_thread.run_sync(call, *args)
         except Exception:
             logger.exception("Kunde inte nå lagringen")
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                "Kunde inte nå databasen. Försök igen om en stund.",
-            ) from None
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, _UNAVAILABLE) from None
 
     async def change(
         if_match: str | None, update: Callable[[Home], Home], store: Callable[[Home], None]
     ) -> Response:
         """Ändrar hemmet: kontrollerar revisionen, sparar och lämnar hemmet till kärnan."""
-        nonlocal change_count
-        async with change_lock:
-            if if_match is not None and if_match != revision():
-                raise HTTPException(
-                    status.HTTP_409_CONFLICT,
-                    "Hemmet har ändrats i ett annat fönster. Nu visas det senaste.",
-                )
-            home = update(controller.home)
-            await in_store(store, home)
-            # Nu är hemmet sparat och har en ny revision, vad som än händer i kärnan.
-            change_count += 1
-            controller.replace_home(home)
-            if on_home_replaced is not None:
-                on_home_replaced(home)
-            return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"ETag": revision()})
+        try:
+            await changes.change(update, store, if_match)
+        except Conflict:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Hemmet har ändrats i ett annat fönster. Nu visas det senaste.",
+            ) from None
+        except StoreUnavailable:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, _UNAVAILABLE) from None
+        return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"ETag": revision()})
 
     def require_floor(home: Home, floor_id: str) -> Floor:
         """Våningen, eller svar 404 om den inte finns."""

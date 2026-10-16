@@ -196,3 +196,16 @@ def home_with_settings(settings: RoomSettings, *, lamp_lux: float = 0) -> Home:
     lamps = tuple(lamp.model_copy(update={"lux_contribution": lamp_lux}) for lamp in room.lamps)
     living_room = room.model_copy(update={"settings": settings, "lamps": lamps})
     return home.model_copy(update={"floors": (floor.model_copy(update={"rooms": (living_room,)}),)})
+
+
+def two_lamp_home() -> Home:
+    """Enrumshemmet med en golvlampa i vardagsrummets högra hörn, utöver taklampan.
+
+    Taklampan sitter 2 meter från rumskortet och golvlampan √5 meter.
+    """
+    home = one_room_home()
+    floor = home.floors[0]
+    room = floor.rooms[0]
+    floor_lamp = Lamp(id="golvlampa", name="Golvlampa", position=Point(4.5, 1))
+    living_room = room.model_copy(update={"lamps": (*room.lamps, floor_lamp)})
+    return home.model_copy(update={"floors": (floor.model_copy(update={"rooms": (living_room,)}),)})

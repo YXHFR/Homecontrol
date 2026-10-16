@@ -41,7 +41,8 @@ export interface HomeApi {
 
 const CONFLICT = 409;
 
-async function ensureOk(request: Promise<Response>): Promise<Response> {
+/** Väntar på svaret och ger ett `CoreError` med kärnans förklaring om det inte gick bra. */
+export async function ensureOk(request: Promise<Response>): Promise<Response> {
   let response: Response;
   try {
     response = await request;

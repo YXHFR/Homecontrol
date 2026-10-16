@@ -12,6 +12,8 @@ export interface RoomActions {
   setLamp(lampId: string, on: boolean): void;
   /** Någon vill att automatiken ska ta över i rummet igen direkt. */
   resumeAutomation(roomId: string): void;
+  /** Någon vill mäta lampornas eget ljus i rummet (lampkalibreringen). */
+  calibrate(roomId: string): void;
 }
 
 /** Lampans läge i klartext: "tänd", "dimrad 50 %", "släckt", "svarar inte" eller "okänt läge". */
@@ -100,7 +102,9 @@ export function roomsNowItems(
       element("p", { className: "explanation" }, roomState.explanation),
     );
     if (lampButtons.length > 0) {
-      item.append(element("div", { className: "lamp-toggles" }, ...lampButtons));
+      const calibrate = button("Mät lampornas ljus", () => actions.calibrate(room.id), "calibrate");
+      calibrate.title = "Lampkalibrering: hur mycket lamporna själva lyser upp ljussensorn";
+      item.append(element("div", { className: "lamp-toggles" }, ...lampButtons, calibrate));
     }
     item.dataset.status = roomState.status;
     item.dataset.manual = String(roomState.manual);
