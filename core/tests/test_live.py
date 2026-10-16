@@ -48,6 +48,7 @@ def test_streams_home_and_state_and_lights_the_lamp() -> None:
             "x": 2.5,
             "y": 2.0,
             "virtual": True,
+            "lux_contribution": 0.0,
         }
 
         # Simuleringen börjar påslagen och mörk.
@@ -79,7 +80,9 @@ def test_streams_home_and_state_and_lights_the_lamp() -> None:
             "held": False,
         }
         assert state["rooms"][0]["status"] == "upptaget"
-        assert "mörkt" in state["lamps"][0]["explanation"]
+        # Förklaringen kan redan säga att lampan lyser, för den lyser upp den
+        # simulerade sensorn, men händelsen säger varför den tändes.
+        assert any("mörkt" in event["text"] for event in state["events"])
 
         # Personen försvinner mitt i rummet: spåret hålls kvar och visas som tappat.
         ws.send_json({"type": "remove_person", "person_id": "1"})

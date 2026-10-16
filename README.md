@@ -353,17 +353,30 @@ inte via Tailscale (se **Steg 8**).
 En lampa lyser också på rummets ljussensor. För att en lampa inte ska
 släcka sig själv när den gör rummet ljust drar Homecontrol bort lampornas
 eget ljus från det som sensorn mäter (se **Ljusreglerna**). Hur mycket varje
-lampa ger mäts av lampkalibreringen: rum för rum mäter den ljuset med
-lamporna släckta och tända och sparar varje lampas bidrag. Kalibreringen
-görs om när en lampa har bytts eller flyttats.
+lampa ger mäts av lampkalibreringen, ett rum i taget.
 
-> **Obs:** lampkalibreringen finns inte i Homecontrol än; den kommer i en
-> senare version och startas då från webbgränssnittet, som guidar dig genom
-> mätningen. Tills dess räknas lampornas eget ljus som 0. Det märks bara i
-> rum med fönster: lyser lamporna starkt på sensorn kan de släckas av
-> dagsljusregeln medan någon är kvar. Hjälper det inte att flytta sensorn
-> bort från lamporna, kan du ange lampans bidrag själv som
-> `lux_contribution` i hemfilen (se **Hemmet: spara, flytta och läsa in**).
+1. Öppna livevyn. Under **Just nu** har varje rum med lampor knappen
+   **Mät lampornas ljus**. Tryck på den för rummet du vill kalibrera.
+2. Läs råden i rutan **Lampkalibrering**: gör det när ljuset är jämnt,
+   helst när det är mörkt ute, och stå inte mellan lamporna och rumskortet.
+3. Tryck på **Starta kalibreringen**. Alla lampor i rummet släcks, och
+   sedan tänds och släcks de en i taget medan ljuset mäts. Varje mätning
+   tar ungefär en kvarts minut, så ett rum med en lampa tar ungefär en
+   minut. Automatiken i rummet pausar under tiden.
+4. När det är klart står varje lampas ljus i lux i rutan. Värdena sparas,
+   lamporna blir som de var innan och automatiken tar över igen.
+
+Kalibrera igen (knappen **Kalibrera igen**) när en lampa har bytts eller
+flyttats. Kalibreringen avbryts, och lamporna ställs tillbaka, om dagsljuset
+ändras mycket under tiden (till exempel av ett moln), om ljussensorn eller en
+lampa slutar svara, om rummet ändras i kartredigeraren eller om du trycker
+**Avbryt**. Tänder eller släcker du själv en lampa under tiden avbryts den
+också, och den lampan får vara som du ville. Ett rum utan fönster behöver
+ingen kalibrering, eftersom det alltid räknas som mörkt.
+
+Du kan prova kalibreringen i simuleringsläget: där lyser de virtuella
+lamporna upp de simulerade sensorerna, och med tidsfarten 60× går den på
+några sekunder.
 
 ### Steg 8: Nå livevyn utanför hemmet med Tailscale
 
@@ -459,8 +472,8 @@ Värdena inom parentes är standard och ändras per rum i kartredigeraren.
 Ljusnivån som reglerna använder är den uppmätta minus det ljus som rummets
 tända lampor själva ger vid ljussensorn (mindre när de är dimrade). Därför
 släcker en lampa aldrig sig själv för att den lyser upp rummet. Hur mycket
-varje lampa lyser upp sensorn mäts av lampkalibreringen, som kommer i en
-senare version (se **Steg 7**); tills dess är bidraget 0. Under **Just nu** står båda värdena
+varje lampa lyser upp sensorn mäts av lampkalibreringen (se **Steg 7**);
+innan en lampa är mätt är bidraget 0. Under **Just nu** står båda värdena
 när de skiljer sig.
 
 Kärnan antar inte att lamporna är släckta när den startar. Tills en lampa
@@ -795,6 +808,11 @@ och klienten i `web/src/homeApi.ts`). Varje
 ändring ger en ny revision (`ETag`), och en ändring som utgår från en gammal
 revision (`If-Match`) nekas. Ett sparat hem går till kärnan med
 `Controller.replace_home`, så livevyn får det direkt.
+Lampkalibreringen startas med `POST /api/rooms/{id}/calibration` och
+avbryts med `DELETE /api/calibration` (se `core/src/homecontrol/calibration_api.py`).
+Själva mätningen ligger i `calibration.py`, och läget strömmas i livevyn.
+Bidragen sparas på samma sätt som en ändring i kartredigeraren
+(`editor.HomeChanges`).
 
 Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
 sammanvägningen (`fusion.py`) gör om dem till spår och avgör vilka rum som

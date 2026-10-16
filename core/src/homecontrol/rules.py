@@ -10,16 +10,18 @@ zonlampor behöver därför kunna begränsa ett beslut till några av lamporna.
 Standardreglerna frågas i den här ordningen. Värdena inom parentes är
 standardvärden; varje rum har egna i sina inställningar.
 
-1. **Okänt läge.** När en sensor i rummet har slutat svara lämnas lamporna som
+1. **Lampkalibrering.** Medan lampornas eget ljus mäts (se calibration.py)
+   pausar automatiken i rummet, och kalibreringen styr lamporna.
+2. **Okänt läge.** När en sensor i rummet har slutat svara lämnas lamporna som
    de är, så att ingen blir lämnad i mörker på grund av ett fel.
-2. **Manuell styrning.** Har någon styrt en lampa för hand pausar automatiken
+3. **Manuell styrning.** Har någon styrt en lampa för hand pausar automatiken
    i rummet tills det har varit tomt i hela släckfördröjningen.
-3. **Dagsljus.** Släck när någon är i rummet och den justerade ljusnivån har
+4. **Dagsljus.** Släck när någon är i rummet och den justerade ljusnivån har
    varit över ljusgränsen (100 lux) i sträck i 10 minuter.
-4. **Upptaget.** Tänd när någon är i rummet och den justerade ljusnivån är
+5. **Upptaget.** Tänd när någon är i rummet och den justerade ljusnivån är
    under mörkergränsen (30 lux). Ett rum utan fönster är alltid mörkt. Är
    lamporna dimrade går de upp igen.
-5. **Tomt.** Dimra till hälften 30 sekunder innan lamporna släcks, och släck
+6. **Tomt.** Dimra till hälften 30 sekunder innan lamporna släcks, och släck
    när rummet har varit tomt i 3 minuter.
 
 Den *justerade* ljusnivån är den uppmätta minus det som rummets tända lampor
@@ -48,6 +50,8 @@ from homecontrol.home import Home, Lamp, Room, RoomSettings
 FULL_BRIGHTNESS = 100
 """Full ljusstyrka, i procent."""
 
+CALIBRATING = "kalibreras_sedan"
+"""I rummets minne: sedan när lampkalibreringen pågår i rummet."""
 MANUAL = "manuell"
 """I rummets minne: när någon senast styrde en lampa i rummet för hand."""
 BRIGHT_SINCE = "ljust_sedan"
@@ -191,6 +195,20 @@ class RuleResult:
     """Det reglerna minns om varje rum. Skickas tillbaka in nästa gång (`RoomState.memory`)."""
     wake_at: float | None
     """Nästa tidpunkt då regeln kan komma fram till något nytt, om inget annat händer."""
+
+
+class Calibrating:
+    """Under lampkalibreringen pausar automatiken i rummet, och kalibreringen styr lamporna."""
+
+    def decide(self, situation: Situation) -> Verdict:
+        if CALIBRATING not in situation.memory:
+            return NO_OPINION
+        return Verdict(
+            Decision(
+                f"Lampkalibrering pågår i {situation.room.name}: automatiken pausar tills "
+                "den är klar, och lamporna tänds och släcks en i taget."
+            )
+        )
 
 
 class UnknownRoom:
@@ -382,6 +400,7 @@ def _back_to_full(name: str) -> Decision:
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
+    Calibrating(),
     UnknownRoom(),
     ManualControl(),
     DaylightOff(),
@@ -505,6 +524,20 @@ def start_manual(memory: Memory, now: float) -> Memory:
 def stop_manual(memory: Memory) -> Memory:
     """Rummets minne när automatiken ska ta över igen direkt."""
     return {key: value for key, value in memory.items() if key != MANUAL}
+
+
+def start_calibrating(memory: Memory, now: float) -> Memory:
+    """Rummets minne när lampkalibreringen börjar: automatiken pausar."""
+    return {**memory, CALIBRATING: now}
+
+
+def stop_calibrating(memory: Memory) -> Memory:
+    """Rummets minne när lampkalibreringen är slut.
+
+    Hur länge det har varit ljust räknas om från början, eftersom lamporna
+    lyste för mätningen och deras ljus kan ha räknats som dagsljus.
+    """
+    return {key: value for key, value in memory.items() if key not in (CALIBRATING, BRIGHT_SINCE)}
 
 
 def is_manual(memory: Memory) -> bool:

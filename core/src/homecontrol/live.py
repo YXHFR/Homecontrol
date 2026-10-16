@@ -5,7 +5,8 @@ Protokollet är JSON. Kärnan skickar:
 * ``{"type": "home", ...}`` vid anslutning och när hemmet har ändrats, till
   exempel i kartredigeraren: våningarna med sina rum, väggar, zoner, rumskort
   och lampor. Punkter är ``[x, y]`` i meter med origo uppe till vänster.
-  En lampa som ingen riktig lamputgång styr är ``"virtual": true``.
+  En lampa som ingen riktig lamputgång styr är ``"virtual": true``, och
+  ``lux_contribution`` är lampans eget ljus vid sensorn från lampkalibreringen.
 * ``{"type": "state", ...}`` vid anslutning och efter varje ändring: spåren
   (``held`` är ett spår som radarn har tappat men som hålls kvar), läget i
   varje rum och zon (``"upptaget"``, ``"tomt"`` eller ``"okänt"``), om rummet
@@ -15,7 +16,10 @@ Protokollet är JSON. Kärnan skickar:
   (``at`` är Unix-tid i sekunder) och simuleringen. Fältet ``simulation``
   visar simuleringsläget, eller är null om det inte finns. Fältet ``cards``
   visar de riktiga rumskorten (se `cards.cards_message`), eller är null om
-  inga kort kan anslutas.
+  inga kort kan anslutas. Fältet ``calibration`` visar lampkalibreringen som
+  pågår eller den senaste (``phase`` är ``"pågår"``, ``"klar"`` eller
+  ``"avbruten"``, och ``results`` är varje lampas bidrag i lux), eller är null.
+  Kalibreringen startas genom API:t (se calibration_api.py).
 
 Livevyn styr lamporna för hand:
 
@@ -58,6 +62,7 @@ import anyio.abc
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
+from homecontrol.calibration import CalibrationView
 from homecontrol.cards import Cards, CardView, cards_message
 from homecontrol.clock import PacedClock
 from homecontrol.controller import Controller, Snapshot
@@ -200,6 +205,7 @@ def home_message(home: Home, virtual_lamps: Set[str] = frozenset()) -> dict[str,
                         "x": lamp.position.x,
                         "y": lamp.position.y,
                         "virtual": lamp.id in virtual_lamps,
+                        "lux_contribution": lamp.lux_contribution,
                     }
                     for room in floor.rooms
                     for lamp in room.lamps
@@ -254,6 +260,20 @@ def state_message(
         ],
         "simulation": None if simulation is None else simulation_message(simulation),
         "cards": None if cards is None else cards_message(cards),
+        "calibration": (
+            None if snapshot.calibration is None else calibration_message(snapshot.calibration)
+        ),
+    }
+
+
+def calibration_message(calibration: CalibrationView) -> dict[str, Any]:
+    return {
+        "room_id": calibration.room_id,
+        "phase": calibration.phase.value,
+        "text": calibration.text,
+        "step": calibration.step,
+        "steps": calibration.steps,
+        "results": dict(calibration.results),
     }
 
 

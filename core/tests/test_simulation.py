@@ -1,5 +1,8 @@
 """Simuleringsläget och låtsaskällan, sett från kärnans ingång."""
 
+import asyncio
+import contextlib
+
 import pytest
 
 from homecontrol.clock import SystemClock
@@ -14,11 +17,13 @@ from homecontrol.connectors import (
 )
 from homecontrol.home import Point, Target
 from homecontrol.simulation import (
+    LAMP_LUX_AT_ONE_METER,
     MAX_PERSONS,
     SimulatedLampOutput,
     SimulatedSource,
     Simulation,
     TooManyPersons,
+    run_light_sensors,
 )
 from homes import FLOOR, one_room_home, two_floor_home
 
@@ -277,3 +282,36 @@ def test_virtual_lamps_never_report_or_control_real_lamps() -> None:
     assert seen == []
     assert lamps.states == {}
     assert not lamps.history
+
+
+def test_virtual_lamps_light_up_the_simulated_sensor_when_it_measures() -> None:
+    """Taklampan sitter 2 meter från rumskortet. Dagsljusreglaget mäter med lampans ljus nu."""
+    seen: list[Observation] = []
+    source = SimulatedSource(HOME, "sim")
+    lamps = SimulatedLampOutput()
+    simulation = Simulation(
+        source, seen.append, SystemClock(), floor_ids=[FLOOR], daylight=20, lamps=lamps
+    )
+    lamps.send(LampCommand("taklampa", on=True, reason="test"))
+    simulation.measure_light()
+    lamps.send(LampCommand("taklampa", on=True, reason="test", brightness=50))
+    simulation.set_daylight(30)
+    levels = [o.lux for o in seen if isinstance(o, LightLevelObserved)]
+    assert levels == [20, pytest.approx(20 + LAMP_LUX_AT_ONE_METER / 4), 30 + 10]
+
+
+def test_simulated_sensors_measure_every_five_seconds_in_the_cores_time() -> None:
+    async def run() -> int:
+        simulation, seen, clock = make()
+        seen.clear()
+        task = asyncio.create_task(run_light_sensors(simulation, clock))
+        await asyncio.sleep(0.01)
+        simulation.set_speed(60)  # nu mäter de var 5/60 sekund, även mitt i en väntan
+        await asyncio.sleep(0.5)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        return sum(isinstance(o, LightLevelObserved) for o in seen)
+
+    readings = asyncio.run(run())
+    assert 3 <= readings <= 8

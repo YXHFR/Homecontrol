@@ -13,11 +13,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from homecontrol import __version__
+from homecontrol.calibration_api import calibration_saver, create_calibration_router
 from homecontrol.cards import create_cards_router
 from homecontrol.clock import SystemClock
 from homecontrol.connectors import defer_in_loop
 from homecontrol.controller import Controller
-from homecontrol.editor import HomeStore, MemoryStore, create_editor_router
+from homecontrol.editor import HomeChanges, HomeStore, MemoryStore, create_editor_router
 from homecontrol.esphome import (
     AioesphomeNetwork,
     EsphomeSource,
@@ -29,7 +30,12 @@ from homecontrol.home import Home
 from homecontrol.homefile import example_home
 from homecontrol.lampdevices import create_lamp_devices_router
 from homecontrol.live import create_live_router, run_timer
-from homecontrol.simulation import SimulatedLampOutput, SimulatedSource, Simulation
+from homecontrol.simulation import (
+    SimulatedLampOutput,
+    SimulatedSource,
+    Simulation,
+    run_light_sensors,
+)
 from homecontrol.zigbee import Connect, ZigbeeOutput, zigbee_lamps
 
 logger = logging.getLogger(__name__)
@@ -95,6 +101,7 @@ def create_app(
         floor_ids=(floor.id for floor in home.floors),
         enabled=not real_hardware(home),
         real_hardware=real_hardware,
+        lamps=lamps,
     )
     if history is not None:
         # Låtsaspersonerna ska inte hamna i historiken bland de riktiga spåren.
@@ -114,7 +121,10 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if history is not None:
             history.start()
-        tasks = [asyncio.create_task(run_timer(controller, clock))]
+        tasks = [
+            asyncio.create_task(run_timer(controller, clock)),
+            asyncio.create_task(run_light_sensors(simulation, clock)),
+        ]
         if cards is not None:
             tasks.append(asyncio.create_task(cards.run(controller.observe)))
         if zigbee is not None and mqtt is not None:
@@ -156,14 +166,14 @@ def create_app(
     )
     app.include_router(create_cards_router(cards, allowed_hosts))
     app.include_router(create_lamp_devices_router(zigbee, allowed_hosts))
-    app.include_router(
-        create_editor_router(
-            controller,
-            home_store if home_store is not None else MemoryStore(),
-            allowed_hosts,
-            on_home_replaced=use_home,
-        )
+    changes = HomeChanges(
+        controller,
+        home_store if home_store is not None else MemoryStore(),
+        on_home_replaced=use_home,
     )
+    controller.on_calibrated(calibration_saver(changes))
+    app.include_router(create_editor_router(changes, allowed_hosts))
+    app.include_router(create_calibration_router(controller, allowed_hosts))
 
     # Webbgränssnittet monteras sist så att API-vägarna ovan har företräde.
     if web_dir is not None:

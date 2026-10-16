@@ -2,6 +2,7 @@ import { LiveConnection, liveUrl, type ConnectionHandlers, type ConnectionStatus
 import { element } from "./dom";
 import { parkingSpot } from "./geometry";
 import type { ClientMessage, Floor, HomeMessage, StateMessage } from "./protocol";
+import { coreCalibrationApi, createCalibrationPanel, type CalibrationApi } from "./calibrationPanel";
 import { createCardsPanel } from "./cardsPanel";
 import { eventItems, shouldTurnOn, roomsNowItems, type RoomActions } from "./roomPanels";
 import { createSimulationPanel } from "./simulationPanel";
@@ -15,11 +16,13 @@ export interface Connection {
 export interface AppDependencies {
   createView: ViewFactory;
   connect(handlers: ConnectionHandlers): Connection;
+  calibration: CalibrationApi;
 }
 
 const defaultDependencies: AppDependencies = {
   createView: createKonvaView,
   connect: (handlers) => new LiveConnection(liveUrl(window.location), handlers),
+  calibration: coreCalibrationApi,
 };
 
 const STATUS_TEXT: Record<ConnectionStatus, string> = {
@@ -59,6 +62,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   );
 
   const cards = createCardsPanel((message) => connection.send(message));
+  const calibration = createCalibrationPanel(deps.calibration);
 
   root.replaceChildren(
     element("h1", {}, "Homecontrol – livevy"),
@@ -76,6 +80,7 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     simulation.element,
     element("h2", {}, "Just nu"),
     roomsNow,
+    calibration.element,
     element("h2", {}, "Varför hände det?"),
     events,
   );
@@ -83,6 +88,10 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
   const roomActions: RoomActions = {
     setLamp: (lampId, on) => connection.send({ type: "set_lamp", lamp_id: lampId, on }),
     resumeAutomation: (roomId) => connection.send({ type: "resume_automation", room_id: roomId }),
+    calibrate: (roomId) => {
+      calibration.open(roomId);
+      calibration.element.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+    },
   };
 
   let shownFloor: Floor | null = null;
@@ -111,6 +120,9 @@ export function mountApp(root: HTMLElement, deps: AppDependencies = defaultDepen
     if (shownFloor === null) {
       return;
     }
+    // Guiden visar kalibreringen, som inte ingår i jämförelsen nedan, och
+    // hoppar själv över att bygga om när inget har ändrats.
+    calibration.show(shownFloor, lastState?.calibration ?? null);
     const panels = JSON.stringify([shownFloor, lastState?.rooms, lastState?.lamps, lastState?.events]);
     if (panels === shownPanels) {
       return;

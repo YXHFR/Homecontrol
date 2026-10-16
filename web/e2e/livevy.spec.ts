@@ -63,3 +63,23 @@ test("ett klick på en lampa styr den för hand, och rummet visar manuellt läge
   await expect(kitchen).toHaveAttribute("data-manual", "false");
   await expect(page.locator(".events li").first()).toContainText("Automatiken i Kök slogs på igen för hand");
 });
+
+test("lampkalibreringen mäter hallens taklampa och visar dess ljus", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+  // Kalibreringen följer kärnans klocka, så i 60× tar den ungefär en sekund.
+  await page.getByRole("button", { name: "60×" }).click();
+
+  const hall = page.locator(".rooms-now li", { hasText: "Hall:" });
+  await hall.getByRole("button", { name: "Mät lampornas ljus" }).click();
+  const guide = page.getByRole("region", { name: "Lampkalibrering" });
+  await expect(guide.getByRole("heading")).toHaveText("Lampkalibrering: Hall");
+  await guide.getByRole("button", { name: "Starta kalibreringen" }).click();
+
+  await expect(guide).toContainText("Lampkalibreringen i Hall är klar", { timeout: 15_000 });
+  // Den virtuella taklampan sitter drygt två meter från hallens rumskort.
+  await expect(guide.locator("li")).toHaveText([/^Taklampa: 1\d(,\d)? lux$/]);
+  await expect(guide.getByRole("button", { name: "Kalibrera igen" })).toBeVisible();
+
+  await page.getByRole("button", { name: "1×" }).click();
+});
