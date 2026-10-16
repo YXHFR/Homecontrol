@@ -40,6 +40,8 @@ export interface Lamp {
   y: number;
   /** Lampan finns bara i simuleringen; ingen riktig lampa styrs av den. */
   virtual: boolean;
+  /** Hur mycket lampan lyser upp rummets ljussensor vid full styrka, i lux (lampkalibreringen). */
+  lux_contribution: number;
 }
 
 /** Ett rumskort på kartan, riktigt eller simulerat. Ett riktigt kort har kortets namn som id. */
@@ -175,6 +177,21 @@ export interface StateMessage {
   simulation: Simulation | null;
   /** De riktiga rumskorten, eller null om kärnan inte ansluter några. */
   cards: Card[] | null;
+  /** Lampkalibreringen som pågår eller den senaste, eller null om ingen har körts. */
+  calibration: Calibration | null;
+}
+
+/** Hur lampkalibreringen går (se core/src/homecontrol/calibration.py). */
+export interface Calibration {
+  room_id: string;
+  phase: "pågår" | "klar" | "avbruten";
+  /** Vad som händer just nu, varför kalibreringen avbröts eller vad den kom fram till. */
+  text: string;
+  /** Mätningen som pågår, från 1. */
+  step: number;
+  steps: number;
+  /** Varje lampas eget ljus vid sensorn i lux, när kalibreringen är klar. */
+  results: Record<string, number>;
 }
 
 export type ServerMessage = HomeMessage | StateMessage;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mountApp, startFloor, type AppDependencies, type Connection } from "./app";
 import type { ConnectionHandlers } from "./connection";
+import { CoreError } from "./homeApi";
 import {
   MAX_PERSONS,
   type Card,
@@ -34,7 +35,7 @@ const groundFloor: Floor = {
   level: 0,
   rooms: [rectangle("vardagsrum", "Vardagsrum")],
   nodes: [],
-  lamps: [{ id: "taklampa", name: "Taklampa", room_id: "vardagsrum", x: 2.5, y: 2, virtual: true }],
+  lamps: [{ id: "taklampa", name: "Taklampa", room_id: "vardagsrum", x: 2.5, y: 2, virtual: true, lux_contribution: 0 }],
 };
 
 const upstairs: Floor = {
@@ -44,7 +45,7 @@ const upstairs: Floor = {
   rooms: [rectangle("sovrum", "Sovrum")],
   nodes: [],
   lamps: [
-    { id: "sovrumslampa", name: "Sovrumslampa", room_id: "sovrum", x: 2.5, y: 2, virtual: true },
+    { id: "sovrumslampa", name: "Sovrumslampa", room_id: "sovrum", x: 2.5, y: 2, virtual: true, lux_contribution: 0 },
   ],
 };
 
@@ -82,6 +83,7 @@ function state(
     events: [],
     simulation,
     cards: null,
+    calibration: null,
   };
 }
 
@@ -113,6 +115,8 @@ function find<T extends Element>(root: Element, selector: string): T {
 
 function setup() {
   const sent: ClientMessage[] = [];
+  const calibrations: string[] = [];
+  let refusal: string | null = null;
   const shown: (Floor | StateMessage)[] = [];
   let handlers: ConnectionHandlers | undefined;
   let callbacks: LiveViewCallbacks | undefined;
@@ -129,6 +133,16 @@ function setup() {
       handlers = h;
       return { start: () => h.onStatus("open"), send: (m) => sent.push(m) };
     },
+    calibration: {
+      start: (roomId) => {
+        calibrations.push(`start ${roomId}`);
+        return refusal === null ? Promise.resolve() : Promise.reject(new CoreError(refusal));
+      },
+      cancel: () => {
+        calibrations.push("avbryt");
+        return Promise.resolve();
+      },
+    },
   };
   const root = document.createElement("main");
   document.body.replaceChildren(root);
@@ -136,7 +150,10 @@ function setup() {
   if (handlers === undefined || callbacks === undefined) {
     throw new Error("mountApp kopplade inte upp sig");
   }
-  return { root, sent, shown, handlers, callbacks };
+  const refuse = (text: string) => {
+    refusal = text;
+  };
+  return { root, sent, shown, handlers, callbacks, calibrations, refuse };
 }
 
 describe("mountApp", () => {
@@ -474,6 +491,87 @@ describe("mountApp", () => {
     handlers.onMessage(silent);
 
     expect(root.textContent).toContain("Taklampa: svarar inte");
+  });
+});
+
+describe("lampkalibreringen", () => {
+  const running = (step: number) => ({
+    room_id: "vardagsrum",
+    phase: "pågår" as const,
+    text: "Mäter ljuset från Taklampa …",
+    step,
+    steps: 3,
+    results: {},
+  });
+
+  it("öppnas från rummet, förklarar och startar mätningen i kärnan", () => {
+    const { root, handlers, calibrations } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false));
+    const panel = find<HTMLElement>(root, "section.calibration");
+    expect(panel.hidden).toBe(true);
+
+    find<HTMLButtonElement>(root, ".rooms-now button.calibrate").click();
+    expect(panel.hidden).toBe(false);
+    expect(text(root, "section.calibration h2")).toBe("Lampkalibrering: Vardagsrum");
+    expect(panel.textContent).toContain("helst när det är mörkt ute");
+    expect(panel.textContent).toContain("Taklampa: inte mätt än");
+
+    find<HTMLButtonElement>(root, "section.calibration button.start").click();
+    expect(calibrations).toEqual(["start vardagsrum"]);
+  });
+
+  it("visar hur mätningen går och kan avbryta den", () => {
+    const { root, handlers, calibrations } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage({ ...state(10, false), calibration: running(2) });
+
+    const panel = find<HTMLElement>(root, "section.calibration");
+    expect(panel.hidden).toBe(false);
+    expect(panel.textContent).toContain("Mätning 2 av 3: Mäter ljuset från Taklampa …");
+    expect(find<HTMLProgressElement>(root, "section.calibration progress").value).toBe(1);
+
+    find<HTMLButtonElement>(root, "section.calibration button.cancel").click();
+    expect(calibrations).toEqual(["avbryt"]);
+  });
+
+  it("visar lampornas uppmätta ljus och går att köra igen", () => {
+    const { root, handlers, calibrations } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage({ ...state(10, false), calibration: running(3) });
+    handlers.onMessage({
+      ...state(10, false),
+      calibration: {
+        ...running(3),
+        phase: "klar",
+        text: "Lampkalibreringen i Vardagsrum är klar.",
+        results: { taklampa: 20.5 },
+      },
+    });
+
+    const panel = find<HTMLElement>(root, "section.calibration");
+    expect(panel.textContent).toContain("Taklampa: 20,5 lux");
+    find<HTMLButtonElement>(root, "section.calibration button.start").click();
+    expect(calibrations).toEqual(["start vardagsrum"]);
+
+    find<HTMLButtonElement>(root, "section.calibration button.close").click();
+    expect(panel.hidden).toBe(true);
+  });
+
+  it("säger varför mätningen inte gick att starta", async () => {
+    const { root, handlers, refuse } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(null, false));
+    refuse("Ingen ljussensor har mätt ljuset i Vardagsrum.");
+
+    find<HTMLButtonElement>(root, ".rooms-now button.calibrate").click();
+    find<HTMLButtonElement>(root, "section.calibration button.start").click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(text(root, "section.calibration .problem")).toBe(
+      "Ingen ljussensor har mätt ljuset i Vardagsrum.",
+    );
   });
 });
 
