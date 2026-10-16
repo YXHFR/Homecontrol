@@ -111,6 +111,8 @@ def test_invalid_messages_are_ignored() -> None:
     with TestClient(application) as client, client.websocket_connect("/api/live") as ws:
         ws.receive_json()
         ws.receive_json()
+        ws.send_json({"type": "set_speed", "speed": 10})
+        receive_until(ws, lambda s: s["simulation"]["speed"] == 10)
         for bad in [
             '{"type": "add_person", "floor_id": "plan", "x": "NaN", "y": 0}',
             '{"type": "add_person", "x": 1, "y": 1}',
@@ -129,7 +131,7 @@ def test_invalid_messages_are_ignored() -> None:
         # Bara det sista, giltiga meddelandet har nått kärnan.
         state = receive_until(ws, lambda s: s["simulation"]["persons"])
         assert state["targets"] == [{"floor_id": FLOOR, "x": 1, "y": 1}]
-        assert state["simulation"]["speed"] == 1
+        assert state["simulation"]["speed"] == 10
         assert state["simulation"]["daylight"] == DEFAULT_DAYLIGHT_LUX
 
 

@@ -211,6 +211,18 @@ describe("mountApp", () => {
     ]);
   });
 
+  it("ger varje ny person en egen plats även när klicken kommer tätt", () => {
+    const { root, sent, handlers } = setup();
+    handlers.onMessage(home);
+    handlers.onMessage(state(10, false));
+    const add = find<HTMLButtonElement>(root, ".simulation .controls button");
+
+    add.click();
+    add.click();
+
+    expect(sent.map((m) => (m.type === "add_person" ? m.y : null))).toEqual([0.5, 1.5]);
+  });
+
   it("tar inte emot fler personer än kärnan tillåter", () => {
     const { root, handlers } = setup();
     handlers.onMessage(home);

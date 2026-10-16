@@ -224,7 +224,7 @@ class Simulation:
             self._notify()
 
     def set_speed(self, speed: Speed) -> None:
-        if speed not in SPEEDS:
+        if isinstance(speed, bool) or speed not in SPEEDS:
             raise ValueError(f"Tidsfarten ska vara en av {SPEEDS}, inte {speed}")
         if self._enabled:
             self._clock.set_speed(speed)

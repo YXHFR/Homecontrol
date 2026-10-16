@@ -132,6 +132,7 @@ class Controller:
 
     def _room_lux(self, room_id: str) -> float | None:
         by_source = self._lux.get(room_id)
+        # Källan som mätte senast ligger sist, eftersom den läggs in på nytt varje gång.
         return next(reversed(by_source.values()), None) if by_source else None
 
     def _all_targets(self) -> tuple[Target, ...]:

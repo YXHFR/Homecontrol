@@ -18,7 +18,7 @@ export function createSimulationPanel(
 ): SimulationPanel {
   const toggle = element("input", { type: "checkbox" });
   const addButton = element("button", { type: "button" }, "Lägg till person");
-  const full = element("span", { className: "status", hidden: true }, ` Högst ${MAX_PERSONS} personer.`);
+  const fullNotice = element("span", { className: "status", hidden: true }, ` Högst ${MAX_PERSONS} personer.`);
   const persons = element("ul", { className: "persons" });
   const daylight = element("input", { type: "range", min: "0", max: "300", step: "5" });
   const daylightValue = element("output", {}, "– lux");
@@ -41,7 +41,7 @@ export function createSimulationPanel(
       "Lägg till en låtsasperson och dra in den i ett rum med musen eller fingret. " +
         "När det är mörkt tänds lampan, och när rummet har varit tomt en stund släcks den.",
     ),
-    element("div", { className: "controls" }, addButton, full),
+    element("div", { className: "controls" }, addButton, fullNotice),
     persons,
     element("div", { className: "controls" }, element("label", {}, "Dagsljus ", daylight), " ", daylightValue),
     element("div", { className: "controls" }, element("span", {}, "Tidsfart "), speedPicker),
@@ -73,7 +73,7 @@ export function createSimulationPanel(
     );
     const isFull = simulation.persons.length >= MAX_PERSONS;
     addButton.disabled = isFull;
-    full.hidden = !isFull;
+    fullNotice.hidden = !isFull;
   };
 
   return {

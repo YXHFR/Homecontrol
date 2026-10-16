@@ -132,6 +132,8 @@ def test_only_the_offered_speeds_are_allowed() -> None:
 
     with pytest.raises(ValueError, match="Tidsfarten"):
         simulation.set_speed(1000)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="Tidsfarten"):
+        simulation.set_speed(True)  # type: ignore[arg-type]
 
 
 def test_faster_clock_continues_from_where_it_was() -> None:
