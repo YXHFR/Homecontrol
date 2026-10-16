@@ -152,7 +152,7 @@ jobs:
               MQTT_ZIGBEE2MQTT_PASSWORD ZIGBEE2MQTT_AUTH_TOKEN; do
             sed -i "s/^${name}=.*/${name}=$(openssl rand -hex 16)/" .env
           done
-          if grep -q byt-mig .env; then echo "Ett lösenord i .env.example fylls inte i här"; exit 1; fi
+          if grep byt-mig .env; then echo "Raden ovan fylls inte i här"; exit 1; fi
       - name: Starta alla tjänster
         run: docker compose up --detach --build --wait --wait-timeout 300
       - name: Kontrollera kärnan och webbgränssnittet
@@ -165,7 +165,8 @@ jobs:
           docker compose exec -T core python - <<'EOF'
           import psycopg
 
-          with psycopg.connect("host=/var/run/postgresql dbname=homecontrol user=homecontrol_core") as conn:
+          core = "host=/var/run/postgresql dbname=homecontrol user=homecontrol_core"
+          with psycopg.connect(core) as conn:
               row = conn.execute(
                   "SELECT current_user, rolsuper, rolcreaterole, rolcreatedb"
                   " FROM pg_roles WHERE rolname = current_user"
@@ -183,18 +184,23 @@ jobs:
         run: |
           set -a; . ./.env; set +a
           docker compose exec -T -e CORE="$MQTT_CORE_PASSWORD" -e Z2M="$MQTT_ZIGBEE2MQTT_PASSWORD" mosquitto sh -eu <<'EOF'
-          # Kärnan läser det Zigbee2MQTT skriver.
-          mosquitto_sub -h 127.0.0.1 -u homecontrol -P "$CORE" -t zigbee2mqtt/ci -C 1 -W 10 > /tmp/fick &
-          sleep 2
-          mosquitto_pub -h 127.0.0.1 -u zigbee2mqtt -P "$Z2M" -t zigbee2mqtt/ci -m hej
-          wait
-          test "$(cat /tmp/fick)" = hej
+          core() { mosquitto_sub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -C 1 -W 3 -t "$1"; }
+          z2m() { mosquitto_sub -h 127.0.0.1 -u zigbee2mqtt -P "$Z2M" -C 1 -W 3 -t "$1"; }
+          denied() { if "$@"; then echo "släpptes igenom: $*"; exit 1; fi; }
+          # Meddelandena sparas (-r), så att ordningen mellan pub och sub inte spelar roll.
+          mosquitto_pub -h 127.0.0.1 -u zigbee2mqtt -P "$Z2M" -r -t zigbee2mqtt/ci -m hej
+          mosquitto_pub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -r -t zigbee2mqtt/ci/set -m tand
+          mosquitto_pub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -r \
+            -t zigbee2mqtt/bridge/request/permit_join -m '{"time": 254}'
+          # Kärnan läser det Zigbee2MQTT skriver, och Zigbee2MQTT tar emot kärnans kommandon.
+          test "$(core zigbee2mqtt/ci)" = hej
+          test "$(z2m zigbee2mqtt/ci/set)" = tand
+          # Men kärnan får inte släppa in nya enheter.
+          denied z2m zigbee2mqtt/bridge/request/permit_join
           # Zigbee2MQTT får inte läsa brokerns egna ämnen.
-          if mosquitto_sub -h 127.0.0.1 -u zigbee2mqtt -P "$Z2M" -t '$SYS/broker/uptime' -C 1 -W 3; then
-            echo "zigbee2mqtt fick läsa \$SYS"; exit 1
-          fi
-          # Utan lösenord kommer ingen in.
-          if mosquitto_sub -h 127.0.0.1 -t zigbee2mqtt/# -C 1 -W 3; then exit 1; fi
+          denied z2m '$SYS/broker/uptime'
+          # Utan lösenord kommer ingen in. HOME pekar bort från hälsokontrollens inloggning.
+          denied env HOME=/tmp mosquitto_sub -h 127.0.0.1 -t zigbee2mqtt/# -C 1 -W 3
           EOF
       - name: Exportera hemmet från databasen och importera det igen
         run: |

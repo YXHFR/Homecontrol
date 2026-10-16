@@ -624,7 +624,7 @@ Blir en del angripen eller går fel kommer den inte åt resten.
 | --- | --- | --- |
 | `POSTGRES_PASSWORD` | Databasens ägare (`homecontrol`) | Allt i databasen. Används bara av `db-setup`, som körs en kort stund vid varje `docker compose up` och sedan avslutas. |
 | `CORE_DATABASE_PASSWORD` | Kärnan (databasrollen `homecontrol_core`) | Läsa och skriva hemmet, historiken och händelseloggen, men inte skapa, ändra eller ta bort tabeller. |
-| `MQTT_CORE_PASSWORD` | Kärnan (MQTT-användaren `homecontrol`) | Läsa och skriva Zigbee2MQTT:s ämnen (`zigbee2mqtt/...`). |
+| `MQTT_CORE_PASSWORD` | Kärnan (MQTT-användaren `homecontrol_core`) | Läsa allt från Zigbee2MQTT och tända, släcka och gruppera lamporna. Inte släppa in eller ta bort enheter eller ändra Zigbee2MQTT:s inställningar. |
 | `MQTT_ZIGBEE2MQTT_PASSWORD` | Zigbee2MQTT (MQTT-användaren `zigbee2mqtt`) | Läsa och skriva sina egna ämnen (`zigbee2mqtt/...`). |
 | `ZIGBEE2MQTT_AUTH_TOKEN` | Du, i webbläsaren | Logga in på Zigbee2MQTT:s webbsida. |
 
@@ -635,6 +635,10 @@ Blir en del angripen eller går fel kommer den inte åt resten.
   från nätverket.
 - **MQTT:** vilka ämnen varje användare får läsa och skriva står i
   `mosquitto/acl`. Allt annat är förbjudet, och utan lösenord kommer ingen in.
+  Mosquittos hälsokontroll har en egen användare med ett lösenord som
+  slumpas fram vid varje start.
+- Kärnan kan bara styra lampor vars namn i Zigbee2MQTT har högst två
+  snedstreck (`/`). Det förvalda namnet (lampans adress) har inga.
 
 Kärnan svarar bara när den nås på de adresser och namn den känner till
 (`localhost`, IP-adresser och `ALLOWED_HOSTS`), och inte till andra
@@ -656,10 +660,11 @@ docker compose logs    # visar vad tjänsterna skriver, leta efter fel
 Ett vanligt fel är att `.env` saknas eller att ett värde är tomt. Då säger
 `docker compose up` vilken inställning som saknas.
 
-Säger `docker compose logs db-setup` att lösenordet är fel för användaren
-`homecontrol`, är `POSTGRES_PASSWORD` i `.env` inte samma som när databasen
-skapades första gången. Sätt tillbaka det lösenordet. Databasens ägare får
-inte samma lösenord som något annat i `.env`.
+Står kärnan inte som "Up", titta i `docker compose logs db-setup`. Står
+det `password authentication failed for user "homecontrol"` är
+`POSTGRES_PASSWORD` i `.env` inte samma som när databasen skapades första
+gången; databasen minns det första lösenordet. Sätt tillbaka det. Ge inte
+`POSTGRES_PASSWORD` samma lösenord som någon annan rad i `.env`.
 
 Syns inte en ny lampa under **Placera** i kartredigeraren? Kontrollera i
 Zigbee2MQTT att den är ihopparad och klar (inte "interviewing"). Står en lampa
@@ -704,13 +709,16 @@ planlösning.
 
 Säger `docker compose up -d` att en inställning saknas, har den nya
 versionen fått en ny inställning. Kopiera raden från `.env.example` till
-`.env` och fyll i ett nytt lösenord med `openssl rand -hex 24`, som i
-**Steg 3**. Från och med versionen där kärnan och Zigbee2MQTT fick egna
-lösenord (se **Lösenorden och vem som får vad**) gäller det
+`.env` och fyll i ett eget lösenord på varje ny rad med
+`openssl rand -hex 24`, som i **Steg 3**.
+
+Kommer du från en version där kärnan och Zigbee2MQTT delade på
+`MQTT_USER` och `MQTT_PASSWORD`, behöver du lägga till
 `CORE_DATABASE_PASSWORD`, `MQTT_CORE_PASSWORD` och
-`MQTT_ZIGBEE2MQTT_PASSWORD`. De gamla raderna `MQTT_USER` och
-`MQTT_PASSWORD` används inte längre och kan tas bort. Databasen behåller
-allt; kärnans nya roll skapas när den startar.
+`MQTT_ZIGBEE2MQTT_PASSWORD` (se **Lösenorden och vem som får vad**).
+`MQTT_USER` och `MQTT_PASSWORD` används inte längre och kan tas bort.
+Databasen behåller allt; kärnans nya roll skapas av `db-setup` vid nästa
+`docker compose up -d`.
 
 Stoppa Homecontrol med `docker compose down`. Inget sparat försvinner;
 `docker compose up -d` startar allt igen.

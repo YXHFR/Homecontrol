@@ -38,7 +38,10 @@ _MIGRATION_NAME = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 _MIGRATION_LOCK = 0x486F6D65
 
 CORE_ROLE = "homecontrol_core"
-"""Rollen som kärnan ansluter med i Docker Compose. Den är ingen superanvändare."""
+"""Rollen som kärnan ansluter med i Docker Compose. Den är ingen superanvändare.
+
+Samma namn står i kärnans HOMECONTROL_DATABASE i compose.yaml.
+"""
 
 
 class SchemaOutdatedError(Exception):
@@ -95,7 +98,7 @@ def check_schema(conn: psycopg.Connection) -> None:
         )
 
 
-def grant_core_role(conn: psycopg.Connection, password: str, role: str = CORE_ROLE) -> None:
+def grant_core_role(conn: psycopg.Connection, password: str) -> None:
     """Skapar kärnans roll om den saknas och ger den rätt att läsa och skriva tabellerna.
 
     Rollen får inte skapa, ändra eller ta bort tabeller och är ingen
@@ -104,6 +107,7 @@ def grant_core_role(conn: psycopg.Connection, password: str, role: str = CORE_RO
     Anropas av databasens ägare, efter `migrate`, så att rättigheterna
     också gäller nya tabeller.
     """
+    role = CORE_ROLE
     name = sql.Identifier(role)
     hashed = conn.pgconn.encrypt_password(password.encode(), role.encode(), b"scram-sha-256")
     with conn.transaction():

@@ -46,6 +46,8 @@ class Settings:
     Med Docker Compose görs det i stället av `homecontrol förbered-databasen`
     före kärnan, och kärnan ansluter med en roll som bara får läsa och skriva.
     """
+    core_database_password: str | None = field(default=None, repr=False)
+    """Lösenordet som kärnans databasroll får av `homecontrol förbered-databasen`."""
     esphome_secret: str | None = field(default=None, repr=False)
     """Hemligheten som rumskortens nycklar räknas fram ur (se esphome.py).
 
@@ -103,6 +105,7 @@ class Settings:
                 minimum=timedelta(days=1),
                 default=None,
             ),
+            core_database_password=os.environ.get("HOMECONTROL_CORE_DATABASE_PASSWORD") or None,
             esphome_secret=os.environ.get("HOMECONTROL_ESPHOME_SECRET", "").strip() or None,
             mqtt=_mqtt_from_env(),
         )

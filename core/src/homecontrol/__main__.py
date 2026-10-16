@@ -66,9 +66,7 @@ def main(argv: list[str] | None = None) -> None:
     if settings.database is None:
         sys.exit("HOMECONTROL_DATABASE är inte satt, så det finns inget sparat hem.")
     if args.command == "förbered-databasen":
-        prepare_database(
-            settings.database, settings, os.environ.get("HOMECONTROL_CORE_DATABASE_PASSWORD", "")
-        )
+        prepare_database_for_core(settings.database, settings)
     elif args.command == "exportera":
         export_home(settings.database, args.fil, prepare=settings.prepare_database)
     else:
@@ -107,14 +105,18 @@ def serve(settings: Settings) -> None:
     )
 
 
-def prepare_database(database: str, settings: Settings, core_password: str) -> None:
-    """Skapar och uppdaterar tabellerna, ställer in historiken och ger kärnans roll åtkomst."""
-    if not core_password:
+def prepare_database_for_core(database: str, settings: Settings) -> None:
+    """Skapar och uppdaterar tabellerna, ställer in historiken och ger kärnans roll åtkomst.
+
+    Körs som databasens ägare. Rollen får rättigheter sist, så att de också
+    gäller tabeller som just skapades.
+    """
+    if settings.core_database_password is None:
         sys.exit("HOMECONTROL_CORE_DATABASE_PASSWORD är inte satt, se .env.example.")
     with store.connect(database) as conn:
         store.migrate(conn)
         _configure_history(conn, settings)
-        store.grant_core_role(conn, core_password)
+        store.grant_core_role(conn, settings.core_database_password)
     logger.info("Databasen är klar för kärnan (rollen %s)", store.CORE_ROLE)
 
 
@@ -180,7 +182,11 @@ def load_or_seed_home(settings: Settings) -> Home:
 
 
 def prepare_history(settings: Settings) -> history.History | None:
-    """Ställer in hur länge historiken sparas. Utan databas sparas ingen historik."""
+    """Skrivaren av historiken. Utan databas sparas ingen historik.
+
+    Får kärnan förbereda databasen ställs också in hur länge historiken sparas;
+    annars har `förbered-databasen` redan gjort det.
+    """
     if settings.database is None:
         return None
     if settings.prepare_database:
