@@ -114,7 +114,7 @@ engelska och ändras inte, så att kärnan kan lita på dem.
 
 | Namn | Vad |
 | --- | --- |
-| Radar Target 1–3 X / Y | Läge i mm, cirka 10 Hz. Med LD2461 också mål 4 och 5 |
+| Radar Target 1–3 X / Y | Läge i mm, cirka 10 Hz. Med LD2461 mål 1–5, i steg om 100 mm (enligt komponentens ramformat, inte provat) |
 | Radar Target 1–3 Speed | Fart i mm/s. Finns inte med LD2461 |
 | Radar Target Count | Antal mål |
 | Radar Presence | Någon syns på radarn |
@@ -132,8 +132,9 @@ engelska och ändras inte, så att kärnan kan lita på dem.
 | Uptime, Free Heap, Loop Time | Hälsa (drifttid, ledigt minne, looptid) |
 
 Radarns värden skickas utan ESPHome:s vanliga strypning till 1 gång per
-sekund. Med LD2450 skickas ett värde bara när det ändras. Med LD2461 skickas
-alla mål 10 gånger per sekund.
+sekund. Med LD2450 skickas ett värde bara när det ändras. Med LD2461 skickar
+firmware alla mål 10 gånger per sekund (så är det inställt). Hur ofta LD2461
+själv mäter är inte provat.
 
 Kärnan ser på entiteterna vilken radar kortet har: bara kortet med LD2461
 har `Radar Target 4` och `5`.
@@ -165,13 +166,16 @@ personer, och hur noga den mäter, är tillverkarens uppgifter. Inget av det
   LD2450, eftersom LD2461:s räckvidd inte är provad.
 
 **Att prova med riktig hårdvara** innan LD2461 används på riktigt: gör
-[hårdvarutestet](#hårdvarutest-ld2450-och-espectre-på-samma-kort-i-24-h)
+[hårdvarutestet](#hårdvarutest-radarn-och-espectre-på-samma-kort-i-24-h)
 med LD2461, och kontrollera också att
 
 - `Radar Target 1 X` och `Y` följer en person som går runt, och att
   avståndet stämmer med ett måttband,
 - 4 och 5 personer i rummet ger 4 och 5 mål,
-- `Radar Online` är på hela tiden och `Radar Firmware` visar en version.
+- `Radar Online` är på hela tiden, även när rummet är tomt, och
+  `Radar Firmware` visar en version. Firmware håller `Radar Online` på bara
+  när en hel ram med mål kommer från radarn. Skickar LD2461 inga ramar när
+  ingen syns blir rummet okänt, och då behöver det ändras.
 
 ## Kända begränsningar
 
@@ -202,7 +206,7 @@ med LD2461, och kontrollera också att
   [`requirements.in`](requirements.in) (hela kedjan, med hashar, i
   `requirements.txt`).
 
-## Hårdvarutest: LD2450 och ESPectre på samma kort i 24 h
+## Hårdvarutest: radarn och ESPectre på samma kort i 24 h
 
 Radarn och CSI delar processor och avbrott. Testet visar att de fungerar
 tillsammans över tid. Gör det innan ett nytt kort, en ny ESPHome-version
@@ -210,9 +214,9 @@ eller en ny ESPectre-version används på riktigt.
 
 **Förberedelse**
 
-1. Installera firmware på ett kort med LD2450 och BH1750 inkopplade och
+1. Installera firmware på ett kort med radarn (LD2450 eller LD2461) och BH1750 inkopplade och
    koppla det till kärnan (eller till `esphome logs`).
-2. Kontrollera att `Radar Firmware` inte är 2.14.x.
+2. Med LD2450: kontrollera att `Radar Firmware` inte är 2.14.x.
 3. Låt kortet stå på sin vanliga plats i rummet, på vanlig strömkälla.
 
 **Under 24 timmar**
@@ -229,12 +233,14 @@ eller en ny ESPectre-version används på riktigt.
 | `CSI Motion` | Slår till när någon går i rummet, släpper när rummet är tomt |
 | `Illuminance` | Följer dagsljus och lampor |
 | `WiFi Signal` | Stabil, bättre än −70 dBm |
-| Loggen | Inga upprepade UART-fel från LD2450, inga varningar om full buffert |
+| Loggen | Inga upprepade UART-fel från radarn, inga varningar om full buffert |
 
 **Så här mäts radarns takt:** gå runt i rummet i en minut och räkna hur
 många gånger `Radar Target 1 X` uppdateras (i kärnans logg eller med
-`esphome logs`). Omkring 600 betyder 10 Hz.
+`esphome logs`). Omkring 600 betyder 10 Hz. Med LD2461 skickar firmware
+målen 10 gånger per sekund oavsett, så räkna i stället hur ofta läget
+ändras när du går.
 
 **Rapportera** resultatet i ett ärende: kortmodell, firmware-versioner
-(Homecontrol, ESPHome, ESPectre, LD2450), tabellen ovan och eventuella
+(Homecontrol, ESPHome, ESPectre, radarn), tabellen ovan och eventuella
 avvikelser.

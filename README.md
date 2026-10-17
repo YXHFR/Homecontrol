@@ -1,8 +1,8 @@
 # Homecontrol
 
 Närvarostyrd belysning för hemmet. Radar (LD2450, eller LD2461 som
-alternativ) och Wi-Fi-CSI på ESP32 känner av var någon befinner sig, och lamporna (IKEA via Zigbee2MQTT) tänds
-och släcks efter det.
+alternativ) och Wi-Fi-CSI på ESP32 känner av var någon befinner sig, och
+lamporna (IKEA via Zigbee2MQTT) tänds och släcks efter det.
 
 > Projektet är i ett tidigt skede men fungerar från början till slut: du
 > ritar hemmet ovanpå en planritning, rumskorten (ESP32) ser var personerna
