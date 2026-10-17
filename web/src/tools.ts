@@ -9,7 +9,7 @@ import type { Point } from "./protocol";
 
 /**
  * Verktygen som placerar ut något med ett klick heter som det de placerar.
- * Med "zone" ritas en zon med fri form, av den sort som kartredigeraren har valt.
+ * Med "zone" ritas en zon med fri form, av den sort som har valts i verktygsraden.
  */
 export type ToolName = "select" | "polygon" | "rectangle" | "scale" | "walls" | "zone" | ItemKind;
 

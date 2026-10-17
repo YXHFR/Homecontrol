@@ -1,5 +1,5 @@
 /**
- * Hemmet som kartredigeraren läser och sparar: samma form som exportfilen
+ * Hemmet som sidan läser och sparar: samma form som exportfilen
  * (se core/src/homecontrol/homefile.py och home.py).
  *
  * Det redigeraren inte själv ändrar (till exempel nodernas förmågor) följer

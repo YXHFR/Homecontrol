@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   atMeters,
   groundFloor,
+  mapCanvas,
   onMap,
   openEditor,
   png,
@@ -12,15 +13,15 @@ import {
 test("ett rum som dras ut som rektangel sparas, byter namn, flyttas och tas bort", async ({ page }) => {
   await openEditor(page);
   const before = groundFloor(await savedHome(page)).rooms.length;
-  const map = page.locator(".editor-stage canvas").first();
+  const map = mapCanvas(page);
 
   await page.getByRole("button", { name: "Rum, rektangel" }).click();
   await expect(page.locator(".instruction")).toContainText("dra till hörnet snett emot");
-  // Zooma ut så att det finns tom yta bredvid exempelhemmet.
-  await page.getByRole("button", { name: "−" }).click();
-  await page.getByRole("button", { name: "−" }).click();
-  const from = await onMap(map, 0.82, 0.8);
-  const to = await onMap(map, 0.96, 0.96);
+  // Zooma ut så att det finns tom yta bredvid exempelhemmet, ovanför kartans knappar.
+  await page.getByRole("button", { name: "Zooma ut" }).click();
+  await page.getByRole("button", { name: "Zooma ut" }).click();
+  const from = await onMap(map, 0.82, 0.7);
+  const to = await onMap(map, 0.96, 0.88);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 5 });
@@ -52,7 +53,7 @@ test("ett rum som dras ut som rektangel sparas, byter namn, flyttas och tas bort
   const outside = await onMap(map, 0.5, 0.03);
   await page.mouse.click(outside.x, outside.y);
   await expect(page.locator(".selection")).toContainText("Inget valt");
-  const middle = await onMap(map, 0.89, 0.88);
+  const middle = await onMap(map, 0.89, 0.8);
   await page.mouse.click(middle.x, middle.y);
   await expect(page.getByRole("textbox", { name: "Namn" })).toHaveValue("Förråd");
 
@@ -73,20 +74,20 @@ test("ett rum som dras ut som rektangel sparas, byter namn, flyttas och tas bort
 test("ett rum med fri form stängs genom att klicka på första hörnet", async ({ page }) => {
   await openEditor(page);
   const before = groundFloor(await savedHome(page)).rooms.length;
-  const map = page.locator(".editor-stage canvas").first();
-  await page.getByRole("button", { name: "−" }).click();
-  await page.getByRole("button", { name: "−" }).click();
+  const map = mapCanvas(page);
+  await page.getByRole("button", { name: "Zooma ut" }).click();
+  await page.getByRole("button", { name: "Zooma ut" }).click();
 
   await page.getByRole("button", { name: "Rum, fri form" }).click();
   await expect(page.locator(".instruction")).toContainText("klicka på det första hörnet");
   // Ett L-format rum.
   const corners: [number, number][] = [
-    [0.8, 0.8],
-    [0.96, 0.8],
-    [0.96, 0.96],
-    [0.88, 0.96],
-    [0.88, 0.88],
-    [0.8, 0.88],
+    [0.8, 0.7],
+    [0.96, 0.7],
+    [0.96, 0.86],
+    [0.88, 0.86],
+    [0.88, 0.78],
+    [0.8, 0.78],
   ];
   for (const [fx, fy] of corners) {
     const point = await onMap(map, fx, fy);
@@ -106,7 +107,7 @@ test("ett rum med fri form stängs genom att klicka på första hörnet", async 
 
 test("en bild av planritningen laddas upp och skalas med två punkter", async ({ page }) => {
   await openEditor(page);
-  const map = page.locator(".editor-stage canvas").first();
+  const map = mapCanvas(page);
 
   await page.locator('input[type="file"][accept^="image"]').setInputFiles({
     name: "planritning.png",
@@ -150,7 +151,7 @@ test("ett rumskort placeras i ett rum, vrids med knappar och ring, får höjd oc
   const floor = groundFloor(await savedHome(page));
   const room = floor.rooms[0];
   const nodesBefore = room.nodes?.length ?? 0;
-  const map = page.locator(".editor-stage canvas").first();
+  const map = mapCanvas(page);
   // En bit in från rummets övre vänstra hörn, där inget annat är placerat.
   const [left, top] = room.polygon[0];
   const spot = { x: left + 1, y: top + 1 };

@@ -1,17 +1,11 @@
 /**
- * Hur livevyn visar spåren och läget i rummen. Modulen beror inte på Konva,
+ * Hur kartan visar spåren och läget i rummen. Modulen beror inte på Konva,
  * så att den går att pröva utan en rityta.
  */
 import type { Occupancy, StateMessage, Track } from "./protocol";
 
-export const TRACK_COLOR = "#7a1f1f";
-
-/** Golvets färg i ett rum, efter läget i rummet. */
-export const ROOM_FILLS: Record<Occupancy, string> = {
-  upptaget: "#e3eefb",
-  tomt: "#f4f1ea",
-  okänt: "#dcdcdc",
-};
+/** Spårens färg när ingen annan anges (se --person i styles.css). */
+export const TRACK_COLOR = "#09090b";
 
 export interface TrackStyle {
   fill?: string;
@@ -25,10 +19,8 @@ export interface TrackStyle {
  * men som kärnan håller kvar är en streckad ring, så att det syns att
  * kärnan minns personen fast ingen ser den just nu.
  */
-export function trackStyle(track: Track): TrackStyle {
-  return track.held
-    ? { stroke: TRACK_COLOR, strokeWidth: 2, dash: [3, 3] }
-    : { fill: TRACK_COLOR };
+export function trackStyle(track: Track, color = TRACK_COLOR): TrackStyle {
+  return track.held ? { stroke: color, strokeWidth: 2, dash: [3, 3] } : { fill: color };
 }
 
 /** Spåren på en våning. */
@@ -36,9 +28,9 @@ export function tracksOnFloor(state: StateMessage | null, floorId: string): Trac
   return (state?.tracks ?? []).filter((track) => track.floor_id === floorId);
 }
 
-/** Läget i ett rum i klartext, för panelen "Just nu". */
+/** Läget i ett rum i klartext, för rummets kort. */
 export const OCCUPANCY_TEXT: Record<Occupancy, string> = {
-  upptaget: "upptaget",
-  tomt: "tomt",
-  okänt: "okänt – en sensor svarar inte",
+  upptaget: "Upptaget",
+  tomt: "Tomt",
+  okänt: "Okänt läge – en sensor svarar inte",
 };

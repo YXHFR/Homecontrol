@@ -7,8 +7,9 @@ lamporna (IKEA via Zigbee2MQTT) tänds och släcks efter det.
 > Projektet är i ett tidigt skede men fungerar från början till slut: du
 > ritar hemmet ovanpå en planritning, rumskorten (ESP32) ser var personerna
 > är, och kärnan tänder, dimrar och släcker Zigbee-lamporna efter ljusregler
-> som går att ändra per rum. Livevyn visar prickar på kartan och förklarar
-> under **Varför hände det?** varför lamporna gjorde som de gjorde. Utan
+> som går att ändra per rum. Webbsidan visar prickar på kartan, vad som
+> inte svarar och varför lamporna är som de är, och där ritar du också
+> rummet. Utan
 > hårdvara kan allt provas i simuleringsläget, med låtsaspersoner som du
 > drar runt i hemmet.
 
@@ -28,8 +29,8 @@ nedskalade tills ett rum fungerar hela vägen:
 | Dator som hjärna | 1 | En gammal laptop eller dator som står på räcker. |
 
 Webbinstalleraren bygger därför bara firmware för rummet i
-[`firmware/rooms.txt`](firmware/rooms.txt). Rita bara det rummet i
-kartredigeraren (steg 4). Fler rum, Wi-Fi-CSI som andra källa och egna
+[`firmware/rooms.txt`](firmware/rooms.txt). Rita bara det rummet
+(steg 4). Fler rum, Wi-Fi-CSI som andra källa och egna
 kretskort läggs till igen när det här fungerar: lägg då till rummen i
 `firmware/rooms.txt` och följ resten av guiden som den står.
 
@@ -45,11 +46,11 @@ terminalfönster och gör resten i webbläsaren. Stegen i ordning:
 1. [Köp hårdvaran](#steg-1-köp-hårdvaran)
 2. [Gör i ordning datorn](#steg-2-gör-i-ordning-datorn)
 3. [Starta Homecontrol](#steg-3-starta-homecontrol)
-4. [Rita hemmet i kartredigeraren](#steg-4-rita-hemmet-i-kartredigeraren)
+4. [Rita hemmet](#steg-4-rita-hemmet)
 5. [Koppla in Zigbee-lamporna](#steg-5-koppla-in-zigbee-lamporna)
 6. [Installera rumskorten](#steg-6-installera-rumskorten)
 7. [Kalibrera lamporna](#steg-7-kalibrera-lamporna)
-8. [Nå livevyn utanför hemmet med Tailscale](#steg-8-nå-livevyn-utanför-hemmet-med-tailscale)
+8. [Nå Homecontrol utanför hemmet med Tailscale](#steg-8-nå-homecontrol-utanför-hemmet-med-tailscale)
 
 Vill du först bara prova? Gör steg 2–4. Utan rumskort och lampor startar
 Homecontrol i simuleringsläget, där du drar låtsaspersoner runt i hemmet
@@ -88,7 +89,7 @@ Hur delarna kopplas ihop står i [firmware/README.md](firmware/README.md#kopplin
 
 Du behöver också en dator med Chrome eller Edge för att installera
 rumskorten (steg 6), och ett gratis [Tailscale](https://tailscale.com/)-konto
-om du vill nå livevyn när du inte är hemma (steg 8).
+om du vill nå Homecontrol när du inte är hemma (steg 8).
 
 ### Steg 2: Gör i ordning datorn
 
@@ -170,8 +171,7 @@ halvtimme på en Raspberry Pi. Därefter finns:
 
 | Vad                                   | Adress                       |
 | ------------------------------------- | ---------------------------- |
-| Homecontrol (livevyn)                 | http://localhost:8000        |
-| Kartredigeraren                       | http://localhost:8000/#redigera |
+| Homecontrol (sidan med kartan)        | http://localhost:8000        |
 | Sida som visar att kärnan är igång    | http://localhost:8000/health |
 | Zigbee2MQTT (lösenord: `ZIGBEE2MQTT_AUTH_TOKEN` i `.env`) | http://localhost:8080 |
 
@@ -179,17 +179,25 @@ Surfar du från en annan enhet, byt `localhost` mot datorns adress i
 hemnätet. Den hittar du till exempel i routerns lista över anslutna enheter.
 Använder du ett namn i stället för adressen, till exempel
 `homecontrol.local`, skriv in det som `ALLOWED_HOSTS` i `.env`. Annars
-öppnas sidan, men livevyn tappar genast anslutningen.
+öppnas sidan, men den tappar genast anslutningen till kärnan.
 
 Homecontrol startar av sig själv igen efter ett strömavbrott och behöver
 inte internet för att styra lamporna. Läs **Vem som når Homecontrol** längre
 ned innan du släpper in fler i nätverket.
 
-### Steg 4: Rita hemmet i kartredigeraren
+### Steg 4: Rita hemmet
 
-Öppna **Kartredigerare** högst upp på sidan. Verktygen finns till vänster,
-kartan i mitten och en instruktion för det verktyg du har valt till höger. På
-mobilen ligger verktygen ovanför kartan och instruktionen under.
+Homecontrol är en enda sida. Överst står en hälsorad, kartan över rummet tar
+största ytan och det du trycker på visar sitt kort: till höger på datorn och
+som ett ark längst ned på mobilen (dra i handtaget för att göra det högre).
+Se **Sidan** nedan för hur den används till vardags.
+
+Tryck på **Ändra rummet** längst ned i rummets kort. Toppraden visar då
+**Ändrar rummet** och **Klar**, och ritverktygen kommer fram: till vänster om
+kartan på datorn och längst ned på kartan på mobilen. Instruktionen för det
+verktyg du har valt och egenskaperna för det som är valt står i kortet.
+Väggar, dörrar och zoner ritas lättast på en dator. Tryck **Klar** när du är
+färdig.
 
 1. **Ladda upp bild** av planritningen, till exempel från mäklarannonsen.
    Webbläsaren förminskar bilden och rensar bort extra uppgifter i filen (som
@@ -254,13 +262,14 @@ inställningar att den inte laddar upp skanningen till en egen molntjänst.
 3. Exportera skanningen som **JSON** (ibland kallat RoomPlan-JSON eller
    CapturedRoom), inte som USDZ eller bild. Ge gärna filen ett namn med
    ordet `skanning`, till exempel `skanning.json`. Flytta den till datorn med
-   till exempel AirDrop, e-post eller appen Filer, eller öppna kartredigeraren
-   i telefonens webbläsare (samma adress som på datorn) och välj filen där.
+   till exempel AirDrop, e-post eller appen Filer, eller öppna Homecontrol
+   i telefonens webbläsare (samma adress som på datorn), tryck **Ändra
+   rummet** och välj filen där.
 4. Tryck **Läs in iPhone-skanning** under **Planritning** och välj filen.
    Själva filen skickas inte någonstans. Homecontrol sparar bara rummen och
    möblerna som du läser in.
-5. Kartan visar hur skanningen blir. Bredvid kartan (under den på mobilen)
-   står hur många rum, dörröppningar, fönster och möbler som lästes, och på
+5. Kartan visar hur skanningen blir. I kortet bredvid kartan (under den på
+   mobilen) står hur många rum, dörröppningar, fönster och möbler som lästes, och på
    svenska vad som inte gick att läsa. Skanningen rätas upp så att väggarna
    går rakt. Tryck **Vrid 90°** tills den ligger som du vill och flytta den
    med **Från vänster** och **Från toppen** (meter).
@@ -279,15 +288,56 @@ Vill du prova först finns en påhittad skanning av en tvåa i
 ut, så lägg den inte i Homecontrols kod på GitHub eller någon annanstans på
 nätet.
 
-Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
+Bilden och rummen hör till våningen som visas. Sidan visar en våning:
+entréplanet (`level` 0), eller den första om inget plan är 0. Läses en
+skanning in som en ny våning visas den nya våningen tills sidan laddas om.
 Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
 och Enter stänger rummet eller zonen.
 
-Allt sparas direkt, och livevyn visar ändringen utan omstart. Har du
-redigeraren öppen i två fönster och ändrar i båda, visar det ena fönstret
+Allt sparas direkt, och kärnan använder ändringen utan omstart. Har du
+sidan öppen i två fönster och ändrar i båda, visar det ena fönstret
 det andras ändring i stället för att skriva över den. Under
-**Hemmet** står hur många rum, zoner, rumskort, routrar och lampor hemmet
-har.
+**Hemmet** i kortet står hur många rum, zoner, rumskort, routrar och lampor
+hemmet har.
+
+#### Sidan
+
+- **Hälsoraden** överst sammanfattar läget i en mening, till exempel "Allt
+  fungerar", "Rumskortet svarar inte", "Zigbee-stickan svarar inte",
+  "Databasen svarar inte" eller "+1 ny enhet". Tryck på den, så visar kartan
+  enheten det gäller och dess kort öppnas. Ett rumskort eller en lampa som
+  inte svarar har också en röd prick på kartan.
+- **Kartan** visar rummet med väggar, dörrar, möbler, zoner, rumskort med
+  radarns synfält, lampor (tänd lampa i gult), routrar (dämpade, eftersom
+  Wi-Fi-avkänningen vilar) och prickar för personerna. Dra på en tom del av
+  kartan för att se en annan del och zooma med två fingrar, mushjulet eller
+  knapparna **+** och **−**. **⌖** visar hela rummet igen.
+- **Rummets kort** visas när inget är valt: om rummet är upptaget eller
+  tomt, ljusnivån i lux, en PÅ/AV-knapp per lampa, om automatiken är på
+  (eller **Automatik igen** efter manuell styrning), varför lamporna är som
+  de är, enheterna i rummet, **Ljusregler**, **Mät lampornas ljus** och
+  **Ändra rummet**.
+- **Ett tryck på en sak på kartan** öppnar dess kort. Ett tryck på en lampa
+  tänder eller släcker den inte; det gör den stora PÅ/AV-knappen i lampans
+  kort. Rumskortets kort visar om det svarar, signalen, versionen och när
+  det senast hördes, och har **Flytta**, **Kalibrera tomt rum**, en knapp
+  för en ny firmware-version och **Fler inställningar** (höjd och
+  spegelvänt). Esc eller **‹ Rummet** går tillbaka till rummets kort.
+- **Flytta** låser upp just den saken. Toppraden visar **Flyttar …** med
+  **Avbryt** och **Klar**. Dra saken dit den sitter och vrid ett rumskort
+  med ringen runt det eller med knapparna −15° och +15°. På datorn flyttar
+  piltangenterna 5 cm och Skift+pil vrider 15°. Varje släpp sparas direkt,
+  och **Sparat · Ångra** visas en stund; **Ångra** ställer tillbaka det
+  senaste släppet och **Avbryt** ställer tillbaka saken som den var när du
+  tryckte **Flytta**. Efter att ett rumskort har flyttats står **Räknar om
+  …** tills kärnan har räknat fram prickarna på nytt. Hann någon annan ändra
+  hemmet under tiden står "Någon annan ändrade – ladda om". Medan databasen
+  är nere går det inte att flytta något.
+- **Sim** i toppraden slår på och av simuleringsläget. I simuleringen finns
+  en rad på kartan med **+ Person**, **Dagsljus** och tidsfarten.
+  Låtsaspersonerna dras direkt på kartan, utan **Flytta**.
+- **Dörren** i toppraden visas bara när en dörrklocka är inställd (se
+  [Tillägg: dörrklocka](#tillägg-dörrklocka)).
 
 ### Steg 5: Koppla in Zigbee-lamporna
 
@@ -317,8 +367,11 @@ och följ guiden. MQTT-uppgifterna är redan ifyllda.
 1. Para ihop lampan med Zigbee2MQTT: tryck på **Permit join** i Zigbee2MQTT
    och nollställ lampan (en IKEA TRÅDFRI nollställs genom att slå av och på
    strömmen sex gånger i rad).
-2. Öppna kartredigeraren i Homecontrol. Under **Placera** står lampan som en
-   ny lampa. Välj den och klicka där den sitter, inne i ett rum.
+2. Hälsoraden i Homecontrol visar **+1 ny enhet**. Tryck på den (eller på
+   lampan under **Enheter** i rummets kort) och sedan **Placera på kartan**.
+   Lampan hamnar mitt i rummet och är upplåst för flytt; dra den dit den
+   sitter och tryck **Klar**. Du kan också trycka **Ändra rummet**, välja
+   lampan under **Placera** och klicka där den sitter, inne i ett rum.
 
 Homecontrol använder bara lampor som är placerade på kartan; andra
 Zigbee-enheter rörs inte. När två eller fler Zigbee-lampor sitter i samma rum
@@ -328,9 +381,9 @@ att rummets lampor tänds och släcks samtidigt med en mjuk övergång. Ändra
 inte i de grupperna själv; Homecontrol håller dem i takt med kartan.
 
 Tänder, släcker eller dimrar du en lampa med en fjärrkontroll eller i en app
-räknas det som manuell styrning, precis som ett klick i livevyn. En lampa som
-inte svarar (till exempel när strömbrytaren är av) visas med ⚠ på kartan, och
-rummet får läget okänt tills lampan svarar igen.
+räknas det som manuell styrning, precis som PÅ/AV-knappen på sidan. En lampa
+som inte svarar (till exempel när strömbrytaren är av) får en röd prick på
+kartan och står i hälsoraden, och rummet får läget okänt tills lampan svarar igen.
 
 När den första riktiga lampan är placerad stängs simuleringsläget av. Så länge
 riktiga lampor är placerade kan tiden inte gå fortare än vanligt, så att de
@@ -397,22 +450,24 @@ installeras om. När det första kortet är placerat stängs simuleringsläget a
 
 1. Låt Homecontrol vara igång (från **Steg 3**) när kortet får Wi-Fi.
    Kärnan hittar korten i hemnätet av sig själv (med mDNS). Ett nytt kort
-   syns i livevyn under **Rumskort** som ett nytt kort att placera.
-2. Öppna kartredigeraren och välj **Placera Homecontrol <rum>** under
-   **Placera**. Klicka där kortet sitter och vrid det åt rätt håll. Först nu
+   syns i hälsoraden (**+1 ny enhet**) och under **Enheter** i rummets kort.
+2. Tryck på det och sedan **Placera på kartan**. Kortet hamnar mitt i
+   rummet och är upplåst för flytt; dra det dit det sitter, vrid det åt rätt
+   håll och tryck **Klar**. Först nu
    ansluter kärnan till kortet och ger det dess nyckel. Gör det snart: tills
    kortet har fått kärnans nyckel kan vem som helst i hemnätet ge det en
    egen. Kortet måste ha ström; kärnan erbjuder nyckeln bara under tio
    minuter efter placeringen. Ett kort som inte är placerat används aldrig.
-3. I livevyn syns det kortets radar ser som prickar, och Wi-Fi-rörelsen och
+3. På kartan syns det kortets radar ser som prickar, och Wi-Fi-rörelsen och
    ljusnivån påverkar rummet.
 
-Svarar ett kort inte, eller bara en del av det (till exempel radarn), blir
-kortet rött med ⚠ på kartan, varningen står under **Rumskort** och rummet
+Svarar ett kort inte, eller bara en del av det (till exempel radarn), står
+det i hälsoraden och kortet får en röd prick på kartan (radarns synfält töms
+när kortet inte svarar). Varningen står i rumskortets kort, och rummet
 får läget okänt. Lamporna i rummet lämnas då som de är.
 
-Finns en ny version av kortets firmware visas knappen **Godkänn uppdatering**
-under **Rumskort**. Kortet uppdateras bara när någon trycker på den; det
+Finns en ny version av kortets firmware visas knappen **Uppdatera till …**
+i rumskortets kort. Kortet uppdateras bara när någon trycker på den; det
 hämtar då själv filen från webbinstalleraren och startar om.
 
 Kärnan använder datorns eget nätverk (`network_mode: host` i
@@ -430,8 +485,9 @@ släcka sig själv när den gör rummet ljust drar Homecontrol bort lampornas
 eget ljus från det som sensorn mäter (se **Ljusreglerna**). Hur mycket varje
 lampa ger mäts av lampkalibreringen, ett rum i taget.
 
-1. Öppna livevyn. Under **Just nu** har varje rum med lampor knappen
-   **Mät lampornas ljus**. Tryck på den för rummet du vill kalibrera.
+1. Öppna Homecontrol. Rummets kort har knappen **Mät lampornas ljus** när
+   rummet har lampor (rumskortets kort har samma sak som **Kalibrera tomt
+   rum**). Tryck på den.
 2. Läs råden i rutan **Lampkalibrering**: gör det när ljuset är jämnt,
    helst när det är mörkt ute, och stå inte mellan lamporna och rumskortet.
 3. Tryck på **Starta kalibreringen**. Alla lampor i rummet släcks, och
@@ -444,7 +500,7 @@ lampa ger mäts av lampkalibreringen, ett rum i taget.
 Kalibrera igen (knappen **Kalibrera igen**) när en lampa har bytts eller
 flyttats. Kalibreringen avbryts, och lamporna ställs tillbaka, om dagsljuset
 ändras mycket under tiden (till exempel av ett moln), om ljussensorn eller en
-lampa slutar svara, om rummet ändras i kartredigeraren eller om du trycker
+lampa slutar svara, om rummet ändras med **Ändra rummet** eller om du trycker
 **Avbryt**. Tänder eller släcker du själv en lampa under tiden avbryts den
 också, och den lampan får vara som du ville. Ett rum utan fönster behöver
 ingen kalibrering, eftersom det alltid räknas som mörkt.
@@ -453,9 +509,9 @@ Du kan prova kalibreringen i simuleringsläget: där lyser de virtuella
 lamporna upp de simulerade sensorerna, och med tidsfarten 60× går den på
 några sekunder.
 
-### Steg 8: Nå livevyn utanför hemmet med Tailscale
+### Steg 8: Nå Homecontrol utanför hemmet med Tailscale
 
-Homecontrol ska aldrig öppnas mot internet. Utanför hemmet når du livevyn
+Homecontrol ska aldrig öppnas mot internet. Utanför hemmet når du sidan
 med [Tailscale](https://tailscale.com/), som kopplar ihop dina egna enheter
 i ett eget krypterat nätverk.
 
@@ -481,7 +537,7 @@ i ett eget krypterat nätverk.
 
 Vill du använda datorns namn i Tailscale (MagicDNS) i stället för adressen,
 skriv in namnet som `ALLOWED_HOSTS` i `.env` och starta om med
-`docker compose up -d`. Annars öppnas sidan, men livevyn tappar genast
+`docker compose up -d`. Annars öppnas sidan, men den tappar genast
 anslutningen.
 
 Tänk på:
@@ -656,8 +712,8 @@ Tappar radarn någon räknas personen som kvar en stund, beroende på var:
 - i en stillhetszon: så länge Wi-Fi känner rörelse i rummet, högst 30 minuter
 - annars i rummet: cirka 10 sekunder
 
-En person som hålls kvar visas som en streckad ring i livevyn. Under
-**Just nu** står om varje rum är upptaget, tomt eller okänt. Okänt betyder att
+En person som hålls kvar visas som en streckad ring på kartan. I rummets
+kort står om rummet är upptaget, tomt eller okänt. Okänt betyder att
 radarn på ett rumskort i rummet har slutat svara, eller Wi-Fi-mätningen när
 rummet använder Wi-Fi (vikten är över 0), eller en av rummets lampor; då
 lämnas lamporna som de är.
@@ -671,14 +727,15 @@ ensam för att rummet ska räknas som upptaget. Med 0 används inte Wi-Fi alls,
 och med standardvärdet 0,5 förlänger tydlig rörelse närvaron men startar
 den aldrig.
 
-Livevyn visar alltså också när någon sitter eller ligger still, i vilka
+Sidan visar alltså också när någon sitter eller ligger still, i vilka
 zoner, och vilka sensorer som inte svarar. Tänk på det när du bestämmer vem
-som når livevyn (se nedan).
+som når Homecontrol (se nedan).
 
 ### Ljusreglerna
 
 Reglerna gäller ett rum i taget, och alla lampor i rummet följer varandra.
-Värdena inom parentes är standard och ändras per rum i kartredigeraren.
+Värdena inom parentes är standard och ändras per rum under **Ljusregler** i
+rummets kort.
 
 - **Tänd** när någon är i rummet och det är mörkt (under 30 lux).
 - **Varningsdimring**: när rummet har varit tomt i 2 minuter och 30
@@ -696,7 +753,7 @@ Ljusnivån som reglerna använder är den uppmätta minus det ljus som rummets
 tända lampor själva ger vid ljussensorn (mindre när de är dimrade). Därför
 släcker en lampa aldrig sig själv för att den lyser upp rummet. Hur mycket
 varje lampa lyser upp sensorn mäts av lampkalibreringen (se **Steg 7**);
-innan en lampa är mätt är bidraget 0. Under **Just nu** står båda värdena
+innan en lampa är mätt är bidraget 0. I rummets kort står båda värdena
 när de skiljer sig.
 
 Kärnan antar inte att lamporna är släckta när den startar. Tills en lampa
@@ -706,18 +763,18 @@ aldrig på chans. Zigbee-lamporna frågas om sitt läge när kärnan startar, oc
 de styrs först när de har svarat. De virtuella lamporna i simuleringen är
 släckta från början.
 
-**Manuell styrning**: klicka på en lampa på kartan, eller på lampans knapp
-under **Just nu**, så tänds eller släcks den. Automatiken i rummet pausar
-då, så att den inte går emot ditt val (till exempel när du släcker för att
-sova), tills rummet har varit tomt i hela släckfördröjningen (3 minuter).
-Rummet står som **manuellt** på kartan och under **Just nu**, och med
+**Manuell styrning**: tryck på lampans PÅ/AV-knapp i rummets kort, eller på
+den stora knappen i lampans kort, så tänds eller släcks den. Ett tryck på
+lampan på kartan öppnar bara dess kort och ändrar ingenting. Automatiken i
+rummet pausar då, så att den inte går emot ditt val (till exempel när du
+släcker för att sova), tills rummet har varit tomt i hela släckfördröjningen
+(3 minuter). Rummet står som **Manuellt läge** i rummets kort, och med
 **Automatik igen** tar automatiken över direkt. En lampa som ändras med
 fjärrkontroll eller app pausar automatiken på samma sätt.
 
-**Varför hände det?** listar de senaste besluten med klockslag och värden,
-till exempel "19:02 Tändes: någon är i Vardagsrum och det var mörkt (9 lux,
-under 30)." Listan visar de senaste besluten och töms när kärnan startar
-om, men besluten sparas också i historiken (se nedan).
+Rummets kort förklarar i klartext varför lamporna är som de är. Besluten
+sparas med klockslag och värden i historiken (se nedan), men sidan visar
+ingen lista över dem.
 
 ### Historik
 
@@ -729,13 +786,13 @@ någonstans, och inget exporteras av sig självt.
   i ett dygn. Sedan finns bara en mätning per sekund kvar (medelvärdet), och
   den packas ihop så att den tar mindre plats.
 - **Händelseloggen:** när ett rum blir upptaget, tomt eller okänt, och
-  besluten från **Varför hände det?**.
+  regelmotorns beslut om lamporna.
 
 Prickarna på kartan är anonyma. Varje prick får ett slumpat nummer, och
 historiken säger inget om vem det var. Låtsaspersonerna i simuleringsläget
 sparas inte: ingen historik sparas medan simuleringsläget är på. Utan
 `ESPHOME_SECRET` (se **Steg 6**) är simuleringsläget påslaget från början; stäng
-av det i livevyn för att historiken ska börja sparas.
+av det med **Sim** på sidan för att historiken ska börja sparas.
 
 Som standard sparas historiken utan tidsgräns, så den växer sakta med
 tiden. Båda tiderna går att ändra i `.env`. Ta bort `#` framför raden och
@@ -770,8 +827,8 @@ docker compose exec -T core homecontrol importera --exempelhem     # börja om m
 docker compose restart core                                        # efter en import
 ```
 
-Starta om kärnan direkt efter en import. Annars kan en ändring i
-kartredigeraren skriva över det du just importerade.
+Starta om kärnan direkt efter en import. Annars kan en ändring på
+sidan skriva över det du just importerade.
 
 Filen kontrolleras innan något ändras, så en trasig fil lämnar hemmet som det
 var, och felmeddelandet säger var i filen felet finns. En egen hemfil
@@ -820,7 +877,7 @@ Så läser du filen:
 - `lamps` har en plats, kan höra till en zon (`zone_id`) och har en
   `profile` som säger hur lampan styrs (`generisk` eller `ikea-tradfri`).
   En Zigbee-lampa har id:t `zigbee-` följt av lampans IEEE-adress (lampans
-  unika adress i Zigbee-nätet; kartredigeraren fyller i den själv). Andra
+  unika adress i Zigbee-nätet; sidan fyller i den själv). Andra
   lampor är virtuella.
   `lux_contribution` är hur många lux lampan ger vid rummets ljussensor på
   full styrka (0 om inget anges, se **Ljusreglerna**).
@@ -838,7 +895,7 @@ skrivs varje gång kärnan har läst hemmet från databasen och varje gång
 hemmet sparas.
 
 - **Vid start:** svarar inte databasen inom några sekunder startar kärnan
-  med kopian. Lamporna styrs som vanligt, och livevyn visar en varning:
+  med kopian. Lamporna styrs som vanligt, och sidan visar en varning:
   "Databasen svarar inte". Har kärnan ingen kopia än, till exempel första
   gången, väntar den på databasen som förut. Svarar databasen men något
   annat är fel, till exempel ett fel lösenord i `.env`, startar kärnan inte
@@ -846,7 +903,8 @@ hemmet sparas.
   Har du ändrat hur länge historiken sparas (eller uppdaterat Homecontrol)
   medan databasen var nere, kör `docker compose up -d` igen när den är
   igång, så att ändringen görs i databasen.
-- **Medan databasen är nere:** ändringar i kartredigeraren och resultatet
+- **Medan databasen är nere:** ändringar av hemmet (**Flytta** och **Ändra
+  rummet**) och resultatet
   av en lampkalibrering nekas med ett meddelande om varför. Historiken
   sparas inte; det som inte hinner skrivas tappas (se **Historik**).
   Planritningens bild finns bara i databasen och syns inte heller.
@@ -879,7 +937,7 @@ data, och då måste lamporna paras ihop igen.)
 ### Vem som når Homecontrol
 
 Homecontrol har inga konton och ingen inloggning: alla i hushållet har samma
-åtkomst. Den som når livevyn kan alltså se var någon är, tända och släcka
+åtkomst. Den som når sidan kan alltså se var någon är, tända och släcka
 lamporna, ändra planlösningen och bilden av planritningen, placera nya
 rumskort och godkänna uppdateringar av dem.
 
@@ -887,7 +945,7 @@ rumskort och godkänna uppdateringar av dem.
   som datorn är ansluten till: hemnätverket, och Tailscale om det är
   installerat. Med `BIND_ADDRESS=127.0.0.1` i `.env` nås den bara från den
   här datorn.
-- Utanför hemmet når du livevyn med [Tailscale](https://tailscale.com/):
+- Utanför hemmet når du sidan med [Tailscale](https://tailscale.com/):
   installera det på datorn som kör Homecontrol och på din telefon, och surfa
   till datorns Tailscale-adress (100.x.y.z) och port 8000. Använder du
   datorns Tailscale-namn (MagicDNS), skriv in namnet som `ALLOWED_HOSTS` i
@@ -940,7 +998,7 @@ inte finns några konton.
 Varje lampa tar emot högst fem kommandon i rad och sedan ett i sekunden, så
 att ett trasigt eller elakt program i nätverket inte kan få lamporna att
 blinka. Det märks aldrig när automatiken, lampkalibreringen eller någon som
-klickar i livevyn styr lamporna. Kommandon utöver gränsen skjuts upp, och
+trycker på sidan styr lamporna. Kommandon utöver gränsen skjuts upp, och
 lampan får till slut det senaste. Kärnans logg säger när kommandon till en
 lampa skjuts upp.
 
@@ -966,20 +1024,20 @@ det `password authentication failed for user "homecontrol"` är
 gången; databasen minns det första lösenordet. Sätt tillbaka det. Ge inte
 `POSTGRES_PASSWORD` samma lösenord som någon annan rad i `.env`.
 
-Visar livevyn "Databasen svarar inte"? Lamporna styrs ändå, men ändringar
+Visar sidan "Databasen svarar inte"? Lamporna styrs ändå, men ändringar
 sparas inte. Titta i `docker compose ps` och `docker compose logs db`. När
 databasen är igång igen försvinner varningen av sig själv inom en halv minut.
 
-Syns inte en ny lampa under **Placera** i kartredigeraren? Kontrollera i
-Zigbee2MQTT att den är ihopparad och klar (inte "interviewing"). Står en lampa
-med ⚠ på kartan svarar den inte: kontrollera strömbrytaren, eller att
+Visar hälsoraden ingen ny lampa? Kontrollera i
+Zigbee2MQTT att den är ihopparad och klar (inte "interviewing"). Har en lampa
+en röd prick på kartan svarar den inte: kontrollera strömbrytaren, eller att
 Zigbee2MQTT når lampan (den är för långt bort eller saknar ström).
 
-Syns inte ett nytt rumskort under **Rumskort** i livevyn? Kortet och datorn
+Visar hälsoraden inget nytt rumskort? Kortet och datorn
 måste vara i samma nätverk. Ett gästnätverk, eller en router som håller
 isär enheterna i nätverket, stoppar mDNS som kärnan hittar korten med.
 
-Kopplas livevyn bort direkt när du surfar till ett namn i stället för en
+Kopplas sidan bort direkt när du surfar till ett namn i stället för en
 adress? Skriv in namnet som `ALLOWED_HOSTS` i `.env` och starta om med
 `docker compose up -d`.
 
@@ -1052,7 +1110,7 @@ HOMECONTROL_WEB_DIR=../web/dist uv run homecontrol
 ```
 
 Utan `HOMECONTROL_DATABASE` visar kärnan exempelhemmet, och ändringar från
-kartredigeraren sparas bara så länge kärnan är igång. Utanför Docker Compose
+sidan sparas bara så länge kärnan är igång. Utanför Docker Compose
 skapar och uppdaterar kärnan själv tabellerna. I `compose.yaml` gör
 `homecontrol förbered-databasen` (tjänsten `db-setup`) det i stället, och
 kärnan har `HOMECONTROL_PREPARE_DATABASE=false` och en roll som bara får
@@ -1092,17 +1150,17 @@ npm run test:e2e
 ```
 
 Nya API-vägar i kärnan läggs under `/api/...` så att de inte krockar med
-webbgränssnittets filer. Livevyn får sin realtidsström från `/api/live`.
-Kartredigeraren läser och sparar hemmet med `/api/home` och bilden av
+webbgränssnittets filer. Sidan får sin realtidsström från `/api/live` och
+läser och sparar hemmet med `/api/home` och bilden av
 planritningen med `/api/floors/{id}/plan-image` (se `core/src/homecontrol/editor.py`
 och klienten i `web/src/homeApi.ts`). Varje
 ändring ger en ny revision (`ETag`), och en ändring som utgår från en gammal
 revision (`If-Match`) nekas. Ett sparat hem går till kärnan med
-`Controller.replace_home`, så livevyn får det direkt.
+`Controller.replace_home`, så realtidsströmmen får det direkt.
 Lampkalibreringen startas med `POST /api/rooms/{id}/calibration` och
 avbryts med `DELETE /api/calibration` (se `core/src/homecontrol/calibration_api.py`).
-Själva mätningen ligger i `calibration.py`, och läget strömmas i livevyn.
-Bidragen sparas på samma sätt som en ändring i kartredigeraren
+Själva mätningen ligger i `calibration.py`, och läget strömmas till sidan.
+Bidragen sparas på samma sätt som en ändring av hemmet
 (`editor.HomeChanges`).
 En iPhone-skanning (RoomPlan-JSON) läses i webbläsaren av
 `web/src/roomplan.ts` och blir en vanlig ändring av hemmet, som sparas med
@@ -1119,7 +1177,7 @@ tar emot dem. Lamputgångarna berättar hur lamporna är med
 regelmotorn är en egen klass med metoden `decide`; en ny sorts regel läggs
 till i listan `rules.DEFAULT_RULES` utan att de andra ändras (se
 `core/src/homecontrol/rules.py`). Ett beslut gäller i dag alltid alla lampor i
-ett rum. Manuell styrning från livevyn går till
+ett rum. Manuell styrning från sidan går till
 `Controller.set_lamp`; en ändring med fjärrkontroll eller app kommer som
 `LampStateReported` med `external=True` och behandlas likadant. Lamputgången
 Zigbee2MQTT (`zigbee.py`) skiljer lampornas svar på kärnans kommandon från
@@ -1127,7 +1185,7 @@ sådana ändringar, läser lampornas läge innan den styr dem och skickar
 kommandona genom lampans profil (till exempel IKEA TRÅDFRI:s egenheter).
 Kopplingstesterna kör den mot exempelmeddelanden i `core/tests/zigbee_exempel/`.
 Simuleringen (`simulation.py`) är både en källa och en utgång. Simuleringsläget
-i livevyn styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
+på sidan styr låtsaskällan (personer och dagsljus) och klockans tidsfart; personerna
 når kärnan genom samma ingång som en riktig källa, som radarmål i varje
 rumskorts egna koordinater. Tidsfarten gäller hela kärnan och är därför
 spärrad till 1× så länge hemmet har riktiga rumskort eller lampor.

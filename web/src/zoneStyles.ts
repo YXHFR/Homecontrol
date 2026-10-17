@@ -1,6 +1,6 @@
 /**
- * Hur varje sorts zon ser ut och vad den betyder i klartext. Både livevyn och
- * kartredigeraren ritar zoner, så modulen beror inte på någon av dem.
+ * Hur varje sorts zon ser ut och vad den betyder i klartext. Både kartan och
+ * ritverktygen använder zonerna, så modulen beror inte på någon av dem.
  */
 import type { ZoneKind } from "./protocol";
 

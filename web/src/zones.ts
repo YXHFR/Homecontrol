@@ -1,6 +1,6 @@
 /**
  * Zonerna: delar av ett rum som betyder något särskilt för närvaron (se #36).
- * Här finns de ändringar som kartredigeraren gör i zonerna. Precis som i
+ * Här finns de ändringar som ritverktygen gör i zonerna. Precis som i
  * editing.ts returnerar ändringarna ett nytt dokument och lämnar det gamla
  * orört. Hur zonerna ser ut står i zoneStyles.ts.
  */

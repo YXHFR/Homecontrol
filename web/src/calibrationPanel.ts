@@ -1,9 +1,9 @@
 /**
- * Guiden för lampkalibreringen i livevyn: mäter hur mycket varje lampa i ett rum
+ * Guiden för lampkalibreringen: mäter hur mycket varje lampa i ett rum
  * själv lyser upp rummets ljussensor, så att reglerna kan räkna bort lampornas
  * eget ljus (se core/src/homecontrol/calibration.py).
  *
- * Guiden öppnas från ett rum i panelen "Just nu". Den förklarar vad som händer,
+ * Guiden öppnas från rummets, rumskortets eller lampans kort. Den förklarar vad som händer,
  * startar mätningen i kärnan och visar hur den går och vad den kom fram till.
  * Mätningen sköts helt av kärnan, så guiden kan stängas och öppnas igen.
  */

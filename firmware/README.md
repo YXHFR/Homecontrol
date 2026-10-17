@@ -69,13 +69,14 @@ API:t är krypterat, men nyckeln finns inte i firmware. Kärnan skapar en
 egen nyckel för varje kort och skickar den vid första anslutningen. Efter
 det tar kortet bara emot krypterade anslutningar med just den nyckeln.
 
-Kärnan hittar nya kort själv (mDNS) och visar dem i livevyn. Placera kortet
-i kartredigeraren (se README i repots rot); först då ansluter kärnan och
-ger kortet dess nyckel. Nyckeln räknas fram ur `ESPHOME_SECRET` i `.env`
+Kärnan hittar nya kort själv (mDNS). Ett nytt kort syns som **ny enhet** i
+hälsoraden och i listan **Enheter** i rummets kort. Tryck på det och sedan
+på **Placera på kartan** i dess kort (se README i repots rot); först då
+ansluter kärnan och ger kortet dess nyckel. Nyckeln räknas fram ur `ESPHOME_SECRET` i `.env`
 och kortets namn, så den sparas ingenstans. Placera därför kortet så snart
 det har fått Wi-Fi: innan kärnan har kopplat kortet kan vem som helst i
-hemnätet ansluta och sätta en egen nyckel. Då varnar livevyn att kortet har
-en annan nyckel. Nyckeln tas bara bort om kortet raderas via
+hemnätet ansluta och sätta en egen nyckel. Då visar hälsoraden en varning,
+och kortets kort säger att kortet har en annan nyckel. Nyckeln tas bara bort om kortet raderas via
 webbinstalleraren (**Erase device**). Byts `ESPHOME_SECRET` måste korten
 raderas och installeras om på samma sätt.
 
@@ -84,8 +85,8 @@ raderas och installeras om på samma sätt.
 - **Över nätverket:** fungerar först när webbinstalleraren är publicerad på
   webben, vilket den inte är än. Kortet kollar var 6:e timme om
   webbinstalleraren har en ny version och visar det i entiteten `Firmware`. Uppdateringen startar
-  bara när kärnan ber om det, efter att du har tryckt på **Godkänn
-  uppdatering** under **Rumskort** i livevyn. Kortet hämtar då
+  bara när kärnan ber om det, efter att du har tryckt på **Uppdatera till
+  …** (med den nya versionen) i rumskortets kort. Kortet hämtar då
   själv filen över https. Det tar inte emot firmware från någon annan.
   Adressen är `yxhfr.github.io`, så GitHub-kontot **YXHFR får inte byta
   namn**. Då kan någon annan ta namnet och skicka firmware till korten.
@@ -159,10 +160,11 @@ personer, och hur noga den mäter, är tillverkarens uppgifter. Inget av det
   låst på en commit. Vad som är ändrat står i
   [`components/ld2461/README.md`](components/ld2461/README.md).
 - Radarn kör 9600 baud. Komponenten skickar ingen fart.
-- Kontrollera i livevyn att prickarna hamnar på rätt sida om kortet. Gör de
-  inte det: kryssa i **Spegelvänd sidled** för kortet i kartredigeraren.
+- Kontrollera på kartan att prickarna hamnar på rätt sida om kortet. Gör de
+  inte det: kryssa i **Spegelvänd sidled** under **Fler inställningar** i
+  rumskortets kort.
 - Simuleringen kan låtsas att ett kort har en LD2461 (**Radar i
-  simuleringen** i kartredigeraren). Den ser då lika långt och brett som en
+  simuleringen**, som syns när kortet väljs i **Ändra rummet**). Den ser då lika långt och brett som en
   LD2450, eftersom LD2461:s räckvidd inte är provad.
 
 **Att prova med riktig hårdvara** innan LD2461 används på riktigt: gör

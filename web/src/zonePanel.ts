@@ -1,7 +1,7 @@
 /**
- * Kartredigerarens delar för zoner: en knapp per sorts zon i verktygslådan,
+ * Ritverktygens delar för zoner: en knapp per sorts zon i verktygsraden,
  * instruktionen och egenskaperna för en vald zon. Delarna sparar inget själva
- * utan lämnar ändringarna till kartredigeraren, som sparar dem.
+ * utan lämnar ändringarna till Ändra rummet, som sparar dem.
  */
 import { button, element } from "./dom";
 import type { HomeDocument } from "./homefile";
@@ -11,7 +11,7 @@ import { deleteZone, findZone, renameZone, setZoneKind } from "./zones";
 import { ZONE_KINDS, ZONE_STYLES } from "./zoneStyles";
 
 export interface ZoneTools {
-  /** Rubriken och knapparna, i den ordning de ska stå i verktygslådan. */
+  /** Rubriken och knapparna, i den ordning de ska stå i verktygsraden. */
   nodes: HTMLElement[];
   /** Markerar knappen för sorten som ritas, eller ingen. */
   render(active: ZoneKind | null): void;

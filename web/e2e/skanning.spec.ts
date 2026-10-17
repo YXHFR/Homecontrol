@@ -15,7 +15,7 @@ test("en iPhone-skanning blir en ny våning med rum, dörröppningar, fönster o
     await openEditor(page);
     await page.locator('input[accept=".json,application/json"]').setInputFiles(EXAMPLE_SCAN);
     await expect(page.locator(".instruction")).toContainText("Så här blir skanningen");
-    await expect(page.locator(".properties")).toContainText(
+    await expect(page.locator(".edit-panel")).toContainText(
       "2 rum, 2 dörröppningar, 2 fönster och 6 möbler",
     );
     await page.getByRole("button", { name: "Vrid 90°" }).click();
@@ -33,7 +33,7 @@ test("en iPhone-skanning blir en ny våning med rum, dörröppningar, fönster o
     const xs = scanned?.rooms[0].polygon.map(([x]) => x) ?? [];
     expect(Math.min(...xs)).toBeCloseTo(2, 1);
     expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(4, 1);
-    // Den nya våningen visas i redigeraren.
+    // Den nya våningen visas på kartan.
     await expect(page.locator("#app")).toHaveAttribute("data-rooms", "2");
   } finally {
     const now = await page.request.get("/api/home");

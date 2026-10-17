@@ -2,7 +2,7 @@
  * Läser en iPhone-skanning (Apple RoomPlan, CapturedRoom som JSON) och gör
  * den till rum, väggar, dörröppningar, fönster och möbler i hemmet (se #86).
  *
- * Skanningen läses här i webbläsaren och inte i kärnan. Kartredigeraren gör
+ * Skanningen läses här i webbläsaren och inte i kärnan. Ritverktygen gör
  * redan alla ändringar som rena funktioner på hemmet och visar resultatet
  * innan det sparas, så att användaren kan vrida och flytta skanningen först.
  * Själva filen lämnar aldrig webbläsaren; kärnan får bara det färdiga hemmet,

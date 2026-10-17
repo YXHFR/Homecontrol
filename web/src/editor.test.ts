@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { mountEditor, type EditorDependencies } from "./editor";
-import type { EditorScene, EditorViewCallbacks } from "./editorView";
+import type { MapCallbacks, MapScene } from "./mapView";
+import { mountPage, type PageDependencies } from "./page";
 import { setPlanImage } from "./editing";
 import { CoreError, type HomeApi } from "./homeApi";
 import type { HomeDocument } from "./homefile";
@@ -99,30 +99,41 @@ async function setup(cards: Card[] = [], found: FoundLamp[] = []) {
   const core = new FakeCore();
   core.cards = cards;
   core.found = found;
-  const scenes: EditorScene[] = [];
-  let callbacks: EditorViewCallbacks | undefined;
-  const deps: EditorDependencies = {
+  const scenes: MapScene[] = [];
+  let callbacks: MapCallbacks | undefined;
+  const deps: PageDependencies = {
     api: core.api,
-    createView: (_container, cb) => {
+    createMap: (_container, cb) => {
       callbacks = cb;
       return {
         render: (scene) => scenes.push(scene),
         metersPerPixel: () => 0.01,
         zoom: () => undefined,
         fit: () => undefined,
+        centerOn: () => undefined,
         destroy: () => undefined,
       };
     },
     prepareImage: (file) => Promise.resolve({ blob: file, width: 500 }),
+    connect: () => ({ start: () => undefined, send: () => undefined }),
+    calibration: { start: () => Promise.resolve(), cancel: () => Promise.resolve() },
+    hasDoorbell: () => Promise.resolve(false),
   };
   const root = document.createElement("main");
   document.body.replaceChildren(root);
-  mountEditor(root, deps);
+  mountPage(root, deps);
   await vi.waitFor(() => expect(root.dataset.ready).toBe("true"));
   if (callbacks === undefined) {
     throw new Error("Kartan skapades inte");
   }
   const map = callbacks;
+  // Ritverktygen finns i Ändra rummet.
+  const edit = [...root.querySelectorAll("button")].find((b) => b.textContent === "Ändra rummet");
+  if (edit === undefined) {
+    throw new Error("Hittade inte Ändra rummet");
+  }
+  edit.click();
+  expect(root.dataset.mode).toBe("edit");
   const click = (label: string) => {
     const button = [...root.querySelectorAll("button")].find((b) => b.textContent === label);
     if (button === undefined) {

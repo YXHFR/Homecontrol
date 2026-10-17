@@ -1,5 +1,5 @@
 /**
- * Ändringar som kartredigeraren gör i hemmet. Alla funktioner är rena: de
+ * Ändringar som ritverktygen (Ändra rummet) gör i hemmet. Alla funktioner är rena: de
  * returnerar ett nytt dokument och lämnar det gamla orört, så att ett
  * misslyckat sparande kan ångras genom att visa det gamla igen.
  */
