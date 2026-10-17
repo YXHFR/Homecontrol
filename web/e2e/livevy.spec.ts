@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { groundFloor, savedHome } from "./helpers";
+import { atMeters, groundFloor, mapCanvas, openPage, savedHome } from "./helpers";
 
 test("en simulerad person i hallen ger ett spår, och när den går hålls spåret kvar en stund", async ({
   page,
@@ -14,12 +14,12 @@ test("en simulerad person i hallen ger ett spår, och när den går hålls spår
   const x = node.position[0] + 1.5 * Math.cos(angle);
   const y = node.position[1] + 1.5 * Math.sin(angle);
 
-  await page.goto("/");
-  await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
-  const hallNow = page.locator(".rooms-now li", { hasText: "Hall:" });
-  await expect(hallNow).toHaveAttribute("data-status", "tomt");
+  await openPage(page);
+  // Hallen är det första rummet, så dess kort visas när inget är valt.
+  const hallCard = page.locator(".card-head", { hasText: "Hall" });
+  await expect(hallCard).toHaveAttribute("data-status", "tomt");
 
-  // Livevyn drar personer med musen; här skickas samma meddelande som dragningen ger.
+  // Sidan drar personer med musen; här skickas samma meddelande som dragningen ger.
   await page.evaluate(
     ({ floorId, x, y }) =>
       new Promise<void>((resolve, reject) => {
@@ -29,49 +29,63 @@ test("en simulerad person i hallen ger ett spår, och när den går hålls spår
           socket.close();
           resolve();
         });
-        socket.addEventListener("error", () => reject(new Error("Ingen kontakt med livevyn")));
+        socket.addEventListener("error", () => reject(new Error("Ingen kontakt med kärnan")));
       }),
     { floorId: groundFloor(await savedHome(page)).id, x, y },
   );
-  await expect(hallNow).toHaveAttribute("data-status", "upptaget");
+  await expect(hallCard).toHaveAttribute("data-status", "upptaget");
 
   // Personen försvinner mitt i hallen: rummet räknas som upptaget i cirka 10 sekunder till.
   await page.getByRole("button", { name: /Ta bort person/ }).click();
-  await expect(page.locator(".simulation li")).toHaveCount(0);
-  await expect(hallNow).toHaveAttribute("data-status", "upptaget");
-  await expect(hallNow).toHaveAttribute("data-status", "tomt", { timeout: 15_000 });
+  await expect(page.locator(".persons li")).toHaveCount(0);
+  await expect(hallCard).toHaveAttribute("data-status", "upptaget");
+  await expect(hallCard).toHaveAttribute("data-status", "tomt", { timeout: 15_000 });
 });
 
-test("ett klick på en lampa styr den för hand, och rummet visar manuellt läge tills automatiken tar över", async ({
+test("ett tryck på lampan på kartan öppnar kortet utan att tända; snabbknappen styr den för hand", async ({
   page,
 }) => {
-  await page.goto("/");
-  await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
-  const kitchen = page.locator(".rooms-now li", { hasText: "Kök:" });
-  const lamp = kitchen.getByRole("button", { name: /^Taklampa: släckt/ });
-  await expect(kitchen).toHaveAttribute("data-manual", "false");
+  const floor = groundFloor(await savedHome(page));
+  const kitchen = floor.rooms.find((room) => room.id === "kok");
+  if (kitchen === undefined) {
+    throw new Error("Exempelhemmet saknar kök");
+  }
+  await openPage(page);
+  const map = mapCanvas(page);
 
-  await lamp.click();
+  // Ett tryck på köksgolvet visar köket.
+  const floorSpot = await atMeters(map, floor, { x: 2.5, y: 6.5 });
+  await page.mouse.click(floorSpot.x, floorSpot.y);
+  await expect(page.locator(".card-head h2")).toHaveText("Kök");
+  const automation = page.locator(".automation");
+  await expect(automation).toHaveAttribute("data-manual", "false");
 
-  await expect(kitchen.getByRole("button", { name: "Taklampa: tänd" })).toBeVisible();
-  await expect(kitchen).toHaveAttribute("data-manual", "true");
-  await expect(kitchen.locator(".badge")).toHaveText("Manuellt läge");
-  await expect(page.locator(".events li").first()).toContainText("Taklampa tändes för hand. Automatiken i Kök pausar");
+  // Ett tryck på lampan öppnar lampans kort och ändrar inget.
+  const lamp = await atMeters(map, floor, { x: 4, y: 7.5 });
+  await page.mouse.click(lamp.x, lamp.y);
+  await expect(page.locator(".card-head h2")).toHaveText("Taklampa");
+  await expect(page.locator(".power.big")).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "Tillbaka till rummet" }).click();
+  await expect(automation).toHaveAttribute("data-manual", "false");
+
+  // Snabbknappen i rummets kort tänder lampan för hand och pausar automatiken.
+  const quick = page.locator(".lamp-row", { hasText: "Taklampa" }).getByRole("button", { name: "Taklampa" });
+  await quick.click();
+  await expect(quick).toHaveAttribute("aria-pressed", "true");
+  await expect(automation).toHaveAttribute("data-manual", "true");
+  await expect(automation).toContainText("Manuellt läge");
 
   // Automatiken tar över igen direkt, utan att vänta tills köket varit tomt.
-  await kitchen.getByRole("button", { name: "Automatik igen" }).click();
-  await expect(kitchen).toHaveAttribute("data-manual", "false");
-  await expect(page.locator(".events li").first()).toContainText("Automatiken i Kök slogs på igen för hand");
+  await automation.getByRole("button", { name: "Automatik igen" }).click();
+  await expect(automation).toHaveAttribute("data-manual", "false");
 });
 
 test("lampkalibreringen mäter hallens taklampa och visar dess ljus", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+  await openPage(page);
   // Kalibreringen följer kärnans klocka, så i 60× tar den ungefär en sekund.
   await page.getByRole("button", { name: "60×" }).click();
 
-  const hall = page.locator(".rooms-now li", { hasText: "Hall:" });
-  await hall.getByRole("button", { name: "Mät lampornas ljus" }).click();
+  await page.getByRole("button", { name: "Mät lampornas ljus" }).click();
   const guide = page.getByRole("region", { name: "Lampkalibrering" });
   await expect(guide.getByRole("heading")).toHaveText("Lampkalibrering: Hall");
   await guide.getByRole("button", { name: "Starta kalibreringen" }).click();

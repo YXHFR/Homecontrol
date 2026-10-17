@@ -2,7 +2,7 @@
  * Egenskapspanelens delar för det som placeras i hemmet: ett valt
  * rumskort, en router eller en lampa, och ett valt rums inställningar
  * (ljusgränser och fördröjning). Panelen ändrar hemmet genom `commit`,
- * precis som resten av kartredigeraren.
+ * precis som resten av ritverktygen (Ändra rummet).
  */
 import { button, element } from "./dom";
 import type {
@@ -168,7 +168,7 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
       element(
         "p",
         { className: "muted" },
-        "Kryssa i om personerna i livevyn hamnar på fel sida om rumskortet, till exempel om kortet sitter upp och ned.",
+        "Kryssa i om prickarna på kartan hamnar på fel sida om rumskortet, till exempel om kortet sitter upp och ned.",
       ),
       element("label", {}, "Radar i simuleringen ", radar),
       element(
@@ -308,7 +308,7 @@ export function roomSettingsForm(room: RoomModel, actions: PanelActions): HTMLEl
     element(
       "p",
       { className: "muted" },
-      "Ljusnivåerna räknas utan lampornas eget ljus. Ett klick på en lampa i livevyn pausar " +
+      "Ljusnivåerna räknas utan lampornas eget ljus. Att tända eller släcka en lampa för hand pausar " +
         "automatiken i rummet tills det har varit tomt i hela fördröjningen.",
     ),
     element(

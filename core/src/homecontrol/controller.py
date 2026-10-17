@@ -437,7 +437,7 @@ class Controller:
                 or room.settings.windowless
                 or [lamp.id for lamp in room.lamps] != list(calibration.before)
             ):
-                self._end_calibration(calibration, "rummet ändrades i kartredigeraren")
+                self._end_calibration(calibration, "rummet ändrades under mätningen")
         self._lux = {
             room_id: lux for room_id, lux in self._lux.items() if room_id in self._room_ids
         }

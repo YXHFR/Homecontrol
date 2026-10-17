@@ -41,14 +41,18 @@ export function groundFloor(document: HomeDocument) {
 /** Hur många ändringar sidan har sparat sedan den öppnades. */
 const savesSeen = new WeakMap<Page, number>();
 
-export async function openEditor(page: Page): Promise<void> {
-  if (page.url().endsWith("/#redigera")) {
-    await page.reload(); // samma adress laddas inte om av goto
-  } else {
-    await page.goto("/#redigera");
-  }
+/** Öppnar sidan och väntar tills den har läst hemmet. */
+export async function openPage(page: Page): Promise<void> {
+  await page.goto("/");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
   savesSeen.set(page, 0);
+}
+
+/** Öppnar sidan och ritverktygen (Ändra rummet). */
+export async function openEditor(page: Page): Promise<void> {
+  await openPage(page);
+  await page.getByRole("button", { name: "Ändra rummet" }).click();
+  await expect(page.locator("#app")).toHaveAttribute("data-mode", "edit");
 }
 
 /** Väntar tills kärnan har tagit emot nästa ändring. */
@@ -57,22 +61,21 @@ export async function waitUntilSaved(page: Page): Promise<void> {
   await expect(page.locator(".message"), "kärnan sa nej").toBeHidden();
   await expect(page.locator("#app")).toHaveAttribute("data-saves", String(next));
   await expect(page.locator("#app")).toHaveAttribute("data-busy", "false");
-  await expect(page.getByRole("status")).toHaveText("Alla ändringar är sparade.");
+  await expect(page.locator(".save-status")).toHaveText("Alla ändringar är sparade.");
   savesSeen.set(page, next);
 }
 
-/**
- * En punkt på kartan, som andel av kartans bredd och höjd (0–1). Kartan rullas
- * först till mitten av fönstret, eftersom verktygslådan bredvid är högre än
- * fönstret och ett klick på en knapp längre ned annars lämnar kartans överkant
- * utanför.
- */
+/** Kartan på sidan. */
+export function mapCanvas(page: Page): Locator {
+  return page.locator(".map-stage canvas").first();
+}
+
+/** En punkt på kartan, som andel av kartans bredd och höjd (0–1). */
 export async function onMap(
   map: Locator,
   fx: number,
   fy: number,
 ): Promise<{ x: number; y: number }> {
-  await map.evaluate((node) => node.scrollIntoView({ block: "center" }));
   const box = await map.boundingBox();
   if (box === null) {
     throw new Error("Kartan syns inte");
@@ -81,8 +84,8 @@ export async function onMap(
 }
 
 /**
- * Var en punkt i hemmets meter syns på kartan, när redigeraren visar hela
- * våningen som när den öppnas (samma uträkning som `fit` i editorView.ts).
+ * Var en punkt i hemmets meter syns på kartan, när kartan visar hela
+ * våningen som när den öppnas (samma uträkning som `fit` i mapView.ts).
  */
 export async function atMeters(
   map: Locator,
@@ -102,7 +105,7 @@ export async function atMeters(
     Math.min(...ys),
     Math.max(...ys),
   ];
-  const margin = 1;
+  const margin = 1.5;
   const perMeter = Math.min(
     box.width / (maxX - minX + 2 * margin),
     box.height / (maxY - minY + 2 * margin),

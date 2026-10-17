@@ -1,5 +1,5 @@
 /**
- * Meddelandena i realtidsströmmen mellan kärnan och livevyn (se core/src/homecontrol/live.py).
+ * Meddelandena i realtidsströmmen mellan kärnan och sidan (se core/src/homecontrol/live.py).
  * Koordinater är meter i en vånings plan, med origo uppe till vänster och y nedåt.
  */
 
@@ -118,7 +118,7 @@ export interface Card {
   /** Kortets namn, homecontrol-<rum>. Ett placerat kort är en nod med samma id. */
   id: string;
   name: string;
-  /** Kortet är placerat på kartan. Annars väntar det på att placeras i kartredigeraren. */
+  /** Kortet är placerat på kartan. Annars väntar det på att placeras (Placera på kartan). */
   placed: boolean;
   online: boolean;
   /** Varningar i klartext. Tom när allt fungerar. */
@@ -154,7 +154,7 @@ export interface LampState {
   explanation: string;
 }
 
-/** Något som hände med lamporna, för listan "Varför hände det?". */
+/** Något som hände med lamporna. Kärnan skickar händelserna, men sidan visar dem inte. */
 export interface LampEvent {
   /** Löpnummer från 1; ett högre nummer är en senare händelse. */
   number: number;
