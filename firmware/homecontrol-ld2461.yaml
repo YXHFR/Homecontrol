@@ -3,8 +3,8 @@
 # (common.yaml): Wi-Fi-CSI, ljussensorn, det krypterade API:t och
 # uppdateringarna.
 #
-# LD2461 följer upp till 5 personer enligt tillverkaren. Det, räckvidden och
-# precisionen är inte provat än (se firmware/README.md).
+# LD2461 följer upp till 5 personer enligt tillverkaren. Varken det,
+# räckvidden eller precisionen är provat än (se firmware/README.md).
 #
 # Konfigurationen är Apache-2.0. Den byggda firmware-binären innehåller
 # ESPectre och ESPHome:s C++-kod och blir därför GPL-3.0 (se firmware/README.md).
@@ -54,25 +54,28 @@ uart:
   baud_rate: 9600
   parity: NONE
   stop_bits: 1
-  # LD2461-komponenten har ingen händelse för varje ram. Det här anropas i
-  # stället när radarn har skickat något och sedan tystnat en kort stund,
-  # och håller "Radar Online" på (se common.yaml). Inget loggas.
-  debug:
-    direction: RX
-    dummy_receiver: false
-    after:
-      timeout: 20ms
-    sequence:
-      - binary_sensor.template.publish:
-          id: radar_online
-          state: true
-      - script.execute: radar_watchdog
 
 ld2461:
   id: radar
   uart_id: ld2461_uart
   # Hur ofta målen skickas till kärnan, ungefär som LD2450:s 10 gånger per sekund.
   update_interval: 100ms
+
+# LD2461-komponenten har ingen händelse för varje ram. Här kollas i stället
+# om en hel ram med mål har kommit, och då hålls "Radar Online" på (se
+# common.yaml). Kommer inga ramar blir rummet okänt i stället för att visa
+# de senaste målen.
+interval:
+  - interval: 100ms
+    then:
+      - if:
+          condition:
+            lambda: return id(radar).take_new_coordinates();
+          then:
+            - binary_sensor.template.publish:
+                id: radar_online
+                state: true
+            - script.execute: radar_watchdog
 
 # Komponentens nummer 0–4 blir mål 1–5, så att namnen är desamma som på
 # LD2450-kortet (som har mål 1–3). Läget är i mm. Ingen fart: komponenten

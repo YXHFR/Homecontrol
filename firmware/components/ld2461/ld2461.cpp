@@ -1,8 +1,12 @@
 // Changed for Homecontrol (https://github.com/YXHFR/Homecontrol): the
-// coordinates are now published in mm, the number code is built only with
-// USE_LD2461_NUMBER, and the firmware version is formatted safely. See
+// coordinates are now published in mm, also when nobody is seen, the frame
+// bytes are read unsigned, frames are read only within what was received,
+// the number code is built only with USE_LD2461_NUMBER, and the firmware
+// version is formatted safely. Every change is marked "Homecontrol:". See
 // README.md in this folder.
 #include "ld2461.h"
+
+#include <algorithm>
 
 namespace esphome {
 namespace ld2461 {
@@ -39,7 +43,14 @@ void LD2461::update() {
 
 void LD2461::loop() {
     while (available()) {
-        char c = read();
+        // Homecontrol: unsigned, so that 0xDD and 0xFF match the cases below
+        // also where char is signed.
+        uint8_t c = read();
+        // Homecontrol: start over instead of letting size wrap around.
+        if(serial_data.size == UINT8_MAX) {
+            serial_data.size = 0;
+            serial_data.frame_start = 0;
+        }
         serial_data.buffer[serial_data.size] = c;
         serial_data.size ++;
 
@@ -57,26 +68,40 @@ void LD2461::loop() {
 
                 if(serial_data.size >= min_packet_size && memcmp(serial_data.buffer+serial_data.size-fe_size, FRAME_END, fe_size) == 0) {
                     uint8_t frame_size = sizeof(response_frame_header);
+                    // Homecontrol: read only what has been received since the frame header.
+                    uint8_t received = serial_data.size - serial_data.frame_start;
+                    if(serial_data.frame_start > serial_data.size || received < frame_size) {
+                        serial_data.size = 0;
+                        serial_data.frame_start = 0;
+                        break;
+                    }
                     memcpy(&response_frame_header, serial_data.buffer+serial_data.frame_start, frame_size);
 
-                    if(response_frame_header.command_val) {
+                    // Homecontrol: a coordinate frame has no command value; its first
+                    // byte is the first target's X, which is 0 when nobody is seen.
+                    if(response_frame_header.command_val || response_frame_header.command == GET_COORDINATES) {
                         if(response_frame_header.command == GET_REGIONS) {
                             uint8_t sensor_regions_size = sizeof(sensor_regions);
-                            memcpy(&sensor_regions, serial_data.buffer+serial_data.frame_start+frame_size, sensor_regions_size);
+                            if(received >= frame_size + sensor_regions_size) {
+                                memcpy(&sensor_regions, serial_data.buffer+serial_data.frame_start+frame_size, sensor_regions_size);
+                            }
                         } else if(response_frame_header.command == GET_COORDINATES){
                             uint8_t packet_size = sizeof(data_packet_struct); 
-                            // Homecontrol: only a whole frame is read, and the coordinates
-                            // are handed on to the sensors (upstream never set person[]).
-                            if(serial_data.size >= packet_size) {
-                                memcpy(&received_data, serial_data.buffer+serial_data.size-packet_size, packet_size);
+                            // Homecontrol: only a frame of exactly the expected size, from its
+                            // header, is read. The coordinates are handed on to the sensors
+                            // (upstream never set person[]).
+                            if(received == packet_size) {
+                                memcpy(&received_data, serial_data.buffer+serial_data.frame_start, packet_size);
                                 for(int i=0; i<5; i++) {
                                     person[i].x = to_mm(received_data.person[i].cx);
                                     person[i].y = to_mm(received_data.person[i].cy);
                                 }
+                                new_coordinates_ = true;
                             }
                         }
                           else {
-                            memcpy(response_buffer, serial_data.buffer+serial_data.frame_start+frame_size, response_frame_header.size_0);
+                            uint8_t length = std::min<uint8_t>(response_frame_header.size_0, received - frame_size);
+                            memcpy(response_buffer, serial_data.buffer+serial_data.frame_start+frame_size, length);
                         }
 
                         switch(response_frame_header.command) {
@@ -247,8 +272,15 @@ void LD2461::report_position(void) {
 
 #endif
 }
-// Homecontrol: the radar sends each coordinate as one signed byte in 0.1 m.
-// This is how the frame is read here; it has not been tried on a real radar.
+// Homecontrol: whether a coordinate frame has been read since the last call.
+bool LD2461::take_new_coordinates() {
+    bool seen = new_coordinates_;
+    new_coordinates_ = false;
+    return seen;
+}
+
+// Homecontrol: each coordinate is read as one signed byte in 0.1 m, as the
+// frame layout in typedefs.h has it. Not tried on a real radar.
 double LD2461::to_mm(uint8_t data) {
     return static_cast<int8_t>(data) * 100.0;
 }
