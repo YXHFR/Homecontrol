@@ -172,10 +172,10 @@ med LD2461, och kontrollera också att
 - `Radar Target 1 X` och `Y` följer en person som går runt, och att
   avståndet stämmer med ett måttband,
 - 4 och 5 personer i rummet ger 4 och 5 mål,
-- `Radar Online` är på hela tiden, även när rummet är tomt, och
-  `Radar Firmware` visar en version. Firmware håller `Radar Online` på bara
-  när en hel ram med mål kommer från radarn. Skickar LD2461 inga ramar när
-  ingen syns blir rummet okänt, och då behöver det ändras.
+- `Radar Online` är på hela tiden, även när rummet är tomt. Firmware håller
+  `Radar Online` på bara när en hel ram med mål kommer från radarn. Skickar
+  LD2461 inga ramar när ingen syns blir rummet okänt, och då behöver det
+  ändras.
 
 ## Kända begränsningar
 

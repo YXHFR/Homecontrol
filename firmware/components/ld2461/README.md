@@ -33,12 +33,15 @@ komponenten. Ändringarna är:
   målet hade X = 0, också ramen när ingen syns, och sista läget låg kvar.
 - **Byte läses utan tecken**, så att `0xDD` och `0xFF` känns igen som slutet
   på ramhuvudet och ramen också där `char` har tecken.
-- **Bara det som har tagits emot läses.** En ram med mål läses bara om den
-  är exakt så lång som väntat från ramhuvudet. Ingen ram läses utanför
-  bufferten, och bufferten börjar om i stället för att slå runt.
+- **Bara det som har tagits emot läses.** En ram läses bara efter ett
+  ramhuvud, och en ram med mål bara om den är exakt så lång som väntat från
+  ramhuvudet. Ingen ram läses utanför bufferten, och bufferten börjar om i
+  stället för att slå runt. Kontrollsumman kontrolleras inte, som i
+  originalet.
 - **`take_new_coordinates()`** säger om en hel ram med mål har kommit.
   `homecontrol-ld2461.yaml` håller `Radar Online` på med den.
-- **Målen börjar på 0** i stället för det som råkade ligga i minnet.
+- **Målen och buffertarna börjar på 0** i stället för det som råkade ligga
+  i minnet.
 - **Number-delen byggs bara när den används** (`USE_LD2461_NUMBER` i stället
   för `USE_NUMBER`). Annars gick firmware inte att bygga, eftersom ESPectre
   också har inställningar. Number-delen själv (zoner och inställningar i
@@ -50,6 +53,10 @@ Allt annat är oförändrat. Homecontrol använder bara sensorerna (målens
 läge, antal mål), närvaron och radarns firmwareversion. Number-, select-
 och button-delarna används inte. Antal mål och närvaro räknar som i
 originalet bara mål vars X inte är 0. Kärnan använder dem inte.
+
+**Känt fel från originalet:** radarns firmwareversion (`Radar Firmware`)
+läses troligen fel och visar `V00.00.0000`, eftersom svaret läses från fel
+ställe i ramen. Kärnan använder den inte.
 
 Ramtolkningen prövas på datorn med påhittade ramar i
 [`scripts/tests/test_ld2461_frames.py`](../../../scripts/tests/test_ld2461_frames.py).

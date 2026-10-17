@@ -129,3 +129,25 @@ def test_a_long_stream_without_frames_does_not_break_the_next_frame(program: Pat
 
     assert fresh
     assert targets[0] == (1500, 2000)
+
+
+def test_bytes_that_only_end_like_a_frame_are_not_read(program: Path) -> None:
+    """Utan ramhuvudet FF EE DD är det inga mål, även om resten ser ut som en ram."""
+    whole = frame((15, 20))
+    no_header = bytes([0x00, 0x00, 0x00]) + whole[3:]
+
+    [(fresh, targets)] = run(program, no_header)
+
+    assert not fresh
+    assert targets == [(0, 0)] * 5
+
+
+def test_an_answer_to_a_command_between_frames_is_not_targets(program: Path) -> None:
+    """Ett svar på ett kommando (här firmwareversionen) håller inte Radar Online på."""
+    answer = bytes([0xFF, 0xEE, 0xDD, 0x00, 0x09, 0x09, *range(1, 9), 0x00, 0xDD, 0xEE, 0xFF])
+
+    [_, (fresh, targets), (fresh_again, _)] = run(program, frame((15, 20)), answer, frame((-5, 30)))
+
+    assert not fresh
+    assert targets[0] == (1500, 2000)
+    assert fresh_again

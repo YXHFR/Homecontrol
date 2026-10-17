@@ -1,5 +1,5 @@
 // Changed for Homecontrol (https://github.com/YXHFR/Homecontrol): to_mm(),
-// take_new_coordinates(), USE_LD2461_NUMBER and start values for the targets.
+// take_new_coordinates(), USE_LD2461_NUMBER, start values and frame_header_seen_.
 // See README.md in this folder.
 #pragma once
 #include "esphome/core/helpers.h"
@@ -128,11 +128,12 @@ class LD2461 : public uart::UARTDevice, public PollingComponent {
     uint8_t FRAME_HEADER[3] = { 0xFF, 0xEE, 0xDD };
     uint8_t FRAME_END[3] = { 0xDD, 0xEE, 0xFF };
 
-    serial_buffer_struct serial_data;
-    frame_start_struct response_frame_header;
-    uint8_t response_buffer[256];
-    data_packet_struct received_data;
-    regions sensor_regions;
+    // Homecontrol: start at 0 instead of whatever was in memory (also below).
+    serial_buffer_struct serial_data{};
+    frame_start_struct response_frame_header{};
+    uint8_t response_buffer[256]{};
+    data_packet_struct received_data{};
+    regions sensor_regions{};
     reporting sensor_reporting;
     std::string version_;
     std::string uuid_;
@@ -143,6 +144,8 @@ class LD2461 : public uart::UARTDevice, public PollingComponent {
     int32_t presence_millis[5]{};
     // Homecontrol: see take_new_coordinates().
     bool new_coordinates_{false};
+    // Homecontrol: a frame header has been seen since the buffer started over.
+    bool frame_header_seen_{false};
     std::vector<EntryPoint *> entry_points;
     std::vector<PresenceRegion *> presence_regions;
 

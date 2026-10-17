@@ -50,6 +50,7 @@ void LD2461::loop() {
         if(serial_data.size == UINT8_MAX) {
             serial_data.size = 0;
             serial_data.frame_start = 0;
+            frame_header_seen_ = false;
         }
         serial_data.buffer[serial_data.size] = c;
         serial_data.size ++;
@@ -59,6 +60,7 @@ void LD2461::loop() {
                 uint8_t fh_size = sizeof(FRAME_HEADER);
                 if(serial_data.size >= fh_size && memcmp(serial_data.buffer+serial_data.size-fh_size, FRAME_HEADER, fh_size) == 0) {
                     serial_data.frame_start = serial_data.size - fh_size;
+                    frame_header_seen_ = true;
                 }
                 break;
             }
@@ -70,9 +72,10 @@ void LD2461::loop() {
                     uint8_t frame_size = sizeof(response_frame_header);
                     // Homecontrol: read only what has been received since the frame header.
                     uint8_t received = serial_data.size - serial_data.frame_start;
-                    if(serial_data.frame_start > serial_data.size || received < frame_size) {
+                    if(!frame_header_seen_ || serial_data.frame_start > serial_data.size || received < frame_size) {
                         serial_data.size = 0;
                         serial_data.frame_start = 0;
+                        frame_header_seen_ = false;
                         break;
                     }
                     memcpy(&response_frame_header, serial_data.buffer+serial_data.frame_start, frame_size);
@@ -132,6 +135,7 @@ void LD2461::loop() {
                         }
                         serial_data.size = 0;
                         serial_data.frame_start = 0;
+                        frame_header_seen_ = false;
                     } else {
                         ESP_LOGD(TAG, "ACK Error, command %02x", response_frame_header.command);
                     }
