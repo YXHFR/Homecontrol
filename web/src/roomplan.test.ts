@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { polygonArea } from "./editing";
 import type { HomeDocument } from "./homefile";
 import type { Point } from "./protocol";
 import {
@@ -91,6 +92,33 @@ function home(): HomeDocument {
       ],
     },
   };
+}
+
+/**
+ * Kärnans regler för det som skanningen lägger in (se home.py): minst tre
+ * hörn och en yta, en vägg per sida, koordinater på planet och en rimlig
+ * takhöjd. Ett hem som bryter mot dem nekas helt när det sparas.
+ */
+function expectValidForCore(document: HomeDocument) {
+  const hasArea = (polygon: [number, number][]) =>
+    polygon.length >= 3 && polygonArea(polygon.map(([x, y]) => ({ x, y }))) > 1e-9;
+  const onPlan = (polygon: [number, number][]) =>
+    polygon.flat().every((v) => v >= 0 && v <= 1000 && Math.round(v * 100) / 100 === v);
+  for (const floor of document.home.floors) {
+    for (const room of floor.rooms) {
+      expect(hasArea(room.polygon), room.id).toBe(true);
+      expect(onPlan(room.polygon), room.id).toBe(true);
+      expect(room.walls).toHaveLength(room.polygon.length);
+      if (room.ceiling_height != null) {
+        expect(room.ceiling_height).toBeGreaterThan(0);
+        expect(room.ceiling_height).toBeLessThanOrEqual(20);
+      }
+    }
+    for (const item of floor.furniture ?? []) {
+      expect(hasArea(item.polygon), item.name).toBe(true);
+      expect(onPlan(item.polygon), item.name).toBe(true);
+    }
+  }
 }
 
 describe("exempelskanningen", () => {
@@ -327,6 +355,67 @@ describe("en tolerant läsare", () => {
     expect(scan.problems.join(" ")).toContain(`Bara de första ${MAX_ITEMS} lästes.`);
   });
 
+  it("läser golvets hörn på rätt plats även när matrisen bara flyttar golvet", () => {
+    const floor = {
+      category: { floor: {} },
+      transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 0, 10, 1],
+      polygonCorners: [
+        [-2, 1.5, 0],
+        [2, 1.5, 0],
+        [2, -1.5, 0],
+        [-2, -1.5, 0],
+      ],
+    };
+    const scan = readScan(JSON.stringify({ floors: [floor] }));
+    expect(bounds(scan.rooms[0].polygon)).toEqual({
+      minX: expect.closeTo(8) as number,
+      minY: expect.closeTo(8.5) as number,
+      width: expect.closeTo(4) as number,
+      height: expect.closeTo(3) as number,
+    });
+  });
+
+  it("struntar i orimliga takhöjder", () => {
+    const tall = boxScan();
+    for (const wall of tall.walls as { dimensions: number[] }[]) {
+      wall.dimensions[1] = 30;
+    }
+    expect(readScan(JSON.stringify(tall)).rooms[0].ceilingHeight).toBeNull();
+  });
+
+  it("läser bara det första våningsplanet och säger till", () => {
+    const upstairs = { ...surface("wall", [0, 0], [4, 0]), story: 1 };
+    const scan = readScan(
+      JSON.stringify(boxScan({ walls: [...(boxScan().walls as object[]), upstairs] })),
+    );
+    expect(scan.rooms).toHaveLength(1);
+    expect(scan.problems).toContain("Skanningen har flera våningsplan. Bara det första lästes in.");
+  });
+
+  it("låter en dörr i ett fönster vara dörröppning, med glas på båda sidor", () => {
+    const scan = readScan(
+      JSON.stringify(
+        boxScan({
+          windows: [surface("window", [1, 3], [3, 3])],
+          doors: [surface("door", [2, 3], [2.8, 3])],
+        }),
+      ),
+    );
+    expect(scan.rooms[0].walls.filter((kind) => kind !== "gips")).toEqual([
+      "glas",
+      "dörröppning",
+      "glas",
+    ]);
+  });
+
+  it("säger till när en rundad vägg blir rak", () => {
+    const walls = boxScan().walls as Record<string, unknown>[];
+    walls[0] = { ...walls[0], curve: { radius: 3 } };
+    expect(readScan(JSON.stringify({ walls })).problems).toContain(
+      "Vägg 1 är rundad i skanningen och blev rak.",
+    );
+  });
+
   it("läser ett rum i taget ur en skanning av flera rum", () => {
     const scan = readScan(JSON.stringify({ rooms: [boxScan(), boxScan({}, 6)] }));
     expect(scan.rooms).toHaveLength(2);
@@ -360,6 +449,65 @@ describe("att lägga in skanningen i hemmet", () => {
     expect(floor.name).toBe("Plan 1");
     expect(floor.signal_sources).toHaveLength(1);
     expect(floor.rooms.map((room) => room.id)).toEqual(["vardagsrum", "sovrum"]);
+  });
+
+  it("blir ett hem som kärnan godtar, hur skanningen än vrids och flyttas", () => {
+    for (const quarterTurns of [0, 1, 2, 3]) {
+      for (const position of [
+        { x: 0, y: 0 },
+        { x: 0.333, y: 7.777 },
+      ]) {
+        const placed = placeScan(readScan(EXAMPLE), { quarterTurns, position });
+        expectValidForCore(importScan(home(), placed, { kind: "new" }).document);
+        expectValidForCore(
+          importScan(home(), placed, { kind: "replace", floorId: "plan" }).document,
+        );
+      }
+    }
+  });
+
+  it("behåller dörren när två hörn avrundas till samma punkt", () => {
+    // Golvets två första hörn ligger 3 mm isär, och dörren börjar i hörnet.
+    const floor = {
+      category: { floor: {} },
+      polygonCorners: [
+        [0, 0, 0],
+        [0.003, 0, 0],
+        [4, 0, 0],
+        [4, 0, 3],
+        [0, 0, 3],
+      ],
+    };
+    const scan = readScan(
+      JSON.stringify(boxScan({ floors: [floor], doors: [surface("door", [0, 0], [0.9, 0])] })),
+    );
+    expect(scan.doorways).toBe(1);
+    const placed = placeScan(scan, { quarterTurns: 0, position: { x: 1, y: 1 } });
+    const { document, floorId } = importScan(home(), placed, { kind: "new" });
+    const room = document.home.floors.find((f) => f.id === floorId)?.rooms[0];
+    expect(room?.walls).toContain("dörröppning");
+    expect(room?.polygon[room.walls.indexOf("dörröppning")]).toEqual([1, 1]);
+    expectValidForCore(document);
+  });
+
+  it("tar inte med en möbel som blir utan yta när hörnen avrundas", () => {
+    // En 4 mm djup tv: ytan räcker innan avrundningen men inte efter.
+    const tv = {
+      category: { television: {} },
+      dimensions: [1, 0.5, 0.004],
+      transform: transform(2, 1.5),
+    };
+    const scan = readScan(JSON.stringify(boxScan({ objects: [tv] })));
+    expect(scan.furniture).toHaveLength(1);
+    const placed = placeScan(scan, { quarterTurns: 0, position: { x: 0, y: 0 } });
+    const { document } = importScan(home(), placed, { kind: "new" });
+    expect(document.home.floors[1].furniture).toEqual([]);
+  });
+
+  it("säger till om våningen som skulle ersättas inte finns längre", () => {
+    expect(() => importScan(home(), scan, { kind: "replace", floorId: "borta" })).toThrow(
+      "finns inte längre",
+    );
   });
 
   it("ändrar inte hemmet den fick", () => {

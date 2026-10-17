@@ -746,10 +746,17 @@ export function mountEditor(
       return;
     }
     const placed = placeScan(current.scan, current.placement);
+    let nextFloor: string;
+    try {
+      nextFloor = importScan(shown, placed, current.target).floorId;
+    } catch (error) {
+      showMessage(errorText(error));
+      return;
+    }
     const previousFloor = floorId;
     scanImport = null;
     selection = null;
-    floorId = importScan(shown, placed, current.target).floorId;
+    floorId = nextFloor;
     // Ändringen görs om på det sparade hemmet; utan konflikter blir våningens id detsamma.
     commit(
       (document) => importScan(document, placed, current.target).document,

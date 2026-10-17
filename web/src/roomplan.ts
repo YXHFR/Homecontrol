@@ -25,6 +25,7 @@ import {
   polygonArea,
   roomProblem,
   roundCm,
+  toPoint,
   toXY,
   uniqueId,
   updateFloors,
@@ -82,6 +83,8 @@ const CORNER_TOLERANCE = 0.5;
 const EPSILON = 1e-6;
 /** Mindre möbler än så här (kvadratmeter ovanifrån) hoppas över. */
 const MIN_FURNITURE_AREA = 1e-4;
+/** Högre väggar än så här är fel i skanningen (samma gräns som MAX_HEIGHT i kärnans home.py). */
+const MAX_CEILING_HEIGHT = 20;
 /**
  * Högst så här många saker av varje slag (väggar, golv, möbler …) och hörn per golv läses.
  * En riktig skanning har några hundra; en enorm fil skulle annars kunna låsa webbläsaren.
@@ -250,7 +253,7 @@ function readFloorPolygon(value: unknown): { polygon: Point[]; story: number } |
       // Matrisen saknas eller lägger golvet på högkant, så hörnen står i golvets
       // eget plan. Där pekar y bort från betraktaren, alltså mot skanningens −z
       // och uppåt på kartan.
-      polygon = local.map(([x, y]) => ({ x, y: -y }));
+      polygon = local.map(([x, y]) => ({ x: x + matrix[12], y: -y + matrix[14] }));
     }
     return { polygon, story };
   }
@@ -624,7 +627,9 @@ function buildRoom(
     for (const wall of surfaces.walls) {
       if (alongSide(a, b, wall) !== null) {
         used.add(wall);
-        heights.push(wall.height);
+        if (wall.height > 0 && wall.height <= MAX_CEILING_HEIGHT) {
+          heights.push(wall.height);
+        }
       }
     }
     const side = sub(b, a);
@@ -645,7 +650,7 @@ function buildRoom(
     name,
     polygon,
     walls: kinds,
-    ceilingHeight: height !== null && height > 0 ? height : null,
+    ceilingHeight: height,
   };
 }
 
@@ -790,14 +795,15 @@ function roundedOutline(polygon: Point[], walls: WallKind[]): { polygon: XY[]; w
   const same = (a: XY, b: XY) => a[0] === b[0] && a[1] === b[1];
   const kept: { point: XY; wall: WallKind }[] = [];
   polygon.map(toXY).forEach((point, i) => {
-    const previous = kept.at(-1)?.point;
-    if (previous !== undefined && same(previous, point)) {
-      return; // sidan före var noll lång; väggen efter hörnet gäller
+    const last = kept.at(-1);
+    if (last !== undefined && same(last.point, point)) {
+      last.wall = walls[i]; // sidan före blev noll lång; väggen från det här hörnet gäller
+      return;
     }
     kept.push({ point, wall: walls[i] });
   });
-  const last = kept.at(-1);
-  if (kept.length > 1 && last !== undefined && same(kept[0].point, last.point)) {
+  const closing = kept.at(-1);
+  if (kept.length > 1 && closing !== undefined && same(kept[0].point, closing.point)) {
     kept.pop();
   }
   return { polygon: kept.map((k) => k.point), walls: kept.map((k) => k.wall) };
@@ -814,12 +820,19 @@ export const SCANNED_FLOOR_NAME = "Skannad våning";
  * plan ovanför den översta. I stället för en våning ersätts våningens rum
  * och möbler, med allt i rummen (zoner, rumskort och lampor). Våningens
  * namn, routrar och planritning finns kvar.
+ *
+ * Hörnen avrundas till hela centimeter. Ett rum eller en möbel som då inte
+ * längre har någon yta tas inte med, eftersom kärnan inte skulle godta det.
+ * Ger ett `ScanError` om våningen som ska ersättas inte finns.
  */
 export function importScan(
   document: HomeDocument,
   scan: Scan,
   target: ScanTarget,
 ): { document: HomeDocument; floorId: string } {
+  if (target.kind === "replace" && !document.home.floors.some((f) => f.id === target.floorId)) {
+    throw new ScanError("Våningen som skanningen skulle ersätta finns inte längre.");
+  }
   const added =
     target.kind === "new"
       ? addFloor(document, SCANNED_FLOOR_NAME)
@@ -832,7 +845,7 @@ export function importScan(
   const rooms: RoomModel[] = [];
   for (const scanned of scan.rooms) {
     const outline = roundedOutline(scanned.polygon, scanned.walls);
-    if (outline.polygon.length < 3) {
+    if (outline.polygon.length < 3 || polygonArea(outline.polygon.map(toPoint)) < EPSILON) {
       continue;
     }
     // Id:t räknas fram mot hemmet med de rum som redan är tillagda.
@@ -843,9 +856,8 @@ export function importScan(
     }
     rooms.push(room);
   }
-  const furniture = scan.furniture.map((item) => ({
-    name: item.name,
-    polygon: item.polygon.map(toXY),
-  }));
+  const furniture = scan.furniture
+    .map((item) => ({ name: item.name, polygon: item.polygon.map(toXY) }))
+    .filter((item) => polygonArea(item.polygon.map(toPoint)) >= MIN_FURNITURE_AREA);
   return { document: withRooms(empty, rooms, furniture), floorId };
 }
