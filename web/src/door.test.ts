@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hasDoorbell, mountDoor, POLL_MS, timeLeft, type DoorApi, type DoorState } from "./door";
+import { hasDoorbell, mountDoor, POLL_MS, RETRY_MS, timeLeft, type DoorApi, type DoorState } from "./door";
 
 class FakeDoor implements DoorApi {
   current: DoorState | null = { camera: true, open_seconds: 0 };
@@ -96,6 +96,20 @@ describe("sidan Dörren", () => {
     expect(root.textContent).toContain("Ingen dörrklocka är inställd");
     expect(showButton(root).hidden).toBe(true);
     expect(await hasDoorbell(door)).toBe(false);
+  });
+
+  it("försöker visa strömmen igen när den har brutits", async () => {
+    const door = new FakeDoor();
+    close = mountDoor(root, door);
+    await flush();
+    showButton(root).click();
+    await flush();
+
+    image(root).dispatchEvent(new Event("error"));
+    expect(image(root).getAttribute("src")).toBeNull();
+    await vi.advanceTimersByTimeAsync(RETRY_MS + 1000);
+
+    expect(image(root).src).toContain("/api/dorr/strom");
   });
 
   it("slutar hämta strömmen när sidan stängs", async () => {

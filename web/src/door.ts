@@ -51,6 +51,8 @@ export const coreDoorApi: DoorApi = {
 
 /** Hur ofta sidan frågar kärnan om någon har ringt. */
 export const POLL_MS = 3000;
+/** Så länge sidan väntar innan den försöker visa en bruten ström igen. */
+export const RETRY_MS = 3000;
 
 /** Tiden kvar som minuter och sekunder, till exempel 1:05. */
 export function timeLeft(seconds: number): string {
@@ -81,7 +83,7 @@ export function mountDoor(root: HTMLElement, api: DoorApi = coreDoorApi): () => 
     element(
       "p",
       { className: "help" },
-      "Kameran visas bara i 2 minuter efter att någon har ringt på, eller efter att du har " +
+      "Kameran visas bara en kort stund efter att någon har ringt på, eller efter att du har " +
         "tryckt på Visa dörren. Annars filmas och sparas ingenting.",
     ),
     showButton,
@@ -92,9 +94,20 @@ export function mountDoor(root: HTMLElement, api: DoorApi = coreDoorApi): () => 
   let closesAt = 0;
   let streaming = false;
   let stopped = false;
+  let retryAt = 0;
+
+  // Bryts strömmen (kameran hickar, eller kärnan svarar att den inte går att
+  // visa just nu) försöker sidan igen om en stund, så länge fönstret är öppet.
+  image.addEventListener("error", () => {
+    if (streaming) {
+      streaming = false;
+      image.removeAttribute("src");
+      retryAt = Date.now() + RETRY_MS;
+    }
+  });
 
   const startStream = () => {
-    if (!streaming) {
+    if (!streaming && Date.now() >= retryAt) {
       streaming = true;
       // Ny adress varje gång, så att webbläsaren inte visar en gammal bild.
       image.src = `${api.streamUrl()}?t=${Date.now()}`;
@@ -118,7 +131,7 @@ export function mountDoor(root: HTMLElement, api: DoorApi = coreDoorApi): () => 
       stopStream();
     }
   };
-  const use = (state: DoorState | null) => {
+  const applyState = (state: DoorState | null) => {
     if (state === null) {
       status.textContent = "Ingen dörrklocka är inställd. Hur den ställs in står i README.";
       showButton.hidden = true;
@@ -140,7 +153,7 @@ export function mountDoor(root: HTMLElement, api: DoorApi = coreDoorApi): () => 
   async function show() {
     showButton.disabled = true;
     try {
-      use(await api.show());
+      applyState(await api.show());
     } catch (error) {
       report(error);
     } finally {
@@ -149,7 +162,7 @@ export function mountDoor(root: HTMLElement, api: DoorApi = coreDoorApi): () => 
   }
   const poll = async () => {
     try {
-      use(await api.state());
+      applyState(await api.state());
     } catch (error) {
       report(error);
     }
@@ -157,7 +170,7 @@ export function mountDoor(root: HTMLElement, api: DoorApi = coreDoorApi): () => 
 
   void poll();
   const pollTimer = window.setInterval(() => void poll(), POLL_MS);
-  const tick = window.setInterval(() => {
+  const countdownTimer = window.setInterval(() => {
     if (closesAt > 0) {
       render();
     }
@@ -166,7 +179,7 @@ export function mountDoor(root: HTMLElement, api: DoorApi = coreDoorApi): () => 
     if (!stopped) {
       stopped = true;
       window.clearInterval(pollTimer);
-      window.clearInterval(tick);
+      window.clearInterval(countdownTimer);
       stopStream();
     }
   };
