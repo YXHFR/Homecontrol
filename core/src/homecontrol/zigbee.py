@@ -28,6 +28,10 @@ med `LampStateReported`.
   borta (``<lampa>/availability``), eller som inte längre finns i Zigbee-
   nätet rapporteras med läget okänt (``on=None``). Samma sak gäller alla
   lampor när MQTT eller Zigbee2MQTT är borta.
+* **Status.** Utgången berättar om den har kontakt med brokern och om
+  Zigbee2MQTT är igång (`ZigbeeOutput.view`), så att livevyn kan visa varför
+  lamporna inte svarar. Loggen får en rad när något av dem försvinner eller
+  kommer tillbaka, men aldrig när lampor tänds och släcks.
 * **Lampprofiler.** Hur kommandot ser ut avgörs av lampans profil (se
   `Profile`), till exempel IKEA TRÅDFRI:s egenheter.
 
@@ -51,6 +55,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, NamedTuple, Protocol
 
 import aiomqtt
@@ -375,6 +380,19 @@ class _AiomqttConnection:
 # --- Utgången ---
 
 
+@dataclass(frozen=True)
+class ZigbeeView:
+    """Det som livevyn visar om MQTT-brokern och Zigbee2MQTT."""
+
+    mqtt_connected: bool
+    """Utgången har en anslutning till brokern."""
+    bridge_online: bool | None
+    """Det Zigbee2MQTT senast sa i ``bridge/state``, eller None när utgången inte är
+    ansluten eller inte har hört något sedan den anslöt."""
+    since: datetime
+    """När läget senast ändrades."""
+
+
 @dataclass
 class _LampStatus:
     """Vad utgången vet om en placerad lampa."""
@@ -433,6 +451,7 @@ class ZigbeeOutput:
     beslut, så att ett rums lampor kan skickas som ett gruppkommando. Utan
     `defer` skickas varje kommando direkt.
     `now` är riktig tid i sekunder. Den påverkas inte av simuleringens tidsfart.
+    `wall_clock` ger klockslaget då anslutningens läge ändras (se `view`).
     """
 
     def __init__(
@@ -441,11 +460,17 @@ class ZigbeeOutput:
         *,
         defer: Defer | None = None,
         now: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         base_topic: str = BASE_TOPIC,
     ) -> None:
         self._home = home
         self._defer = defer
         self._now = now
+        self._wall_clock = wall_clock
+        self._view = ZigbeeView(mqtt_connected=False, bridge_online=None, since=wall_clock())
+        self._listeners: list[Callable[[], None]] = []
+        self._outage_logged = False
+        """Att brokern inte går att nå har loggats, och den har inte svarat sedan dess."""
         self._base = base_topic
         self._sink: ObservationSink | None = None
         self._publish: Publish | None = None
@@ -517,6 +542,15 @@ class ZigbeeOutput:
         self._sync_groups()
         self._ask_lamps()
 
+    def view(self) -> ZigbeeView:
+        """Om utgången har kontakt med brokern och Zigbee2MQTT, för livevyn."""
+        return self._view
+
+    def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Anropar `listener` när `view` ändras. Returnerar en funktion som avslutar."""
+        self._listeners.append(listener)
+        return lambda: self._listeners.remove(listener)
+
     def lamps(self) -> list[FoundLamp]:
         """Lamporna i Zigbee-nätet, för webbgränssnittet. De oplacerade väntar på att placeras."""
         devices = {} if self._devices is None else self._devices
@@ -533,17 +567,22 @@ class ZigbeeOutput:
         while True:
             try:
                 async with connect() as connection:
-                    logger.info("Ansluten till MQTT-brokern")
                     await self._serve(connection)
             except (ConnectionError, OSError) as error:
-                logger.warning(
-                    "Ingen kontakt med MQTT-brokern (%s). Försöker igen. Kör "
-                    "'docker compose ps' och kontrollera MQTT_CORE_PASSWORD i .env.",
-                    error,
-                )
+                # En rad per avbrott, inte en för varje försök att ansluta igen.
+                if not self._outage_logged:
+                    logger.warning(
+                        "Ingen kontakt med MQTT-brokern (%s). Försöker igen. Kör "
+                        "'docker compose ps' och kontrollera MQTT_CORE_PASSWORD i .env.",
+                        error,
+                    )
+                else:
+                    logger.debug("MQTT-brokern svarar inte än (%s)", error)
+                self._outage_logged = True
             except Exception:
                 # Utgången får inte dö tyst; då styrs inga lampor förrän kärnan startas om.
                 logger.exception("Fel i lamputgången Zigbee2MQTT. Ansluter igen.")
+                self._outage_logged = True
             finally:
                 self.disconnected()
             await asyncio.sleep(RECONNECT_SECONDS)
@@ -597,11 +636,18 @@ class ZigbeeOutput:
     def connected(self, publish: Publish) -> None:
         """Utgången är ansluten. Zigbee2MQTT:s sparade meddelanden kommer strax."""
         self._publish = publish
+        self._outage_logged = False
+        if not self._view.mqtt_connected:
+            logger.info("Ansluten till MQTT-brokern")
+            # Zigbee2MQTT:s läge är okänt tills dess sparade ``bridge/state`` har kommit.
+            self._change_view(mqtt_connected=True, bridge_online=None)
 
     def disconnected(self) -> None:
         """Utgången har tappat brokern: ingen lampa går att nå, och lägena gäller inte längre."""
         self._publish = None
         self._bridge_online = False
+        # Loggas i `run`, som vet varför anslutningen bröts.
+        self._change_view(mqtt_connected=False, bridge_online=None)
         self._group_requests.clear()
         self._transactions.clear()
         self._later.clear()
@@ -701,6 +747,13 @@ class ZigbeeOutput:
                     self._device_state(address, data)
 
     def _bridge_state(self, online: bool) -> None:
+        # Utan anslutning är Zigbee2MQTT:s läge okänt, vad som än har kommit.
+        if self._view.mqtt_connected and online != self._view.bridge_online:
+            if online:
+                logger.info("Zigbee2MQTT är igång")
+            else:
+                logger.warning("Zigbee2MQTT är borta; lampornas läge är okänt")
+            self._change_view(mqtt_connected=True, bridge_online=online)
         if online == self._bridge_online:
             return
         self._bridge_online = online
@@ -708,7 +761,6 @@ class ZigbeeOutput:
             self._sync_groups()
             self._ask_lamps()
         else:
-            logger.warning("Zigbee2MQTT är borta; lampornas läge är okänt")
             for lamp_id in self._lamps:
                 self._gone(lamp_id)
 
@@ -862,6 +914,20 @@ class ZigbeeOutput:
         status.gone = True
         status.on = None
         self._report(LampStateReported(lamp_id, None))
+
+    def _change_view(self, *, mqtt_connected: bool, bridge_online: bool | None) -> None:
+        """Byter läget som livevyn visar. Lyssnarna får bara veta när något har ändrats."""
+        if (mqtt_connected, bridge_online) == (
+            self._view.mqtt_connected,
+            self._view.bridge_online,
+        ):
+            return
+        self._view = ZigbeeView(mqtt_connected, bridge_online, self._wall_clock())
+        for listener in list(self._listeners):
+            try:
+                listener()
+            except Exception:
+                logger.exception("Kunde inte berätta om Zigbee-utgångens läge")
 
     def _report(self, report: LampStateReported) -> None:
         if self._sink is None:

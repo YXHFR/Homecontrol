@@ -23,6 +23,14 @@ Protokollet är JSON. Kärnan skickar:
   ``database`` är ``{"connected": true}`` när kärnan har kontakt med
   databasen, ``{"connected": false}`` när den inte har det och styr med sin
   kopia av hemmet (se databaselink.py), och null när ingen databas är inställd.
+  Fältet ``zigbee`` visar Zigbee-utgången (se zigbee.py):
+  ``{"mqtt_connected": true, "bridge_online": true, "since": "2026-10-17T19:42:00Z"}``.
+  ``mqtt_connected`` är om kärnan har en anslutning till MQTT-brokern,
+  ``bridge_online`` det Zigbee2MQTT senast sa i ``bridge/state`` (null när
+  kärnan inte är ansluten eller inte har hört något än), och ``since`` när
+  läget senast ändrades, i UTC. Fältet är null när Zigbee-utgången inte
+  används, till exempel i simuleringsläge utan MQTT. Ett nytt läge skickas
+  när något av dem ändras, inte vid varje meddelande från brokern.
 
 Livevyn styr lamporna för hand:
 
@@ -58,6 +66,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable, Sequence, Set
+from datetime import UTC
 from typing import Annotated, Any, Literal
 
 import anyio
@@ -73,6 +82,7 @@ from homecontrol.databaselink import DatabaseLink, DatabaseView
 from homecontrol.home import Home, Point
 from homecontrol.simulation import Simulation, SimulationView, Speed
 from homecontrol.trust import trusted
+from homecontrol.zigbee import ZigbeeOutput, ZigbeeView
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +235,7 @@ def state_message(
     simulation: SimulationView | None,
     cards: Sequence[CardView] | None = None,
     database: DatabaseView | None = None,
+    zigbee: ZigbeeView | None = None,
 ) -> dict[str, Any]:
     return {
         "type": "state",
@@ -269,6 +280,16 @@ def state_message(
             None if snapshot.calibration is None else calibration_message(snapshot.calibration)
         ),
         "database": None if database is None else {"connected": database.connected},
+        "zigbee": None if zigbee is None else zigbee_message(zigbee),
+    }
+
+
+def zigbee_message(zigbee: ZigbeeView) -> dict[str, Any]:
+    since = zigbee.since.astimezone(UTC).isoformat(timespec="seconds")
+    return {
+        "mqtt_connected": zigbee.mqtt_connected,
+        "bridge_online": zigbee.bridge_online,
+        "since": since.replace("+00:00", "Z"),
     }
 
 
@@ -308,14 +329,16 @@ def create_live_router(
     virtual_lamps: Callable[[Home], Set[str]] = lambda _: frozenset(),
     cards: Cards | None = None,
     database: DatabaseLink | None = None,
+    zigbee: ZigbeeOutput | None = None,
 ) -> APIRouter:
     """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som livevyn får nås på.
 
     `virtual_lamps` ger lamporna i ett hem som bara finns i simuleringen, utan
     någon riktig lampa. Den anropas varje gång hemmet har bytts.
 
-    `cards` är de riktiga rumskorten (se cards.py), och `database` kärnans
-    kontakt med databasen (se databaselink.py).
+    `cards` är de riktiga rumskorten (se cards.py), `database` kärnans
+    kontakt med databasen (se databaselink.py) och `zigbee` lamputgången
+    Zigbee2MQTT (se zigbee.py).
     """
     router = APIRouter()
 
@@ -331,7 +354,7 @@ def create_live_router(
         changed = asyncio.Event()
         changed.set()
         unsubscribes = [controller.subscribe(changed.set)]
-        for source in (simulation, cards, database):
+        for source in (simulation, cards, database, zigbee):
             if source is not None:
                 unsubscribes.append(source.subscribe(changed.set))
 
@@ -346,8 +369,11 @@ def create_live_router(
                 view = None if simulation is None else simulation.view()
                 card_views = None if cards is None else cards.cards()
                 database_view = None if database is None else database.view()
+                zigbee_view = None if zigbee is None else zigbee.view()
                 await websocket.send_json(
-                    state_message(controller.snapshot(), view, card_views, database_view)
+                    state_message(
+                        controller.snapshot(), view, card_views, database_view, zigbee_view
+                    )
                 )
 
         async def receive_commands(group: anyio.abc.TaskGroup) -> None:

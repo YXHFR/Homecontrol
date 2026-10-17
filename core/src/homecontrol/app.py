@@ -171,7 +171,9 @@ def create_app(
         return frozenset(lamp.id for lamp in home.lamps) - real_lamps(home)
 
     app.include_router(
-        create_live_router(controller, simulation, allowed_hosts, virtual_lamps, cards, database)
+        create_live_router(
+            controller, simulation, allowed_hosts, virtual_lamps, cards, database, zigbee
+        )
     )
     app.include_router(create_cards_router(cards, allowed_hosts))
     app.include_router(create_lamp_devices_router(zigbee, allowed_hosts))
