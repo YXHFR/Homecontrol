@@ -1,3 +1,5 @@
+// Changed for Homecontrol (https://github.com/YXHFR/Homecontrol): to_mm(), USE_LD2461_NUMBER.
+// See README.md in this folder.
 #pragma once
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
@@ -14,7 +16,7 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
 
-#ifdef USE_NUMBER
+#ifdef USE_LD2461_NUMBER
 #include "esphome/components/number/number.h"
 #include "number/entry_point.h"
 #include "number/presence_region.h"
@@ -62,7 +64,7 @@ class LD2461 : public uart::UARTDevice, public PollingComponent {
   SUB_SENSOR(target_count)
 #endif
 
-#ifdef USE_NUMBER
+#ifdef USE_LD2461_NUMBER
   SUB_NUMBER(presence_timeout)
 #endif
 
@@ -98,7 +100,7 @@ class LD2461 : public uart::UARTDevice, public PollingComponent {
     void add_entry_point(EntryPoint *entry_point);
     void add_presence_region(PresenceRegion *presence_region);
 
-#ifdef USE_NUMBER
+#ifdef USE_LD2461_NUMBER
     void set_region_number(int region, int coord, number::Number *n);
     void set_region(uint8_t region);
     void set_presence_timeout_number();
@@ -138,11 +140,12 @@ class LD2461 : public uart::UARTDevice, public PollingComponent {
     std::vector<EntryPoint *> entry_points;
     std::vector<PresenceRegion *> presence_regions;
 
-#ifdef USE_NUMBER
+#ifdef USE_LD2461_NUMBER
     std::vector<std::vector<number::Number*>> region_numbers_ = std::vector<std::vector<number::Number*>>(3, std::vector<number::Number*>(4));;
 #endif
 
     int16_t transform(uint16_t data);
+    static double to_mm(uint8_t data);
     void report_position(void);
 
     void send_command_(uint8_t command_str, const uint8_t *command_value, int command_value_len);

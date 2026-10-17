@@ -1,3 +1,7 @@
+// Changed for Homecontrol (https://github.com/YXHFR/Homecontrol): the
+// coordinates are now published in mm, the number code is built only with
+// USE_LD2461_NUMBER, and the firmware version is formatted safely. See
+// README.md in this folder.
 #include "ld2461.h"
 
 namespace esphome {
@@ -61,7 +65,15 @@ void LD2461::loop() {
                             memcpy(&sensor_regions, serial_data.buffer+serial_data.frame_start+frame_size, sensor_regions_size);
                         } else if(response_frame_header.command == GET_COORDINATES){
                             uint8_t packet_size = sizeof(data_packet_struct); 
-                            memcpy(&received_data, serial_data.buffer+serial_data.size-packet_size, packet_size);
+                            // Homecontrol: only a whole frame is read, and the coordinates
+                            // are handed on to the sensors (upstream never set person[]).
+                            if(serial_data.size >= packet_size) {
+                                memcpy(&received_data, serial_data.buffer+serial_data.size-packet_size, packet_size);
+                                for(int i=0; i<5; i++) {
+                                    person[i].x = to_mm(received_data.person[i].cx);
+                                    person[i].y = to_mm(received_data.person[i].cy);
+                                }
+                            }
                         }
                           else {
                             memcpy(response_buffer, serial_data.buffer+serial_data.frame_start+frame_size, response_frame_header.size_0);
@@ -70,13 +82,14 @@ void LD2461::loop() {
                         switch(response_frame_header.command) {
 
                             case READ_FIRMWARE:
-                                this->version_ = str_snprintf("V%u.%02X.%02X%02X/%02X", 17, response_buffer[2], 
+                                // Homecontrol: four values for four fields (upstream had five fields).
+                                this->version_ = str_snprintf("V%02X.%02X.%02X%02X", 17, response_buffer[2], 
                                     response_buffer[3], response_buffer[1], response_buffer[0]).c_str();
                                 this->uuid_ = str_snprintf("%02x%02x%02x%02x", 17, response_buffer[4], 
                                     response_buffer[5], response_buffer[6], response_buffer[7]).c_str();
                                 break;
 
-#ifdef USE_NUMBER
+#ifdef USE_LD2461_NUMBER
                             case GET_REGIONS:
                                 for(int i=0; i<3; i++) {
                                     number::Number *x0 = this->region_numbers_[i][0];
@@ -133,13 +146,13 @@ void LD2461::set_reporting_type(uint8_t state) {
     this->send_command_(SET_REPORTING, (uint8_t *)&sensor_reporting, sensor_reporting_size);
 }
 
-#ifdef USE_NUMBER
+#ifdef USE_LD2461_NUMBER
 void LD2461::set_region_number(int region, int coord, number::Number *n) {
     this->region_numbers_[region][coord] = n;
 }
 #endif
 
-#ifdef USE_NUMBER
+#ifdef USE_LD2461_NUMBER
 void LD2461::set_region(uint8_t region) {
     number::Number *x0 = this->region_numbers_[region][0];
     number::Number *y0 = this->region_numbers_[region][1];
@@ -195,7 +208,7 @@ void LD2461::report_position(void) {
     {
         int32_t current_millis = millis();
 
-    #ifdef USE_NUMBER
+    #ifdef USE_LD2461_NUMBER
         for (auto *presence_region : presence_regions) {
             presence_region->check_target(person);
         }
@@ -204,7 +217,7 @@ void LD2461::report_position(void) {
         for(int i=0; i<5; i++) {
             bool exiting=false;
 
-    #ifdef USE_NUMBER
+    #ifdef USE_LD2461_NUMBER
             for (auto *entry_point : entry_points) {
                 if(entry_point->check_point(person_before[i])) {
                     exiting = true;
@@ -234,6 +247,12 @@ void LD2461::report_position(void) {
 
 #endif
 }
+// Homecontrol: the radar sends each coordinate as one signed byte in 0.1 m.
+// This is how the frame is read here; it has not been tried on a real radar.
+double LD2461::to_mm(uint8_t data) {
+    return static_cast<int8_t>(data) * 100.0;
+}
+
 int16_t LD2461::transform(uint16_t data) {
     return (data>>15) == 1 ? -1 * (data&0x7FFF) : data&0x7FFF;
 }
@@ -242,7 +261,7 @@ void LD2461::add_entry_point(EntryPoint *entry_point) { entry_points.emplace_bac
 
 void LD2461::add_presence_region(PresenceRegion *presence_region) { presence_regions.emplace_back(presence_region); }
 
-#ifdef USE_NUMBER
+#ifdef USE_LD2461_NUMBER
 void LD2461::set_presence_timeout_number() {
     if (this->presence_timeout_number_ != nullptr && this->presence_timeout_number_->has_state()) {
         presence_timeout = this->presence_timeout_number_->state;

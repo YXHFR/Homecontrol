@@ -1,3 +1,5 @@
+# Changed for Homecontrol (https://github.com/YXHFR/Homecontrol): positions in mm.
+# See README.md in this folder.
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
@@ -5,7 +7,6 @@ from esphome.const import (
     CONF_TYPE,
     CONF_NUMBER,
     STATE_CLASS_MEASUREMENT,
-    UNIT_CENTIMETER,
     ICON_ACCELERATION_Y,
     ICON_ACCELERATION_X,
     CONF_ICON,
@@ -42,16 +43,16 @@ CONFIG_SCHEMA = CONFIG_SCHEMA.extend(
         cv.Optional(f"person_{x}"): cv.Schema(
             {
                 cv.Optional(CONF_POSITION_X): sensor.sensor_schema(
-                    accuracy_decimals=1,
+                    accuracy_decimals=0,
                     state_class=STATE_CLASS_MEASUREMENT,
                     icon=ICON_ACCELERATION_X,
-                    unit_of_measurement=UNIT_CENTIMETER
+                    unit_of_measurement=UNIT_MM
                 ),
                 cv.Optional(CONF_POSITION_Y): sensor.sensor_schema(
-                    accuracy_decimals=1,
+                    accuracy_decimals=0,
                     state_class=STATE_CLASS_MEASUREMENT,
                     icon=ICON_ACCELERATION_Y,
-                    unit_of_measurement=UNIT_CENTIMETER
+                    unit_of_measurement=UNIT_MM
                 )
             }
         )

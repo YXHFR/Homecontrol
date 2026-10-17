@@ -1,3 +1,5 @@
+# Changed for Homecontrol (https://github.com/YXHFR/Homecontrol): USE_LD2461_NUMBER.
+# See README.md in the parent folder.
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import number
@@ -122,6 +124,9 @@ CONFIG_SCHEMA = CONFIG_SCHEMA.extend(
 
 
 async def to_code(config):
+    # Homecontrol: the number code in ld2461.h/.cpp is only built when this
+    # platform is used (USE_NUMBER is also set by other components).
+    cg.add_define("USE_LD2461_NUMBER")
     ld2461 = await cg.get_variable(config[CONF_LD2461_ID])
 
     if presence_timeout_config := config.get(CONF_PRESENCE_TIMEOUT):
