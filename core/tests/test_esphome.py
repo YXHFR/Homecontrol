@@ -46,7 +46,7 @@ from homecontrol.esphome import (
     part_source,
 )
 from homecontrol.fusion import Occupancy
-from homecontrol.home import Capability, Home
+from homecontrol.home import Capability, Home, Point, RadarModel
 from homecontrol.simulation import SimulatedLampOutput
 
 
@@ -172,6 +172,55 @@ def test_one_radar_frame_is_one_observation_in_meters() -> None:
         LightLevelObserved(part_source(CARD, Capability.LUX), "vardagsrum", 12.5)
         in harness.observed
     )
+
+
+def test_an_ld2450_card_says_it_has_an_ld2450() -> None:
+    harness = Harness()
+    walk = recording("person_gar_in")
+    harness.connect(walk)
+    harness.play(walk)
+
+    radar = [o for o in harness.observed if isinstance(o, RadarTargetsObserved)]
+    assert {o.radar for o in radar} == {RadarModel.LD2450}
+
+
+def test_an_ld2461_card_sends_four_and_then_five_people_in_meters() -> None:
+    """Påhittade meddelanden: LD2461 har inte provats på riktigt än."""
+    harness = Harness()
+    five = recording("ld2461_fem_personer")
+    harness.connect(five)
+
+    harness.play(five, until=1.0)
+    radar = [o for o in harness.observed if isinstance(o, RadarTargetsObserved)]
+    assert radar[-1].radar is RadarModel.LD2461
+    assert len(radar[-1].targets) == 4
+    # Första personen står i (1, 1,5) i hemmet. Kortet skickar mm, kärnan får meter.
+    seen = harness.home.rooms[0].nodes[0].home_to_radar(Point(1.0, 1.5))
+    assert radar[-1].targets[0].x == pytest.approx(seen.x, abs=0.001)
+    assert radar[-1].targets[0].y == pytest.approx(seen.y, abs=0.001)
+
+    harness.play(five)
+    radar = [o for o in harness.observed if isinstance(o, RadarTargetsObserved)]
+    assert len(radar[-1].targets) == 5
+    tracks = harness.controller.snapshot().tracks
+    assert len(tracks) == 5
+    assert harness.status() is Occupancy.OCCUPIED
+    assert harness.lamp_on()
+    assert harness.card().problems == ()
+
+
+def test_an_ld2461_card_without_people_sends_no_targets() -> None:
+    harness = Harness()
+    five = recording("ld2461_fem_personer")
+    harness.connect(five)
+
+    harness.play(five, until=0)
+
+    radar = [o for o in harness.observed if isinstance(o, RadarTargetsObserved)]
+    assert radar[-1] == RadarTargetsObserved(
+        part_source(CARD, Capability.RADAR), CARD, (), RadarModel.LD2461
+    )
+    assert harness.status() is Occupancy.VACANT
 
 
 def test_silent_radar_makes_the_room_unknown_while_wifi_keeps_talking() -> None:

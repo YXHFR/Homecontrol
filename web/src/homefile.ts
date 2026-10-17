@@ -25,7 +25,14 @@ export interface NodeModel extends PlacedItem {
   /** Radarns sidled är spegelvänd. */
   mirrored?: boolean;
   capabilities?: string[];
+  /**
+   * Radarn som simuleringen låtsas vara (se Node.radar i core/src/homecontrol/home.py).
+   * Saknas den är det en LD2450. Ett riktigt kort säger själv vilken radar det har.
+   */
+  radar?: RadarModel;
 }
+
+export type RadarModel = "ld2450" | "ld2461";
 
 export interface LampModel extends PlacedItem {
   id: string;

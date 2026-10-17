@@ -11,7 +11,7 @@ import pytest
 
 from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved, SourceLost
 from homecontrol.fusion import HOLD_SECONDS, STILL_HOLD_MAX_SECONDS, Fusion, Occupancy, Presence
-from homecontrol.home import Capability, Home, Point, RoomSettings, ZoneKind
+from homecontrol.home import Capability, Home, Point, RadarModel, RoomSettings, ZoneKind
 from homes import home_with_zones, one_room_home, radar_sees, room, side_by_side_home, zone
 
 HOME = one_room_home()
@@ -149,13 +149,28 @@ def test_tracks_of_an_unchanged_node_are_kept() -> None:
     assert fusion.rooms()[ROOM.id].since == pytest.approx(0)
 
 
-def test_too_many_targets_are_cut() -> None:
+@pytest.mark.parametrize(("radar", "limit"), [(RadarModel.LD2450, 3), (RadarModel.LD2461, 5)])
+def test_more_targets_than_the_radar_follows_are_cut(
+    radar: RadarModel, limit: int, caplog: pytest.LogCaptureFixture
+) -> None:
     fusion = Fusion(HOME, now=0)
-    many = [(0.5 + 0.2 * i, 3.0) for i in range(20)]
+    many = [(0.5 + 0.6 * i, 3.0) for i in range(7)]
 
-    fusion.radar(radar_sees(*many), now=0)
+    fusion.radar(radar_sees(*many, radar=radar), now=0)
 
-    assert len(fusion.tracks()) == 16
+    assert len(fusion.tracks()) == limit
+    assert "för många mål" in caplog.text
+
+
+def test_an_ld2461_follows_five_people_without_warning(caplog: pytest.LogCaptureFixture) -> None:
+    fusion = Fusion(HOME, now=0)
+    five = [(0.5 + i, 3.0) for i in range(5)]
+
+    fusion.radar(radar_sees(*five, radar=RadarModel.LD2461), now=0)
+
+    assert sorted(positions(fusion)) == pytest.approx(sorted(five))
+    assert fusion.rooms()[ROOM.id].status is Occupancy.OCCUPIED
+    assert "för många mål" not in caplog.text
 
 
 def test_node_coordinates_are_turned_into_home_coordinates() -> None:

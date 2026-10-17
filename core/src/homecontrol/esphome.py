@@ -75,7 +75,7 @@ from homecontrol.connectors import (
     RadarTargetsObserved,
     SourceLost,
 )
-from homecontrol.home import Capability, Home
+from homecontrol.home import Capability, Home, RadarModel
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +110,21 @@ MAX_DISCOVERED = 50
 PROVISION_SECONDS = 10 * 60.0
 """Så länge efter placeringen som ett kort utan nyckel får sin nyckel."""
 
+
 # Entiteterna som firmware-paketet exponerar (firmware/homecontrol.yaml).
 # Namnen ändras inte, så att kärnan kan lita på dem (se firmware/README.md).
-RADAR_TARGETS = tuple((f"Radar Target {n} X", f"Radar Target {n} Y") for n in (1, 2, 3))
+def radar_targets(radar: RadarModel) -> tuple[tuple[str, str], ...]:
+    """Entiteterna för målen som radarn följer: X och Y för varje mål, i mm."""
+    return tuple(
+        (f"Radar Target {n} X", f"Radar Target {n} Y") for n in range(1, radar.max_targets + 1)
+    )
+
+
+RADAR_TARGETS = radar_targets(RadarModel.LD2450)
+"""Målen på ett kort med LD2450. Ett kort med LD2461 har också mål 4 och 5."""
+ALL_RADAR_TARGETS = frozenset(
+    name for model in RadarModel for pair in radar_targets(model) for name in pair
+)
 RADAR_ONLINE = "Radar Online"
 CSI_MOTION = "CSI Motion"
 CSI_MOVEMENT = "CSI Movement Score"
@@ -130,6 +142,18 @@ REQUIRED_ENTITIES = (
     ILLUMINANCE,
     FIRMWARE_UPDATE,
 )
+"""Entiteterna som varje kort ska ha, oavsett radar."""
+
+
+def card_radar(names: Iterable[str]) -> RadarModel:
+    """Vilken radar ett kort har, utifrån dess entiteter.
+
+    Bara firmware-varianten med LD2461 har mål 4 och 5 (se firmware/README.md).
+    """
+    last_x, last_y = radar_targets(RadarModel.LD2461)[-1]
+    names = set(names)
+    return RadarModel.LD2461 if {last_x, last_y} <= names else RadarModel.LD2450
+
 
 PARTS = (Capability.RADAR, Capability.CSI, Capability.LUX)
 PART_NAMES = {
@@ -203,12 +227,15 @@ class CardReader:
         self.update_key: int | None = None
         self.missing: tuple[str, ...] = ()
         """Entiteter som firmware-paketet ska ha men som kortet saknar."""
+        self.radar = RadarModel.LD2450
+        """Kortets radar, enligt entiteterna vid senaste anslutningen."""
 
     def use_entities(self, entities: Iterable[EntityInfo], now: float) -> None:
         """Kortet har anslutit. Värdena från förra anslutningen gäller inte längre."""
         entities = list(entities)
         self._names = {entity.key: entity.name for entity in entities}
         names = set(self._names.values())
+        self.radar = card_radar(names)
         self.missing = tuple(name for name in REQUIRED_ENTITIES if name not in names)
         self.update_key = next(
             (e.key for e in entities if isinstance(e, UpdateInfo) and e.name == FIRMWARE_UPDATE),
@@ -267,7 +294,7 @@ class CardReader:
                 self._hear(Capability.CSI, now)
         elif name == WIFI_SIGNAL:
             self.wifi_signal = value if math.isfinite(value) else None
-        elif any(name in pair for pair in RADAR_TARGETS):
+        elif name in ALL_RADAR_TARGETS:
             self._values[name] = value
             self._parts[Capability.RADAR].changed = True
 
@@ -328,7 +355,9 @@ class CardReader:
             if not state.alive:
                 result.append(SourceLost(source_id, self.name, part))
             elif part is Capability.RADAR:
-                result.append(RadarTargetsObserved(source_id, self.name, self._targets()))
+                result.append(
+                    RadarTargetsObserved(source_id, self.name, self._targets(), self.radar)
+                )
             elif part is Capability.CSI:
                 result.append(MotionObserved(source_id, self.name, self._csi_motion))
             elif room_id is not None and ILLUMINANCE in self._values:
@@ -338,7 +367,7 @@ class CardReader:
     def _targets(self) -> tuple[RadarTarget, ...]:
         """Radarns mål i meter. En tom plats skickas som 0, 0 (eller utan värde)."""
         targets = []
-        for x_name, y_name in RADAR_TARGETS:
+        for x_name, y_name in radar_targets(self.radar):
             x, y = self._values.get(x_name, math.nan), self._values.get(y_name, math.nan)
             if math.isfinite(x) and math.isfinite(y) and (x, y) != (0, 0):
                 targets.append(RadarTarget(x / 1000, y / 1000))

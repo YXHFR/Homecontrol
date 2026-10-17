@@ -5,7 +5,7 @@ from importlib import resources
 
 import pytest
 
-from homecontrol.home import Capability, LampProfile, WallKind, ZoneKind
+from homecontrol.home import Capability, LampProfile, RadarModel, WallKind, ZoneKind
 from homecontrol.homefile import HomeFileError, dumps, example_home, loads
 from homes import one_room_home
 
@@ -30,6 +30,17 @@ def test_file_is_readable_json_with_points_on_one_line() -> None:
     assert "[0.0, 0.0],\n" in text
     assert '"walls": ["gips", "gips", "gips", "gips"],' in text
     assert json.loads(text)["home"]["floors"][0]["rooms"][0]["walls"] == ["gips"] * 4
+
+
+def test_the_radar_is_written_only_for_an_ld2461() -> None:
+    """Hem med bara LD2450 skrivs ut som förut. En LD2461 följer med tur och retur."""
+    assert '"radar":' not in dumps(one_room_home())
+
+    home = one_room_home(RadarModel.LD2461)
+    text = dumps(home)
+
+    assert '"radar": "ld2461"' in text
+    assert loads(text).rooms[0].nodes[0].radar is RadarModel.LD2461
 
 
 def test_example_home_uses_every_concept_on_two_floors() -> None:
