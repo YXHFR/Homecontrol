@@ -13,34 +13,34 @@ avsändare som resten av API:t gäller (trust.py), så att en främmande sida
 inte kan öppna fönstret eller hämta strömmen.
 """
 
+import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Set
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from homecontrol.doorbell import Doorbell, TooManyViewers, ViewClosed
+from homecontrol.doorbell import SOUND_PATH, VIEW_SECONDS, Doorbell, TooManyViewers, ViewClosed
 from homecontrol.trust import trusted
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_SOUND = Path(__file__).parent / "sounds" / "dingdong.mp3"
-"""Ljudet som följer med: ett enkelt dingdong som är genererat för Homecontrol."""
 BOUNDARY = "bild"
+FIRST_FRAME_SECONDS = 8.0
+"""Så länge kärnan väntar på kamerans första bild innan den svarar att kameran inte svarar."""
 NO_STORE = {"Cache-Control": "no-store"}
 
 
-def create_doorbell_router(
-    doorbell: Doorbell, allowed_hosts: Set[str] = frozenset(), sound: Path = DEFAULT_SOUND
-) -> APIRouter:
+def create_doorbell_router(doorbell: Doorbell, allowed_hosts: Set[str] = frozenset()) -> APIRouter:
     """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som kärnan får nås på."""
     router = APIRouter()
 
     def check(request: Request) -> None:
-        if not trusted(request.headers, allowed_hosts):
+        # En bild på en främmande sida skickar ingen Origin, men webbläsaren
+        # säger ändå att anropet kommer från en annan webbplats.
+        cross_site = request.headers.get("sec-fetch-site") == "cross-site"
+        if cross_site or not trusted(request.headers, allowed_hosts):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Okänd adress eller avsändare")
 
     def state() -> dict[str, Any]:
@@ -67,11 +67,12 @@ def create_doorbell_router(
         try:
             # Den första bilden hämtas innan svaret börjar, så att ett stängt
             # fönster eller en kamera som inte svarar ger ett riktigt felsvar.
-            first = await anext(frames)
+            first = await asyncio.wait_for(anext(frames), FIRST_FRAME_SECONDS)
         except ViewClosed, StopAsyncIteration:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                "Dörren visas bara i 2 minuter efter ett ring eller efter Visa dörren.",
+                f"Dörren visas bara i {VIEW_SECONDS / 60:g} minuter efter ett ring "
+                "eller efter Visa dörren.",
             ) from None
         except TooManyViewers:
             raise HTTPException(
@@ -95,10 +96,10 @@ def create_doorbell_router(
             headers=NO_STORE,
         )
 
-    @router.get("/api/dorr/dingdong.mp3")
+    @router.get(SOUND_PATH)
     def dingdong(request: Request) -> FileResponse:
         check(request)
-        return FileResponse(sound, media_type="audio/mpeg")
+        return FileResponse(doorbell.sound, media_type="audio/mpeg")
 
     return router
 

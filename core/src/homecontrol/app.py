@@ -20,7 +20,7 @@ from homecontrol.connectors import defer_in_loop
 from homecontrol.controller import Controller
 from homecontrol.databaselink import DatabaseLink
 from homecontrol.doorbell import Doorbell
-from homecontrol.doorbell_api import DEFAULT_SOUND, create_doorbell_router
+from homecontrol.doorbell_api import create_doorbell_router
 from homecontrol.editor import HomeChanges, HomeStore, MemoryStore, create_editor_router
 from homecontrol.esphome import (
     AioesphomeNetwork,
@@ -57,7 +57,6 @@ def create_app(
     database: DatabaseLink | None = None,
     doorbell: Doorbell | None = None,
     doorbell_mqtt: Connect | None = None,
-    doorbell_sound: Path = DEFAULT_SOUND,
 ) -> FastAPI:
     """`home` är hemmet från databasen. Utan det används exempelhemmet.
 
@@ -83,8 +82,8 @@ def create_app(
     clock = clock if clock is not None else SystemClock()
     home = home if home is not None else example_home()
     zigbee = None if mqtt is None else ZigbeeOutput(home, defer=defer_in_loop)
-    if doorbell is not None and doorbell.lamp is not None and zigbee is not None:
-        doorbell.lamp.lend_from(zigbee)
+    if doorbell is not None and zigbee is not None:
+        doorbell.light_lamp_with(zigbee)
     real_lamps = zigbee_lamps if zigbee is not None else _nothing_real
     lamps = SimulatedLampOutput(real_lamps, clock.now)
     controller = Controller(home, clock, [lamps] if zigbee is None else [lamps, zigbee])
@@ -197,7 +196,7 @@ def create_app(
     app.include_router(create_editor_router(changes, allowed_hosts))
     app.include_router(create_calibration_router(controller, allowed_hosts))
     if doorbell is not None:
-        app.include_router(create_doorbell_router(doorbell, allowed_hosts, doorbell_sound))
+        app.include_router(create_doorbell_router(doorbell, allowed_hosts))
 
     # Webbgränssnittet monteras sist så att API-vägarna ovan har företräde.
     if web_dir is not None:

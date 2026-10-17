@@ -23,8 +23,9 @@ samma ring.
 
 Modulen är uppdelad så att allt går att pröva utan hårdvara: kameran,
 notiserna och högtalaren är gränssnitt (`Camera`, `Notifier`, `Speaker`)
-med riktiga kopplingar i doorbell_devices.py, och lampan styrs genom samma
-MQTT-anslutning som ringen kommer på.
+med riktiga kopplingar i doorbell_devices.py, och lampan tänds genom kärnans
+lamputgång (`DoorLights`), så att automatiken inte tar det för manuell
+styrning.
 """
 
 import asyncio
@@ -35,11 +36,11 @@ import math
 import secrets
 import time
 from collections import deque
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
-from dataclasses import dataclass
+from collections.abc import AsyncGenerator, Callable, Coroutine
+from pathlib import Path
 from typing import Any, Protocol
 
-from homecontrol.zigbee import BASE_TOPIC, ZIGBEE_BRIGHTNESS, Connect, MqttConnection
+from homecontrol.zigbee import Connect, MqttConnection
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,8 @@ RADAR_NOTICE_SECONDS = 300.0
 """Radarn vid dörren ger högst en notis så här ofta."""
 LAMP_SECONDS = 30.0
 """Så länge dörrlampan lyser efter ett ring."""
-LAMP_READ_SECONDS = 3.0
-"""Så länge kärnan väntar på lampans läge innan den tänds."""
+SNAPSHOT_SECONDS = 8.0
+"""Så länge notisen väntar på stillbilden. Sedan skickas den utan, hellre än sent."""
 MAX_VIEWERS = 2
 """Så många kan titta på kameran samtidigt. Kameran orkar inte med fler."""
 MAX_PAYLOAD = 256
@@ -63,9 +64,15 @@ MAX_PAYLOAD = 256
 REMEMBERED_PRESSES = 64
 """Så många tryck-id:n som kärnan minns för att känna igen dubbletter."""
 RECONNECT_SECONDS = 5.0
+SOUND_PATH = "/api/dorr/dingdong.mp3"
+"""Där kärnan serverar ljudet som högtalaren hämtar."""
+DEFAULT_SOUND = Path(__file__).parent / "sounds" / "dingdong.mp3"
+"""Ljudet som följer med: ett enkelt dingdong som är genererat för Homecontrol."""
 
 RING_TITLE = "Det ringer på dörren"
-RING_MESSAGE = "Öppna Homecontrol och välj Dörren för att se vem det är (i 2 minuter)."
+RING_MESSAGE = (
+    f"Öppna Homecontrol och välj Dörren för att se vem det är (i {VIEW_SECONDS / 60:g} minuter)."
+)
 RADAR_TITLE = "Någon är vid dörren"
 RADAR_MESSAGE = "Radarn vid dörren känner av någon. Kameran är inte på."
 
@@ -104,146 +111,17 @@ class TooManyViewers(Exception):
     """Fler än `MAX_VIEWERS` försöker titta samtidigt."""
 
 
-Publish = Callable[[str, dict[str, Any]], None]
-Sleep = Callable[[float], Awaitable[None]]
+class DoorLights(Protocol):
+    """Lamputgången som tänder dörrlampan en stund (se `ZigbeeOutput.light_for`)."""
 
-
-@dataclass(frozen=True)
-class _LampState:
-    on: bool
-    brightness: int | None = None
-    """Ljusstyrkan i Zigbee (0–254), om lampan sa den."""
-
-
-class LampLender(Protocol):
-    """Lamputgången som annars styr dörrlampan (se `ZigbeeOutput.borrow`)."""
-
-    def borrow(self, friendly_name: str) -> None: ...
-
-    def give_back(self, friendly_name: str) -> None: ...
-
-
-class DoorLamp:
-    """Dörrlampan i Zigbee2MQTT: tänds vid ett ring och får sedan tillbaka sitt läge.
-
-    Den styrs med namnet i Zigbee2MQTT och behöver inte vara placerad på
-    kartan. Är den placerad lånas den från kärnans lamputgång (`lend_from`)
-    medan den lyser, så att automatiken inte tar blinket för manuell
-    styrning. Efteråt tar automatiken över lampan igen.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        *,
-        base_topic: str = BASE_TOPIC,
-        now: Callable[[], float] = time.monotonic,
-        sleep: Sleep = asyncio.sleep,
-    ) -> None:
-        self.name = name
-        self.topic = f"{base_topic}/{name}"
-        self._lender: LampLender | None = None
-        self._now = now
-        self._sleep = sleep
-        self._publish: Publish | None = None
-        self._state: _LampState | None = None
-        self._state_changed = asyncio.Event()
-        self._until = -math.inf
-        self._flashing = False
-
-    def lend_from(self, lender: LampLender) -> None:
-        """Lampan lånas från `lender` medan den lyser efter ett ring."""
-        self._lender = lender
-
-    def connected(self, publish: Publish) -> None:
-        self._publish = publish
-
-    def disconnected(self) -> None:
-        self._publish = None
-        self._state = None
-
-    def handle(self, payload: bytes) -> None:
-        """Lampans besked om sitt läge från Zigbee2MQTT."""
-        try:
-            data = json.loads(payload)
-        except ValueError, RecursionError:
-            return
-        if not isinstance(data, dict) or data.get("state") not in ("ON", "OFF"):
-            return
-        brightness = data.get("brightness")
-        self._state = _LampState(
-            on=data["state"] == "ON",
-            brightness=(
-                round(brightness)
-                if isinstance(brightness, int | float)
-                and not isinstance(brightness, bool)
-                and 0 <= brightness <= ZIGBEE_BRIGHTNESS
-                else None
-            ),
-        )
-        self._state_changed.set()
-
-    async def flash(self) -> None:
-        """Tänder lampan i `LAMP_SECONDS` och ger den sedan tillbaka sitt tidigare läge.
-
-        Ett nytt ring medan lampan lyser förlänger tiden; läget som återställs
-        är fortfarande det från före det första ringet. Har någon ändrat lampan
-        under tiden får den vara som den är.
-        """
-        self._until = self._now() + LAMP_SECONDS
-        if self._flashing:
-            return
-        self._flashing = True
-        if self._lender is not None:
-            self._lender.borrow(self.name)
-        try:
-            before = await self._read()
-            lit = _LampState(on=True, brightness=ZIGBEE_BRIGHTNESS)
-            self._set(lit)
-            while (left := self._until - self._now()) > 0:
-                await self._sleep(left)
-            if self._state is not None and not _same(self._state, lit):
-                logger.info("Dörrlampan ändrades medan den lyste; läget återställs inte")
-                return
-            # Svarade lampan inte med sitt läge var den troligen släckt.
-            self._set(before if before is not None else _LampState(on=False))
-        finally:
-            self._flashing = False
-            if self._lender is not None:
-                self._lender.give_back(self.name)
-
-    async def _read(self) -> _LampState | None:
-        if self._state is not None or self._publish is None:
-            return self._state
-        self._state_changed.clear()
-        self._publish(f"{self.topic}/get", {"state": "", "brightness": ""})
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(self._state_changed.wait(), LAMP_READ_SECONDS)
-        return self._state
-
-    def _set(self, state: _LampState) -> None:
-        if self._publish is None:
-            logger.warning("Ingen kontakt med MQTT-brokern; dörrlampan styrs inte")
-            return
-        payload: dict[str, Any] = {"state": "ON" if state.on else "OFF"}
-        if state.on and state.brightness is not None:
-            payload["brightness"] = state.brightness
-        self._publish(f"{self.topic}/set", payload)
-
-
-def _same(reported: _LampState, lit: _LampState) -> bool:
-    """Om lampan fortfarande är som kärnan tände den (ljusstyrkan avrundas av lampan)."""
-    return reported.on and (
-        reported.brightness is None
-        or lit.brightness is None
-        or abs(reported.brightness - lit.brightness) <= 5
-    )
+    def light_for(self, friendly_name: str, seconds: float) -> None: ...
 
 
 class Doorbell:
     """Dörrklockan. Se modulens beskrivning.
 
-    `now` är riktig tid i sekunder.
+    `lamp` är dörrlampans namn i Zigbee2MQTT och `sound` ljudet som
+    högtalaren spelar. `now` är monoton tid i sekunder.
     """
 
     def __init__(
@@ -252,13 +130,16 @@ class Doorbell:
         *,
         camera: Camera | None = None,
         speaker: Speaker | None = None,
-        lamp: DoorLamp | None = None,
+        lamp: str | None = None,
+        sound: Path = DEFAULT_SOUND,
         now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._notifier = notifier
         self._camera = camera
         self._speaker = speaker
         self._lamp = lamp
+        self._lights: DoorLights | None = None
+        self.sound = sound
         self._now = now
         self._view_until = -math.inf
         self._last_ring = -math.inf
@@ -271,9 +152,9 @@ class Doorbell:
     def has_camera(self) -> bool:
         return self._camera is not None
 
-    @property
-    def lamp(self) -> DoorLamp | None:
-        return self._lamp
+    def light_lamp_with(self, lights: DoorLights) -> None:
+        """Dörrlampan (namnet i Zigbee2MQTT) tänds genom `lights` när det ringer."""
+        self._lights = lights
 
     # --- Fönstret då kameran visas ---
 
@@ -337,16 +218,12 @@ class Doorbell:
         if len(payload) > MAX_PAYLOAD:
             logger.warning("För stort meddelande på %s hoppas över", topic)
             return
-        if topic == RING_TOPIC:
-            if self.accept_ring(payload):
-                self._spawn(self.ring())
-        elif topic == RADAR_TOPIC:
-            if _presence(payload) and self._accept_radar():
-                self._spawn(self.radar_notice())
-        elif self._lamp is not None and topic == self._lamp.topic:
-            self._lamp.handle(payload)
+        if topic == RING_TOPIC and self._accept_ring(payload):
+            self._spawn(self.ring())
+        elif topic == RADAR_TOPIC and _presence(payload) and self._accept_radar():
+            self._spawn(self.radar_notice())
 
-    def accept_ring(self, payload: bytes) -> bool:
+    def _accept_ring(self, payload: bytes) -> bool:
         """Om meddelandet är ett nytt ring, och inte en dubblett eller ett studsande tryck."""
         press = _press_id(payload)
         if press is not None:
@@ -370,23 +247,26 @@ class Doorbell:
         """Det ringer: öppnar fönstret, skickar notisen, spelar ljudet och tänder lampan."""
         logger.info("Det ringer på dörren")
         self.open_view()
+        if self._lamp is not None and self._lights is not None:
+            self._lights.light_for(self._lamp, LAMP_SECONDS)
         parts: dict[str, Coroutine[Any, Any, None]] = {"notisen": self._ring_notice()}
         if self._speaker is not None:
             parts["ljudet"] = self._speaker.play()
-        if self._lamp is not None:
-            parts["dörrlampan"] = self._lamp.flash()
         results = await asyncio.gather(*parts.values(), return_exceptions=True)
         for name, result in zip(parts, results, strict=True):
             if isinstance(result, Exception):
-                logger.warning("Dörrklockan: %s misslyckades (%s)", name, result)
+                # Bara felets sort: meddelandet kan innehålla adresser.
+                logger.warning("Dörrklockan: %s misslyckades (%s)", name, type(result).__name__)
 
     async def _ring_notice(self) -> None:
         still = None
         if self._camera is not None:
             try:
-                still = await self._camera.snapshot()
+                still = await asyncio.wait_for(self._camera.snapshot(), SNAPSHOT_SECONDS)
             except Exception as error:
-                logger.warning("Fick ingen bild från kameran (%s); notisen skickas utan", error)
+                logger.warning(
+                    "Fick ingen bild från kameran (%s); notisen skickas utan", type(error).__name__
+                )
         try:
             await self._notifier.send(RING_TITLE, RING_MESSAGE, still)
         finally:
@@ -414,46 +294,17 @@ class Doorbell:
                     logger.warning("Dörrklockan har ingen kontakt med MQTT-brokern (%s)", error)
                 except Exception:
                     logger.exception("Fel i dörrklockan. Ansluter igen.")
-                finally:
-                    if self._lamp is not None:
-                        self._lamp.disconnected()
                 await asyncio.sleep(RECONNECT_SECONDS)
         finally:
             for task in list(self._tasks):
                 task.cancel()
 
     async def _serve(self, connection: MqttConnection) -> None:
-        outbox: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(100)
-
-        def publish(topic: str, payload: dict[str, Any]) -> None:
-            with contextlib.suppress(asyncio.QueueFull):
-                outbox.put_nowait((topic, json.dumps(payload).encode()))
-
         await connection.subscribe(RING_TOPIC)
         await connection.subscribe(RADAR_TOPIC)
-        if self._lamp is not None:
-            await connection.subscribe(self._lamp.topic)
-            self._lamp.connected(publish)
-
-        async def read() -> None:
-            async for topic, payload in connection.messages():
-                self.handle(topic, payload)
-            raise ConnectionError("brokern stängde anslutningen")
-
-        async def write() -> None:
-            while True:
-                topic, payload = await outbox.get()
-                await connection.publish(topic, payload)
-
-        tasks = [asyncio.create_task(read()), asyncio.create_task(write())]
-        try:
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-        for task in done:
-            task.result()
+        async for topic, payload in connection.messages():
+            self.handle(topic, payload)
+        raise ConnectionError("brokern stängde anslutningen")
 
     def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
         task = asyncio.get_running_loop().create_task(coro)

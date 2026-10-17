@@ -40,14 +40,7 @@ from homecontrol import history, store
 from homecontrol.app import create_app
 from homecontrol.config import DoorbellSettings, Settings
 from homecontrol.databaselink import DatabaseLink, Fetch
-from homecontrol.doorbell import Doorbell, DoorLamp, simulate_ring
-from homecontrol.doorbell_api import DEFAULT_SOUND
-from homecontrol.doorbell_devices import (
-    ChromecastSpeaker,
-    EsphomeCamera,
-    NtfyNotifier,
-    sound_url,
-)
+from homecontrol.doorbell import DEFAULT_SOUND, Doorbell, simulate_ring
 from homecontrol.editor import HomeStore
 from homecontrol.esphome import MIN_SECRET_LENGTH
 from homecontrol.home import Home
@@ -120,7 +113,7 @@ def serve(settings: Settings) -> None:
     if secret is None:
         logger.info("ESPHOME_SECRET är inte satt: inga rumskort ansluts")
     home, home_store, database = open_home(settings)
-    doorbell = None
+    doorbell, doorbell_mqtt = None, None
     if settings.doorbell is not None:
         if settings.mqtt is None:
             logger.warning(
@@ -128,6 +121,7 @@ def serve(settings: Settings) -> None:
             )
         else:
             doorbell = build_doorbell(settings.doorbell, settings.port)
+            doorbell_mqtt = mqtt_connect(settings.mqtt, "homecontrol-dorr")
     uvicorn.run(
         create_app(
             settings.web_dir,
@@ -139,16 +133,7 @@ def serve(settings: Settings) -> None:
             esphome_secret=secret,
             mqtt=None if settings.mqtt is None else mqtt_connect(settings.mqtt),
             doorbell=doorbell,
-            doorbell_mqtt=(
-                None
-                if doorbell is None or settings.mqtt is None
-                else mqtt_connect(settings.mqtt, "homecontrol-dorr")
-            ),
-            doorbell_sound=(
-                DEFAULT_SOUND
-                if settings.doorbell is None or settings.doorbell.sound_file is None
-                else settings.doorbell.sound_file
-            ),
+            doorbell_mqtt=doorbell_mqtt,
         ),
         host=settings.host,
         port=settings.port,
@@ -159,6 +144,13 @@ def serve(settings: Settings) -> None:
 
 def build_doorbell(settings: DoorbellSettings, port: int) -> Doorbell:
     """Dörrklockan med de delar som är inställda. Notisen finns alltid; resten är valfritt."""
+    # Kopplingarna (och pychromecast) laddas bara när dörrklockan är inställd.
+    from homecontrol.doorbell_devices import (
+        ChromecastSpeaker,
+        EsphomeCamera,
+        NtfyNotifier,
+    )
+
     if settings.sound_file is not None and not settings.sound_file.is_file():
         sys.exit(f"DOORBELL_SOUND_FILE i .env: hittar inte filen {settings.sound_file}")
     camera = None
@@ -167,9 +159,7 @@ def build_doorbell(settings: DoorbellSettings, port: int) -> Doorbell:
     speaker = None
     if settings.speaker_host is not None:
         speaker = ChromecastSpeaker(
-            settings.speaker_host,
-            settings.speaker_volume,
-            sound_url(settings.speaker_host, port, settings.media_host),
+            settings.speaker_host, settings.speaker_volume, port, settings.media_host
         )
     logger.info(
         "Dörrklockan är på: notis%s%s%s",
@@ -181,7 +171,8 @@ def build_doorbell(settings: DoorbellSettings, port: int) -> Doorbell:
         NtfyNotifier(settings.ntfy_url, settings.ntfy_topic, settings.ntfy_token),
         camera=camera,
         speaker=speaker,
-        lamp=None if settings.lamp is None else DoorLamp(settings.lamp),
+        lamp=settings.lamp,
+        sound=DEFAULT_SOUND if settings.sound_file is None else settings.sound_file,
     )
 
 

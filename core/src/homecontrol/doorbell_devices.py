@@ -8,7 +8,7 @@
 * `ChromecastSpeaker` spelar dingdong på en Google Home-högtalare med fast IP.
   Högtalaren hämtar ljudet från kärnan (``/api/dorr/dingdong.mp3``).
 
-Loggen nämner aldrig ntfy-ämnet, nycklar eller adresser.
+Kärnans egna loggrader nämner aldrig ntfy-ämnet, nycklar eller adresser.
 """
 
 import asyncio
@@ -28,6 +28,8 @@ from aioesphomeapi.client import APIClient
 from aioesphomeapi.core import APIConnectionError
 from aioesphomeapi.model import CameraInfo, CameraState, EntityState
 
+from homecontrol.doorbell import SOUND_PATH
+
 logger = logging.getLogger(__name__)
 
 CAMERA_NAME = "homecontrol-dorr"
@@ -42,7 +44,6 @@ CAST_PORT = 8009
 CAST_TIMEOUT_SECONDS = 10.0
 PLAY_SECONDS = 4.0
 """Så länge dingdong får spela innan högtalarens volym återställs."""
-SOUND_PATH = "/api/dorr/dingdong.mp3"
 
 
 class EsphomeCamera:
@@ -141,14 +142,16 @@ def _encoded(text: str) -> str:
 class ChromecastSpeaker:
     """En Google Home-högtalare (Chromecast) med fast IP-adress.
 
-    `sound_url` är adressen som högtalaren hämtar ljudet från. Högtalarens
-    volym sätts till `volume` procent medan dingdong spelar och återställs sedan.
+    Högtalaren hämtar ljudet från kärnan på `port`, på `media_host` eller annars
+    datorns egen adress mot högtalaren. Högtalarens volym sätts till `volume`
+    procent medan dingdong spelar och återställs sedan.
     """
 
-    def __init__(self, host: str, volume: int, sound_url: str) -> None:
+    def __init__(self, host: str, volume: int, port: int, media_host: str | None = None) -> None:
         self._host = host
         self._volume = volume / 100
-        self._sound_url = sound_url
+        self._port = port
+        self._media_host = media_host
 
     async def play(self) -> None:
         await asyncio.to_thread(self._play)
@@ -165,9 +168,9 @@ class ChromecastSpeaker:
             before = None if cast.status is None else cast.status.volume_level
             receiver.set_volume(self._volume)
             media = cast.media_controller
-            media.play_media(
-                self._sound_url, "audio/mpeg", title="Dingdong", stream_type="BUFFERED"
-            )
+            # Adressen räknas ut nu, så att ett nät som inte är uppe vid start inte stoppar kärnan.
+            url = sound_url(self._host, self._port, self._media_host)
+            media.play_media(url, "audio/mpeg", title="Dingdong", stream_type="BUFFERED")
             media.block_until_active(timeout=CAST_TIMEOUT_SECONDS)
             time.sleep(PLAY_SECONDS)
             if before is not None:

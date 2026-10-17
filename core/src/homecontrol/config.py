@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import overload
+from urllib.parse import urlsplit
 
 HISTORY_FULL_RESOLUTION = timedelta(days=1)
 """Hur länge varje punkt i historiken sparas innan bara en punkt per sekund och spår finns kvar."""
@@ -32,7 +33,11 @@ class MqttSettings:
 
 
 NTFY_TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-"""Ett ämne i ntfy: bokstäver a–z, siffror, - och _ (som ntfy själv kräver)."""
+"""Ett ämne i ntfy: a–z, A–Z, siffror, - och _ (som ntfy själv kräver)."""
+MIN_OPEN_NTFY_TOPIC = 32
+"""Utan inloggning hos ntfy är ämnet det enda som skyddar notiserna, så det ska vara långt."""
+DEFAULT_NTFY_URL = "https://ntfy.sh"
+DEFAULT_SPEAKER_VOLUME = 50
 DOORBELL_API_KEY_BYTES = 32
 """ESPHome:s krypteringsnyckel är 32 byte, skriven som base64."""
 
@@ -47,7 +52,7 @@ class DoorbellSettings:
 
     ntfy_topic: str = field(repr=False)
     """Ämnet i ntfy som notiserna skickas till. Den som kan gissa det kan läsa dem."""
-    ntfy_url: str = "https://ntfy.sh"
+    ntfy_url: str = DEFAULT_NTFY_URL
     ntfy_token: str | None = field(default=None, repr=False)
     """Inloggning hos ntfy, för en egen ntfy-server eller ett reserverat ämne."""
     camera_host: str | None = field(default=None, repr=False)
@@ -56,7 +61,7 @@ class DoorbellSettings:
     """Nyckeln till kamerans krypterade ESPHome-API, samma som i firmware/secrets.yaml."""
     speaker_host: str | None = field(default=None, repr=False)
     """Google Home-högtalarens fasta IP-adress. Utan den spelas inget ljud."""
-    speaker_volume: int = 50
+    speaker_volume: int = DEFAULT_SPEAKER_VOLUME
     """Volymen i procent (0–100) som dingdong spelas med. Högtalarens volym återställs sedan."""
     media_host: str | None = field(default=None, repr=False)
     """Datorns adress som högtalaren hämtar ljudet från. Utan den räknas den ut."""
@@ -71,8 +76,17 @@ class DoorbellSettings:
                 "DOORBELL_NTFY_TOPIC i .env får bara innehålla a–z, A–Z, 0–9, - och _ "
                 "(högst 64 tecken)"
             )
-        if not self.ntfy_url.startswith(("https://", "http://")):
-            raise ValueError("DOORBELL_NTFY_URL i .env ska börja med https://")
+        if self.ntfy_token is None and len(self.ntfy_topic) < MIN_OPEN_NTFY_TOPIC:
+            raise ValueError(
+                f"DOORBELL_NTFY_TOPIC i .env är för kort (minst {MIN_OPEN_NTFY_TOPIC} tecken "
+                "utan DOORBELL_NTFY_TOKEN): den som gissar ämnet ser stillbilderna. "
+                "Skapa ett med: openssl rand -hex 16"
+            )
+        if not _secure_url(self.ntfy_url):
+            raise ValueError(
+                "DOORBELL_NTFY_URL i .env ska börja med https:// "
+                "(http:// går bara till en ntfy-server i hemnätet)"
+            )
         if (self.camera_host is None) != (self.camera_key is None):
             raise ValueError(
                 "DOORBELL_CAMERA_HOST och DOORBELL_CAMERA_KEY i .env ska fyllas i tillsammans"
@@ -261,14 +275,14 @@ def _doorbell_from_env() -> DoorbellSettings | None:
     key = _env("HOMECONTROL_DOORBELL_CAMERA_KEY")
     sound = _env("HOMECONTROL_DOORBELL_SOUND_FILE")
     try:
-        speaker_volume = 50 if volume is None else int(volume)
+        speaker_volume = DEFAULT_SPEAKER_VOLUME if volume is None else int(volume)
     except ValueError:
         raise ValueError(
             f"DOORBELL_SPEAKER_VOLUME i .env ska vara ett tal 0–100 (inte {volume!r})"
         ) from None
     return DoorbellSettings(
         ntfy_topic=topic,
-        ntfy_url=(_env("HOMECONTROL_DOORBELL_NTFY_URL") or "https://ntfy.sh").rstrip("/"),
+        ntfy_url=(_env("HOMECONTROL_DOORBELL_NTFY_URL") or DEFAULT_NTFY_URL).rstrip("/"),
         ntfy_token=_env("HOMECONTROL_DOORBELL_NTFY_TOKEN"),
         camera_host=_env("HOMECONTROL_DOORBELL_CAMERA_HOST"),
         camera_key=None if key is None else _parse_api_key(key),
@@ -300,3 +314,19 @@ def _parse_ip(name: str, text: str) -> None:
         raise ValueError(
             f"{name} i .env ska vara en IP-adress, till exempel 192.168.1.30"
         ) from None
+
+
+def _secure_url(url: str) -> bool:
+    """https, eller http till en adress i hemnätet (där inget går ut på internet)."""
+    parts = urlsplit(url)
+    if parts.scheme == "https":
+        return bool(parts.hostname)
+    if parts.scheme != "http" or parts.hostname is None:
+        return False
+    if parts.hostname == "localhost" or parts.hostname.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(parts.hostname)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback

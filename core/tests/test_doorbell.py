@@ -3,11 +3,10 @@
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator
 
 import pytest
 
-from homecontrol import doorbell as doorbell_module
 from homecontrol.doorbell import (
     LAMP_SECONDS,
     RADAR_MESSAGE,
@@ -18,7 +17,6 @@ from homecontrol.doorbell import (
     RING_TOPIC,
     VIEW_SECONDS,
     Doorbell,
-    DoorLamp,
     TooManyViewers,
     ViewClosed,
     simulate_ring,
@@ -30,23 +28,13 @@ STILL = b"\xff\xd8 en bild av dorren \xff\xd9"
 
 
 class Clock:
-    """Riktig tid i testerna. `sleep` flyttar fram klockan i stället för att vänta."""
+    """Riktig tid i testerna, som testet flyttar fram."""
 
     def __init__(self) -> None:
         self.time = 1000.0
-        self.while_sleeping: Callable[[], None] | None = None
-        """Görs medan någon väntar, som när något händer under tiden."""
 
     def now(self) -> float:
         return self.time
-
-    async def sleep(self, seconds: float) -> None:
-        if self.while_sleeping is not None:
-            self.while_sleeping()
-            for _ in range(10):
-                await asyncio.sleep(0)
-        self.time += seconds
-        await asyncio.sleep(0)
 
 
 class Notifier:
@@ -354,110 +342,33 @@ def test_at_most_two_can_watch_at_once() -> None:
 # --- Dörrlampan ---
 
 
-class LampBroker:
-    """Zigbee2MQTT för en lampa: svarar på get och set som en riktig lampa."""
+class Lights:
+    def __init__(self) -> None:
+        self.lit: list[tuple[str, float]] = []
 
-    def __init__(self, lamp: DoorLamp, on: bool | None, brightness: int = 120) -> None:
-        self.lamp = lamp
-        self.on = on
-        self.brightness = brightness
-        self.sets: list[dict[str, object]] = []
-        lamp.connected(self.publish)
-
-    def publish(self, topic: str, payload: dict[str, object]) -> None:
-        if topic.endswith("/set"):
-            self.sets.append(payload)
-            self.on = payload["state"] == "ON"
-            if isinstance(payload.get("brightness"), int):
-                self.brightness = payload["brightness"]  # type: ignore[assignment]
-        if self.on is not None:
-            self.report()
-
-    def report(self) -> None:
-        state = {"state": "ON" if self.on else "OFF", "brightness": self.brightness}
-        asyncio.get_running_loop().call_soon(self.lamp.handle, json.dumps(state).encode())
+    def light_for(self, friendly_name: str, seconds: float) -> None:
+        self.lit.append((friendly_name, seconds))
 
 
-def flash(
-    clock: Clock, on: bool | None, during: Callable[[LampBroker], None] | None = None
-) -> list[dict[str, object]]:
-    async def scenario() -> list[dict[str, object]]:
-        lamp = DoorLamp("Dörrlampan", now=clock.now, sleep=clock.sleep)
-        broker = LampBroker(lamp, on)
-        if during is not None:
-            clock.while_sleeping = lambda: during(broker)
-        await lamp.flash()
-        return broker.sets
+def test_a_ring_lights_the_door_lamp_for_30_seconds() -> None:
+    clock, notifier, lights = Clock(), Notifier(), Lights()
+    doorbell = Doorbell(notifier, lamp="Dörrlampan", now=clock.now)
+    doorbell.light_lamp_with(lights)
 
-    return asyncio.run(scenario())
+    ring_messages(doorbell, [(1000.0, press("a-1"))], clock)
 
-
-def test_the_lamp_is_lit_for_30_seconds_and_turned_off_again() -> None:
-    clock = Clock()
-
-    sets = flash(clock, on=False)
-
-    assert sets == [{"state": "ON", "brightness": 254}, {"state": "OFF"}]
-    assert clock.time >= 1000.0 + LAMP_SECONDS
-
-
-def test_the_lamp_gets_its_brightness_back_if_it_was_on() -> None:
-    sets = flash(Clock(), on=True)
-
-    assert sets == [{"state": "ON", "brightness": 254}, {"state": "ON", "brightness": 120}]
-
-
-def test_a_lamp_that_does_not_answer_is_turned_off_afterwards(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(doorbell_module, "LAMP_READ_SECONDS", 0.01)
-
-    sets = flash(Clock(), on=None)
-
-    assert sets[0] == {"state": "ON", "brightness": 254}
-    assert sets[-1] == {"state": "OFF"}
-
-
-def test_a_lamp_changed_by_someone_else_while_lit_is_left_alone() -> None:
-    def switch_off(broker: LampBroker) -> None:
-        broker.on = False
-        broker.report()
-
-    sets = flash(Clock(), on=False, during=switch_off)
-
-    assert sets == [{"state": "ON", "brightness": 254}]
-
-
-def test_a_new_ring_while_the_lamp_is_lit_keeps_it_lit_longer() -> None:
-    clock = Clock()
-
-    async def scenario() -> list[dict[str, object]]:
-        lamp = DoorLamp("Dörrlampan", now=clock.now, sleep=clock.sleep)
-        broker = LampBroker(lamp, on=True)
-        first = asyncio.create_task(lamp.flash())
-        await asyncio.sleep(0)
-        await lamp.flash()  # medan den första lyser
-        await first
-        return broker.sets
-
-    assert asyncio.run(scenario()) == [
-        {"state": "ON", "brightness": 254},
-        {"state": "ON", "brightness": 120},
-    ]
-
-
-def test_a_ring_lights_the_lamp_through_the_doorbell() -> None:
-    clock, notifier = Clock(), Notifier()
-    lamp = DoorLamp("Dörrlampan", now=clock.now, sleep=clock.sleep)
-    doorbell = Doorbell(notifier, lamp=lamp, now=clock.now)
-
-    async def scenario() -> list[dict[str, object]]:
-        broker = LampBroker(lamp, on=False)
-        await doorbell.ring()
-        return broker.sets
-
-    assert asyncio.run(scenario()) == [{"state": "ON", "brightness": 254}, {"state": "OFF"}]
+    assert lights.lit == [("Dörrlampan", LAMP_SECONDS)]
     assert len(notifier.sent) == 1
+
+
+def test_without_a_door_lamp_no_lamp_is_lit() -> None:
+    clock, lights = Clock(), Lights()
+    doorbell = Doorbell(Notifier(), now=clock.now)
+    doorbell.light_lamp_with(lights)
+
+    ring_messages(doorbell, [(1000.0, press("a-1"))], clock)
+
+    assert lights.lit == []
 
 
 # --- MQTT ---
@@ -489,8 +400,7 @@ class FakeBroker:
 
 def test_the_doorbell_listens_on_the_door_topics_and_rings_on_a_press() -> None:
     clock, notifier = Clock(), Notifier()
-    lamp = DoorLamp("Dörrlampan", now=clock.now, sleep=clock.sleep)
-    doorbell = Doorbell(notifier, lamp=lamp, now=clock.now)
+    doorbell = Doorbell(notifier, now=clock.now)
     broker = FakeBroker([(RING_TOPIC, press("a-1")), (RING_TOPIC, press("a-1"))])
 
     async def scenario() -> None:
@@ -503,9 +413,9 @@ def test_the_doorbell_listens_on_the_door_topics_and_rings_on_a_press() -> None:
 
     asyncio.run(scenario())
 
-    assert broker.subscribed == [RING_TOPIC, RADAR_TOPIC, "zigbee2mqtt/Dörrlampan"]
+    assert broker.subscribed == [RING_TOPIC, RADAR_TOPIC]
     assert len(notifier.sent) == 1
-    assert ("zigbee2mqtt/Dörrlampan/get", b'{"state": "", "brightness": ""}') in broker.published
+    assert broker.published == []
 
 
 def test_the_test_command_publishes_a_ring_like_the_button() -> None:
@@ -527,34 +437,3 @@ def test_the_speaker_fetches_the_sound_from_this_computer() -> None:
     )
     # Utan inställd adress används datorns egen adress mot högtalaren.
     assert sound_url("127.0.0.1", 8000) == "http://127.0.0.1:8000/api/dorr/dingdong.mp3"
-
-
-class Lender:
-    def __init__(self) -> None:
-        self.events: list[str] = []
-
-    def borrow(self, friendly_name: str) -> None:
-        self.events.append(f"lånar {friendly_name}")
-
-    def give_back(self, friendly_name: str) -> None:
-        self.events.append(f"lämnar {friendly_name}")
-
-
-def test_the_lamp_is_borrowed_from_the_automation_while_it_is_lit() -> None:
-    clock, lender = Clock(), Lender()
-
-    async def scenario() -> list[dict[str, object]]:
-        lamp = DoorLamp("Dörrlampan", now=clock.now, sleep=clock.sleep)
-        lamp.lend_from(lender)
-        broker = LampBroker(lamp, on=False)
-        clock.while_sleeping = lambda: lender.events.append(f"lyser: {broker.sets}")
-        await lamp.flash()
-        return broker.sets
-
-    asyncio.run(scenario())
-
-    assert lender.events == [
-        "lånar Dörrlampan",
-        "lyser: [{'state': 'ON', 'brightness': 254}]",
-        "lämnar Dörrlampan",
-    ]
