@@ -12,7 +12,10 @@ from homecontrol.controller import Event, RoomView, Snapshot
 from homecontrol.fusion import Occupancy, Track
 from homecontrol.home import Point
 
-NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
+NOW = datetime.now(UTC).replace(microsecond=0)
+"""När testerna börjar. En fast tidpunkt blir med tiden äldre än historikens
+gräns på ett dygn, och då raderar databasens eget rensningsjobb raderna mitt
+i ett test."""
 ANNA = str(uuid.uuid4())
 
 
