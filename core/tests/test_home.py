@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from homecontrol.home import (
     BODY_HEIGHT,
     Floor,
+    Furniture,
     Home,
     Lamp,
     Node,
@@ -170,6 +171,30 @@ def test_floors_have_different_levels() -> None:
 def test_home_has_at_least_one_floor() -> None:
     with pytest.raises(ValidationError, match="minst en våning"):
         home_with()
+
+
+def test_furniture_and_ceiling_height_may_be_missing() -> None:
+    """Ett hem utan möbler och takhöjd, som alla hem före iPhone-skanningen, är giltigt."""
+    floor = one_room_home().floors[0]
+
+    assert floor.furniture == ()
+    assert floor.rooms[0].ceiling_height is None
+
+
+def test_furniture_is_an_area_on_the_floor() -> None:
+    sofa = Furniture(name="Soffa", polygon=rectangle(1, 1, 2, 0.9))
+    floor = Floor(id="plan", name="Plan", level=0, furniture=(sofa,))
+
+    assert floor.furniture[0].name == "Soffa"
+    with pytest.raises(ValidationError, match="minst tre hörn"):
+        Furniture(name="Soffa", polygon=(Point(1, 1), Point(2, 1)))
+
+
+def test_ceiling_height_is_a_sensible_height() -> None:
+    assert l_room(ceiling_height=2.5).ceiling_height == 2.5
+    for height in (0, -1, 25, math.nan):
+        with pytest.raises(ValidationError):
+            l_room(ceiling_height=height)
 
 
 def test_ids_are_simple() -> None:

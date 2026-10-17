@@ -10,7 +10,7 @@ Filen ser ut så här, med hela hemmet under "home":
 
 Databasen sparar samma dokument (se store.py), så formatet har en enda
 version. Versionen höjs när en äldre fil inte längre kan läsas som den är,
-inte när ett nytt fält som får saknas läggs till (som våningens plan_image).
+inte när ett nytt fält som får saknas läggs till (som våningens plan_image och furniture).
 Punkter skrivs som [x, y] i meter, med origo uppe till vänster.
 Allt kontrolleras när filen läses, så en trasig fil ger ett begripligt fel
 i stället för ett halvt hem.
@@ -42,6 +42,7 @@ _ITEM_NAMES = {
     "nodes": "nod",
     "lamps": "lampa",
     "signal_sources": "signalkälla",
+    "furniture": "möbel",
     "polygon": "hörn",
     "walls": "vägg",
     "capabilities": "förmåga",

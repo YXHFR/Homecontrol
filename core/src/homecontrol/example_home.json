@@ -29,6 +29,7 @@
               "windowless": false,
               "wifi_weight": 0.5
             },
+            "ceiling_height": 2.4,
             "zones": [
               {
                 "id": "ytterdorr",
@@ -86,6 +87,7 @@
               "windowless": false,
               "wifi_weight": 0.5
             },
+            "ceiling_height": 2.7,
             "zones": [
               {
                 "id": "soffa",
@@ -151,6 +153,7 @@
               "windowless": false,
               "wifi_weight": 0.5
             },
+            "ceiling_height": 2.4,
             "zones": [
               {
                 "id": "flakt",
@@ -203,7 +206,27 @@
             "height": 1.0
           }
         ],
-        "plan_image": null
+        "plan_image": null,
+        "furniture": [
+          {
+            "name": "Soffa",
+            "polygon": [
+              [7.2, 4.6],
+              [9.3, 4.6],
+              [9.3, 5.4],
+              [7.2, 5.4]
+            ]
+          },
+          {
+            "name": "Bord",
+            "polygon": [
+              [2.0, 6.8],
+              [3.2, 6.8],
+              [3.2, 7.8],
+              [2.0, 7.8]
+            ]
+          }
+        ]
       },
       {
         "id": "ovanvaning",
@@ -230,6 +253,7 @@
               "windowless": false,
               "wifi_weight": 0.5
             },
+            "ceiling_height": 2.4,
             "zones": [
               {
                 "id": "sang",
@@ -285,6 +309,7 @@
               "windowless": false,
               "wifi_weight": 0.5
             },
+            "ceiling_height": 2.4,
             "zones": [],
             "nodes": [
               {
@@ -329,6 +354,7 @@
               "windowless": false,
               "wifi_weight": 0.5
             },
+            "ceiling_height": 2.4,
             "zones": [],
             "nodes": [
               {
@@ -361,7 +387,18 @@
             "height": 2.4
           }
         ],
-        "plan_image": null
+        "plan_image": null,
+        "furniture": [
+          {
+            "name": "Säng",
+            "polygon": [
+              [2.2, 1.6],
+              [3.8, 1.6],
+              [3.8, 3.6],
+              [2.2, 3.6]
+            ]
+          }
+        ]
       }
     ]
   }
