@@ -957,6 +957,11 @@ docker compose logs    # visar vad tjänsterna skriver, leta efter fel
 `docker compose ps -a` visar också `db-setup`, som ska stå som
 "Exited (0)": den gör i ordning databasen och avslutas sedan.
 
+Blir mosquitto aldrig "healthy" på Windows och står det `illegal option -`
+i `docker compose logs mosquitto`? Då har filerna checkats ut med
+Windows-radslut (CRLF) från en version före `.gitattributes`. Hämta
+senaste versionen och klona om repot.
+
 Ett vanligt fel är att `.env` saknas eller att ett värde är tomt. Då säger
 `docker compose up` vilken inställning som saknas.
 
