@@ -31,6 +31,13 @@ med `LampStateReported`.
 * **Lampprofiler.** Hur kommandot ser ut avgörs av lampans profil (se
   `Profile`), till exempel IKEA TRÅDFRI:s egenheter.
 
+* **Tänd en stund.** Dörrklockan (se doorbell.py) kan tända en lampa en
+  stund (`ZigbeeOutput.light_for`), också en som inte är placerad på kartan.
+  Under tiden skickar utgången inga av kärnans kommandon till lampan och
+  lämnar inte dess besked till kärnan, så att det inte räknas som manuell
+  styrning. Sedan får lampan tillbaka sitt tidigare läge (om ingen har ändrat
+  den under tiden). Lampans svar på det lämnas till kärnan, som räknar om
+  vad som behövs, så att automatiken tar över igen.
 * **Styrgräns.** Varje lampa får bara ett fåtal kommandon i sekunden (se
   `LampLimit`). Ett kommando som gränsen stoppar skjuts upp och skickas från
   `tick` så fort lampan får styras igen; kommer ett nyare kommando till samma
@@ -331,8 +338,12 @@ Connect = Callable[[], AbstractAsyncContextManager[MqttConnection]]
 """Ansluter till brokern. Ger ConnectionError om det inte går."""
 
 
-def mqtt_connect(settings: MqttSettings) -> Connect:
-    """Anslutningen till den riktiga brokern med aiomqtt."""
+def mqtt_connect(settings: MqttSettings, identifier: str = "homecontrol") -> Connect:
+    """Anslutningen till den riktiga brokern med aiomqtt.
+
+    `identifier` skiljer kärnans anslutningar åt; brokern kopplar ner en
+    gammal anslutning när en ny ansluter med samma.
+    """
 
     @contextlib.asynccontextmanager
     async def connect() -> AsyncIterator[MqttConnection]:
@@ -341,7 +352,7 @@ def mqtt_connect(settings: MqttSettings) -> Connect:
             settings.port,
             username=settings.username,
             password=settings.password,
-            identifier="homecontrol",
+            identifier=identifier,
         )
         try:
             async with client:
@@ -413,6 +424,18 @@ class _Pending:
     setting: Setting
 
 
+@dataclass
+class _LitFor:
+    """En lampa som är tänd en stund utanför automatiken (se `ZigbeeOutput.light_for`)."""
+
+    started: float
+    until: float
+    before: Setting | None
+    """Lampans läge innan den tändes, eller None om det inte var känt."""
+    changed: bool = False
+    """Någon har ändrat lampan medan den lyste."""
+
+
 class _GroupChange(NamedTuple):
     """En ändring av en rumsgrupp som kärnan ber Zigbee2MQTT om."""
 
@@ -475,6 +498,10 @@ class ZigbeeOutput:
         self._limit = LampLimit(now)
         self._held: dict[str, _Pending] = {}
         """Kommandon som styrgränsen har skjutit upp, det senaste per lampa."""
+        self._seen: dict[str, Setting] = {}
+        """Det varje lampa i Zigbee-nätet senast sa om sitt läge, efter IEEE-adress."""
+        self._lit_for: dict[str, _LitFor] = {}
+        """Lamporna som är tända en stund utanför automatiken (`light_for`), efter IEEE-adress."""
         self._place_lamps(home)
 
     # --- Det kärnan anropar ---
@@ -489,6 +516,9 @@ class ZigbeeOutput:
         address = ieee_address(command.lamp_id)
         device = None if self._devices is None or address is None else self._devices.get(address)
         if status is None or device is None:
+            return
+        if device.ieee_address in self._lit_for:
+            # Kärnan räknar om när lampan har fått tillbaka sitt läge och lästs.
             return
         if not status.state_known:
             # Kärnan får lampans läge snart och räknar då om vad som behövs.
@@ -516,6 +546,33 @@ class ZigbeeOutput:
         self._place_lamps(home)
         self._sync_groups()
         self._ask_lamps()
+
+    def light_for(self, friendly_name: str, seconds: float) -> None:
+        """Tänder lampan med namnet `friendly_name` i Zigbee2MQTT i `seconds` sekunder.
+
+        Sedan får lampan tillbaka läget den hade innan, eller släcks om läget
+        var okänt. Har någon ändrat lampan under tiden får den vara som den
+        är. Tänds lampan igen medan den lyser förlängs tiden.
+        """
+        address = self._names.get(friendly_name)
+        if address is None or self._devices is None or self._publish is None:
+            logger.warning("Dörrlampan finns inte i Zigbee2MQTT eller går inte att nå")
+            return
+        now = self._now()
+        lit = self._lit_for.get(address)
+        if lit is not None:
+            lit.until = max(lit.until, now + seconds)
+            return
+        before = self._seen.get(address)
+        self._lit_for[address] = _LitFor(started=now, until=now + seconds, before=before)
+        lamp_id = zigbee_lamp_id(address)
+        self._pending.pop(lamp_id, None)
+        self._held.pop(lamp_id, None)
+        status = self._lamps.get(lamp_id)
+        if status is not None:
+            # Ett kommando som väntar på svar gäller inte längre; kärnan räknar om efteråt.
+            status.expected = None
+        self._set_device(address, Setting(on=True), lit=before is not None and before.on)
 
     def lamps(self) -> list[FoundLamp]:
         """Lamporna i Zigbee-nätet, för webbgränssnittet. De oplacerade väntar på att placeras."""
@@ -620,6 +677,8 @@ class ZigbeeOutput:
         """
         now = self._now()
         for lamp_id, status in self._lamps.items():
+            if ieee_address(lamp_id) in self._lit_for:
+                continue  # tänd en stund (`light_for`); den följs upp efteråt
             if (
                 not status.state_known
                 and status.asked_at is not None
@@ -632,6 +691,7 @@ class ZigbeeOutput:
                     status.state_known = False
                     status.asked_at = None
                 status.expected = None
+        self._end_lit_for(now)
         due = [item for item in self._later if item[0] <= now]
         self._later = [item for item in self._later if item[0] > now]
         for _, topic, payload in due:
@@ -773,18 +833,37 @@ class ZigbeeOutput:
         lamp_id = zigbee_lamp_id(address)
         status = self._lamps.get(lamp_id)
         state = data.get("state")
-        if status is None or state not in ("ON", "OFF"):
-            return  # en oplacerad lampa, eller ett besked om något annat än ljuset
+        if state not in ("ON", "OFF"):
+            return  # ett besked om något annat än ljuset
         on = state == "ON"
         brightness = data.get("brightness")
-        level = (
-            percent(round(brightness))
-            if isinstance(brightness, int | float)
+        seen = self._seen.get(address)
+        if (
+            isinstance(brightness, int | float)
             and not isinstance(brightness, bool)
             and 0 <= brightness <= ZIGBEE_BRIGHTNESS
-            else status.brightness
-        )
+        ):
+            level = percent(round(brightness))
+        else:
+            level = (
+                status.brightness
+                if status is not None
+                else seen.brightness
+                if seen is not None
+                else 100
+            )
         now = self._now()
+        self._seen[address] = Setting(on, level)
+        lit = self._lit_for.get(address)
+        if lit is not None:
+            # Strax efter att lampan tändes kan den upprepa sitt gamla läge.
+            if now - lit.started > ECHO_GRACE_SECONDS and not (
+                on and level >= 100 - ANSWER_TOLERANCE
+            ):
+                lit.changed = True
+            return
+        if status is None:
+            return  # en oplacerad lampa
         if not status.state_known:
             external = False  # lampans läge när den läses, inte en ändring
             status.state_known = True
@@ -815,6 +894,56 @@ class ZigbeeOutput:
 
     # --- Hjälp ---
 
+    def _end_lit_for(self, now: float) -> None:
+        """Ger lamporna som har lyst färdigt (`light_for`) tillbaka sitt tidigare läge."""
+        if self._publish is None:
+            return  # sköts när utgången är ansluten igen
+        for address, lit in list(self._lit_for.items()):
+            if now < lit.until:
+                continue
+            del self._lit_for[address]
+            lamp_id = zigbee_lamp_id(address)
+            status = self._lamps.get(lamp_id)
+            device = None if self._devices is None else self._devices.get(address)
+            if lit.changed:
+                logger.info("Dörrlampan ändrades medan den lyste; läget återställs inte")
+                if status is not None:
+                    # Läses om, så att kärnan får veta hur lampan är nu.
+                    status.state_known = False
+                    status.asked_at = None
+                continue
+            restore = lit.before or Setting(on=False)
+            if status is None or device is None or not status.state_known:
+                self._set_device(address, restore, lit=True)
+                if status is not None:
+                    status.asked_at = None  # läses när den går att nå
+                continue
+            # En placerad lampa återställs som ett eget kommando, så att lampans
+            # svar räknas som svar och inte som manuell styrning. Kärnan får
+            # beskedet och räknar om, och automatiken tar över igen.
+            seen = self._seen.get(address)
+            if seen is not None:
+                status.on, status.brightness = seen.on, seen.brightness
+            lamp = next((lamp for lamp in self._home.lamps if lamp.id == lamp_id), None)
+            profile = lamp.profile if lamp is not None else device.profile
+            self._set(device.friendly_name, PROFILES[profile], restore, [lamp_id])
+
+    def _set_device(self, address: str, setting: Setting, *, lit: bool) -> None:
+        """Skickar en inställning direkt till en lampa med dess profil, utanför kärnans beslut."""
+        device = None if self._devices is None else self._devices.get(address)
+        if device is None or self._publish is None:
+            return
+        placed = next(
+            (lamp for lamp in self._home.lamps if lamp.id == zigbee_lamp_id(address)), None
+        )
+        profile = PROFILES[placed.profile if placed is not None else device.profile]
+        topic = f"{self._base}/{device.friendly_name}/set"
+        for payload in profile.payloads(setting, TRANSITION_SECONDS, lit=lit):
+            self._publish(topic, payload)
+        later = profile.after_transition(setting, lit=lit)
+        if later is not None:
+            self._later.append((self._now() + TRANSITION_SECONDS, topic, later))
+
     def _place_lamps(self, home: Home) -> None:
         """Håller reda på vilka Zigbee-lampor som är placerade på kartan."""
         placed = zigbee_lamps(home)
@@ -836,6 +965,7 @@ class ZigbeeOutput:
                 device is None
                 or status.state_known
                 or device.ieee_address in self._unavailable
+                or device.ieee_address in self._lit_for
                 or (status.asked_at is not None and now - status.asked_at < READ_RETRY_SECONDS)
             ):
                 continue

@@ -4,6 +4,10 @@ name: Firmware
 # (firmware/homecontrol.yaml) och med LD2461 (firmware/homecontrol-ld2461.yaml),
 # och lägger ihop den till webbinstalleraren, som sparas som artefakten
 # "webbinstallerare". Den publiceras inte på webben än.
+#
+# Dörrklockan (firmware/dorrklocka.yaml) valideras och byggs för sig, med
+# påhittade hemligheter. Den byggs bara för att visa att den går att bygga;
+# ägaren bygger sin egen med sina hemligheter (se firmware/README.md).
 
 on:
   push:
@@ -125,6 +129,54 @@ jobs:
           path: out/
           retention-days: 7
           if-no-files-found: error
+
+  doorbell:
+    name: Bygg dörrklockan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: firmware/requirements.txt
+      - run: pip install --require-hashes -r firmware/requirements.txt
+      - name: Cacha ESP-IDF och verktyg
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/esphome
+          key: esphome-${{ hashFiles('firmware/requirements.txt') }}
+      - name: Påhittade hemligheter
+        # Slumpade för varje körning och sparas ingenstans. Byggets firmware används inte.
+        run: |
+          umask 077
+          {
+            echo "wifi_ssid: ci"
+            echo "wifi_password: $(openssl rand -hex 16)"
+            echo "mqtt_broker: 192.0.2.1"
+            echo "mqtt_password: $(openssl rand -hex 16)"
+            echo "api_key: $(openssl rand -base64 32)"
+          } > firmware/secrets.yaml
+      - name: Validera konfigurationen
+        run: esphome config firmware/dorrklocka.yaml > resolved-dorr.yaml
+      - name: Kontrollera integritet och säkerhet
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          r=resolved-dorr.yaml
+          grep -qE '^  idle_framerate: 0(\.0)?$' "$r" || fail "Kameran ska inte ta bilder när ingen ber om dem"
+          ! grep -qE '^(web_server|esp32_camera_web_server|captive_portal):' "$r" \
+            || fail "Ingen webbserver: kameran ska bara nås genom kärnan över det krypterade API:t"
+          ! grep -qE 'platform: (esp32_camera_web_server|web_server)$' "$r" \
+            || fail "Ingen webbserver: kameran ska bara nås genom kärnan över det krypterade API:t"
+          ! grep -qE '^(microphone|i2s_audio|voice_assistant):' "$r" || fail "Mikrofonen ska inte användas"
+          grep -qE "^    key: !secret 'api_key'$" "$r" || fail "API:t ska vara krypterat med nyckeln i secrets.yaml"
+          grep -qE '^  topic_prefix: dorr/klocka$' "$r" || fail "Dörrklockan ska bara skriva under dorr/ (mosquitto/acl)"
+          grep -qE '^  log_topic: null$' "$r" || fail "Loggen ska inte skickas över MQTT"
+          grep -qE '^  discover_ip: false$' "$r" || fail "Dörrklockan ska inte annonsera sig över MQTT"
+          # Alla lösenord och nycklar ska komma från secrets.yaml.
+          ! grep -E '^\s+(password|key|psk):' "$r" | grep -v '!secret' || fail "Hemligheter hör inte hemma i konfigurationen"
+      - name: Bygg
+        run: esphome compile firmware/dorrklocka.yaml
 
   site:
     name: Bygg webbinstalleraren

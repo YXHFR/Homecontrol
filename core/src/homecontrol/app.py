@@ -19,6 +19,8 @@ from homecontrol.clock import SystemClock
 from homecontrol.connectors import defer_in_loop
 from homecontrol.controller import Controller
 from homecontrol.databaselink import DatabaseLink
+from homecontrol.doorbell import Doorbell
+from homecontrol.doorbell_api import create_doorbell_router
 from homecontrol.editor import HomeChanges, HomeStore, MemoryStore, create_editor_router
 from homecontrol.esphome import (
     AioesphomeNetwork,
@@ -53,6 +55,8 @@ def create_app(
     card_network: Network | None = None,
     mqtt: Connect | None = None,
     database: DatabaseLink | None = None,
+    doorbell: Doorbell | None = None,
+    doorbell_mqtt: Connect | None = None,
 ) -> FastAPI:
     """`home` är hemmet från databasen. Utan det används exempelhemmet.
 
@@ -71,10 +75,15 @@ def create_app(
     `database` är kärnans kontakt med databasen där `home_store` sparar (se
     databaselink.py). Utan kontakt visar livevyn en varning, ändringar nekas
     och kärnan ansluter igen i bakgrunden.
+
+    `doorbell` är dörrklockan (se doorbell.py), som lyssnar på ringen genom
+    `doorbell_mqtt`. Utan den är dörrklockan avstängd och dess vägar finns inte.
     """
     clock = clock if clock is not None else SystemClock()
     home = home if home is not None else example_home()
     zigbee = None if mqtt is None else ZigbeeOutput(home, defer=defer_in_loop)
+    if doorbell is not None and zigbee is not None:
+        doorbell.light_lamp_with(zigbee)
     real_lamps = zigbee_lamps if zigbee is not None else _nothing_real
     lamps = SimulatedLampOutput(real_lamps, clock.now)
     controller = Controller(home, clock, [lamps] if zigbee is None else [lamps, zigbee])
@@ -137,6 +146,8 @@ def create_app(
             tasks.append(asyncio.create_task(zigbee.run(controller.observe, mqtt)))
         if database is not None:
             tasks.append(asyncio.create_task(database.run(changes.resync)))
+        if doorbell is not None and doorbell_mqtt is not None:
+            tasks.append(asyncio.create_task(doorbell.run(doorbell_mqtt)))
         try:
             yield
         finally:
@@ -184,6 +195,8 @@ def create_app(
     controller.on_calibrated(calibration_saver(changes))
     app.include_router(create_editor_router(changes, allowed_hosts))
     app.include_router(create_calibration_router(controller, allowed_hosts))
+    if doorbell is not None:
+        app.include_router(create_doorbell_router(doorbell, allowed_hosts))
 
     # Webbgränssnittet monteras sist så att API-vägarna ovan har företräde.
     if web_dir is not None:

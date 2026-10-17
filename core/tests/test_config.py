@@ -1,9 +1,10 @@
+import base64
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
-from homecontrol.config import MqttSettings, Settings
+from homecontrol.config import DoorbellSettings, MqttSettings, Settings
 
 
 def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -18,6 +19,7 @@ def test_defaults_listen_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOMECONTROL_ESPHOME_SECRET",
         "HOMECONTROL_MQTT_HOST",
         "HOMECONTROL_HOME_COPY",
+        "HOMECONTROL_DOORBELL_NTFY_TOPIC",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -159,3 +161,139 @@ def test_without_mqtt_host_no_real_lamps_are_used(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("HOMECONTROL_MQTT_PASSWORD", "hemligt")
 
     assert Settings.from_env().mqtt is None
+
+
+# --- Dörrklockan ---
+
+DOORBELL_KEY = base64.b64encode(b"0123456789abcdef0123456789abcdef").decode()
+"""32 påhittade byte i base64, som en nyckel från openssl rand -base64 32."""
+
+
+OPEN_TOPIC = "0123456789abcdef0123456789abcdef"
+"""Ett påhittat ntfy-ämne, långt nog utan inloggning."""
+
+
+def clear_doorbell(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "NTFY_TOPIC",
+        "NTFY_URL",
+        "NTFY_TOKEN",
+        "CAMERA_HOST",
+        "CAMERA_KEY",
+        "SPEAKER_HOST",
+        "SPEAKER_VOLUME",
+        "MEDIA_HOST",
+        "SOUND_FILE",
+        "LAMP",
+    ):
+        monkeypatch.delenv(f"HOMECONTROL_DOORBELL_{name}", raising=False)
+
+
+def test_the_doorbell_is_off_until_it_has_a_ntfy_topic(monkeypatch: pytest.MonkeyPatch) -> None:
+    clear_doorbell(monkeypatch)
+    # Andra inställningar för dörrklockan räcker inte för att slå på den.
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_SPEAKER_HOST", "192.0.2.20")
+
+    assert Settings.from_env().doorbell is None
+
+
+def test_reads_the_doorbell(monkeypatch: pytest.MonkeyPatch) -> None:
+    clear_doorbell(monkeypatch)
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_TOPIC", "dorr_abc-123")
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_URL", "https://ntfy.example/")
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_TOKEN", "tk_hemlig")
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_CAMERA_HOST", "192.0.2.30")
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_CAMERA_KEY", DOORBELL_KEY)
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_SPEAKER_HOST", "192.0.2.20")
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_SPEAKER_VOLUME", "35")
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_LAMP", "KAJPLATS hall")
+
+    doorbell = Settings.from_env().doorbell
+
+    assert doorbell == DoorbellSettings(
+        ntfy_topic="dorr_abc-123",
+        ntfy_url="https://ntfy.example",
+        ntfy_token="tk_hemlig",  # noqa: S106 (påhittad)
+        camera_host="192.0.2.30",
+        camera_key=b"0123456789abcdef0123456789abcdef",
+        speaker_host="192.0.2.20",
+        speaker_volume=35,
+        lamp="KAJPLATS hall",
+    )
+
+
+def test_the_doorbell_settings_are_never_printed() -> None:
+    doorbell = DoorbellSettings(
+        ntfy_topic="hemligt_amne",
+        ntfy_token="tk_hemlig",  # noqa: S106 (påhittad)
+        camera_host="192.0.2.30",
+        camera_key=b"k" * 32,
+        lamp="KAJPLATS hall",
+    )
+
+    shown = repr(doorbell)
+
+    for secret in ("hemligt_amne", "tk_hemlig", "192.0.2.30", "kkkk", "KAJPLATS"):
+        assert secret not in shown
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("NTFY_TOPIC", "mitt ämne", "DOORBELL_NTFY_TOPIC"),
+        ("NTFY_URL", "ftp://ntfy.example", "DOORBELL_NTFY_URL"),
+        ("NTFY_URL", "http://ntfy.example", "DOORBELL_NTFY_URL"),
+        ("CAMERA_KEY", "inte-base64", "DOORBELL_CAMERA_KEY"),
+        ("CAMERA_KEY", "c2hvcnQ=", "DOORBELL_CAMERA_KEY"),
+        ("CAMERA_HOST", "dorrklockan.local", "tillsammans"),
+        ("SPEAKER_HOST", "google-home", "DOORBELL_SPEAKER_HOST"),
+        ("SPEAKER_VOLUME", "högt", "DOORBELL_SPEAKER_VOLUME"),
+        ("SPEAKER_VOLUME", "150", "DOORBELL_SPEAKER_VOLUME"),
+        ("LAMP", "lampor/#", "DOORBELL_LAMP"),
+    ],
+)
+def test_a_wrong_doorbell_setting_says_which(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str, message: str
+) -> None:
+    clear_doorbell(monkeypatch)
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_TOPIC", OPEN_TOPIC)
+    monkeypatch.setenv(f"HOMECONTROL_DOORBELL_{name}", value)
+
+    with pytest.raises(ValueError, match=message):
+        Settings.from_env()
+
+
+def test_the_camera_needs_both_address_and_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    clear_doorbell(monkeypatch)
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_TOPIC", OPEN_TOPIC)
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_CAMERA_KEY", DOORBELL_KEY)
+
+    with pytest.raises(ValueError, match="tillsammans"):
+        Settings.from_env()
+
+
+def test_without_a_token_the_ntfy_topic_must_be_long(monkeypatch: pytest.MonkeyPatch) -> None:
+    clear_doorbell(monkeypatch)
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_TOPIC", "dorr")
+
+    with pytest.raises(ValueError, match="för kort"):
+        Settings.from_env()
+
+    # Med inloggning hos ntfy skyddas ämnet av den i stället.
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_TOKEN", "tk_hemlig")
+    assert Settings.from_env().doorbell is not None
+
+
+@pytest.mark.parametrize(
+    "url", ["http://192.168.1.5:8080", "http://ntfy.local", "http://localhost:2586"]
+)
+def test_plain_http_is_allowed_only_to_a_ntfy_server_at_home(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    clear_doorbell(monkeypatch)
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_TOPIC", OPEN_TOPIC)
+    monkeypatch.setenv("HOMECONTROL_DOORBELL_NTFY_URL", url)
+
+    doorbell = Settings.from_env().doorbell
+
+    assert doorbell is not None and doorbell.ntfy_url == url
