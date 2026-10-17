@@ -21,7 +21,7 @@ import struct
 import wave
 
 RATE = 22050
-"""Bildpunkter per sekund. Räcker gott för en dörrklocka och ger en liten fil."""
+"""Ljudprov per sekund (samplingsfrekvens). Räcker gott för en dörrklocka och ger en liten fil."""
 TONES = ((659.25, 0.0), (523.25, 0.6))
 """Tonerna (Hz) och när de börjar (sekunder): ding, sedan dong."""
 LENGTH_SECONDS = 2.2

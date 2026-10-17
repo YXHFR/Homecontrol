@@ -201,13 +201,14 @@ tryckknapp mellan D1 (GPIO2) och GND.
 Dörrklockan finns inte i webbinstalleraren. Den behöver hemligheter (Wi-Fi,
 MQTT och kamerans nyckel), så du bygger den själv:
 
-1. Installera ESPHome i samma version som CI:
+1. Installera ESPHome i den version som projektet testas med:
 
    ```sh
    python3 -m venv .venv && .venv/bin/pip install --require-hashes -r firmware/requirements.txt
    ```
 
 2. Kopiera hemligheterna och fyll i dem. `secrets.yaml` är gitignorerad.
+   Kommandot skriver över en `secrets.yaml` som redan finns.
 
    ```sh
    cp firmware/dorrklocka-secrets.example.yaml firmware/secrets.yaml
@@ -224,7 +225,7 @@ MQTT och kamerans nyckel), så du bygger den själv:
    Senare uppdateringar kan göras över nätverket med samma kommando. De
    kräver kamerans nyckel.
 
-Det här gör dörrklockan:
+För den som vill veta detaljerna gör dörrklockan så här:
 
 - Ett tryck (avstudsat, 50 ms) publicerar `{"tryck": "<id>"}` på
   `dorr/ringer` med QoS 1 och utan retain. Id:t är unikt för varje tryck.

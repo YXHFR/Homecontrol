@@ -523,7 +523,8 @@ När någon trycker på knappen
   nyckeln i `.env`). Sidan Dörren har samma kontroll av adress och avsändare
   som resten av Homecontrol, så en främmande webbsida kan inte öppna den.
   Alla som når Homecontrol (se **Vem som når Homecontrol**) kan däremot
-  trycka på Visa dörren.
+  trycka på Visa dörren, även gäster på samma Wi-Fi. Ett gästnätverk i
+  routern hindrar det.
 - **Radarn vid dörren ger bara en textnotis** och startar aldrig kameran.
   En radar (eller annan närvarogivare) som publicerar `ON` på `dorr/radar`
   ger högst en notis var femte minut.
@@ -538,12 +539,15 @@ När någon trycker på knappen
 | Notisen (text och stillbild) | Homecontrol | ntfy-servern (`DOORBELL_NTFY_URL`), sedan din telefon | ntfy.sh sparar meddelanden och bilagor i några timmar enligt sina villkor. Med en egen ntfy-server bestämmer du själv. |
 | Kamerans ström | Kameran, över krypterat API | Homecontrol, sedan webbläsaren | Nej |
 | Dingdong (mp3) | Homecontrol (`/api/dorr/dingdong.mp3`) | Google Home-högtalaren | Nej |
-| Lampans tänd och släck | Homecontrol | Zigbee2MQTT, sedan lampan | Nej |
+| Radarnotisen (bara text: att någon är vid dörren) | Homecontrol | ntfy-servern, sedan din telefon | Som notisen ovan. |
+| Kommandon till lampan (tänd och släck) | Homecontrol | Zigbee2MQTT, sedan lampan | Nej |
 
-Den som känner till ntfy-ämnet kan läsa notiserna och se stillbilden. Gör
-ämnet långt och slumpat, eller använd en egen ntfy-server med inloggning
-(`DOORBELL_NTFY_TOKEN`). Homecontrols logg nämner aldrig ämnet, nycklar
-eller adresser.
+Den som känner till ntfy-ämnet kan läsa notiserna och se stillbilden.
+Därför måste ämnet vara minst 32 tecken långt och slumpat, om du inte
+använder en ntfy-server med inloggning (`DOORBELL_NTFY_TOKEN`). Notiserna
+går krypterat (https) till ntfy-servern; vanlig http godtas bara till en
+egen server i hemnätet. Homecontrols egna loggrader nämner aldrig ämnet,
+nycklar eller adresser.
 
 ### Det här behövs
 
@@ -608,10 +612,10 @@ eller adresser.
    Öppna sidan **Dörren** i Homecontrol för att se kameran.
 
 Lampan behöver inte vara placerad på kartan. Är den det (som rummets
-KAJPLATS-lampa) lånar dörrklockan den från automatiken i 30 sekunder; sedan
-läser Homecontrol av lampan och automatiken tar över igen. Blinket räknas
-inte som att någon har styrt lampan för hand. Ändrar någon lampan medan den
-lyser får den vara som den är.
+KAJPLATS-lampa) styr automatiken inte lampan under de 30 sekunderna. Sedan
+får lampan tillbaka sitt läge och automatiken tar över igen. Att dörrklockan
+tände lampan räknas inte som att någon har styrt den för hand. Ändrar någon
+lampan medan den lyser får den vara som den är.
 
 **Eget ljud.** Homecontrol har ett eget, genererat dingdong
 ([`scripts/make_dingdong.py`](scripts/make_dingdong.py)). Vill du ha ett
