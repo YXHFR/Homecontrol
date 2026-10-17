@@ -11,10 +11,11 @@ efter att personen gick.
 import pytest
 
 from homecontrol.connectors import LampStateReported
-from homecontrol.home import RoomSettings, ZoneKind
+from homecontrol.home import RadarModel, RoomSettings, ZoneKind
 from homes import (
     home_with_settings,
     home_with_zones,
+    one_room_home,
     side_by_side_home,
     two_floor_home,
     two_lamp_home,
@@ -291,6 +292,55 @@ def test_lamp_stays_on_while_someone_is_left() -> None:
         .wait_for_hold()
         .wait(minutes=3)
         .expect_lamp_off()
+    )
+
+
+def test_five_people_in_a_room_with_an_ld2461_are_all_followed() -> None:
+    """Fem personer i ett rum med LD2461: alla fem syns, och lampan lyser tills alla har gått.
+
+    Simuleringen låtsas vara en LD2461. Att den riktiga radarn följer fem
+    personer är tillverkarens uppgift och inte provat än.
+    """
+    (
+        Scenario(one_room_home(RadarModel.LD2461))
+        .light_level(10)
+        .person_moves_to(x=1.0, y=1.5, who="Anna")
+        .person_moves_to(x=2.0, y=2.5, who="Bo")
+        .person_moves_to(x=3.0, y=1.5, who="Cilla")
+        .person_moves_to(x=4.0, y=2.5, who="David")
+        .person_moves_to(x=2.5, y=3.5, who="Eva")
+        .expect_tracks(5)
+        .expect_room("upptaget")
+        .expect_lamp_on()
+        .person_leaves(who="Anna")
+        .person_leaves(who="Bo")
+        .person_leaves(who="Cilla")
+        .person_leaves(who="David")
+        .wait(minutes=10)
+        .expect_tracks(1)
+        .expect_lamp_on()
+        .person_leaves(who="Eva")
+        .wait_for_hold()
+        .expect_room("tomt")
+        .wait(minutes=3)
+        .expect_lamp_off()
+    )
+
+
+def test_an_ld2450_follows_three_of_five_people_and_the_room_is_still_occupied() -> None:
+    """Samma fem personer med LD2450: radarn följer de tre närmaste, och rummet är upptaget."""
+    (
+        Scenario()
+        .light_level(10)
+        .person_moves_to(x=1.0, y=1.5, who="Anna")
+        .person_moves_to(x=2.0, y=2.5, who="Bo")
+        .person_moves_to(x=3.0, y=1.5, who="Cilla")
+        .person_moves_to(x=4.0, y=2.5, who="David")
+        .person_moves_to(x=2.5, y=3.5, who="Eva")
+        .wait_for_hold()
+        .expect_tracks(3)
+        .expect_room("upptaget")
+        .expect_lamp_on()
     )
 
 

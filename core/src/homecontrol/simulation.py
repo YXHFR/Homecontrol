@@ -3,7 +3,9 @@
 Låtsaskällan styrs från livevyn eller från scenariotester och lämnar sina
 observationer genom samma ingång som riktiga källor. Varje rumskort med radar
 i hemmet blir en virtuell radar, som ser låtsaspersonerna i sitt synfält och
-skickar dem i sina egna koordinater, precis som en riktig radar. Kärnan kan
+skickar dem i sina egna koordinater, precis som en riktig radar. Den virtuella
+radarn är av samma sort som nodens (`Node.radar`), så att ett rum med en
+LD2461 kan provas med fem personer utan hårdvara. Kärnan kan
 alltså inte se skillnad på en låtsasperson och en person som radarn ser, och
 omräkningen och sammanvägningen prövas på samma sätt som med riktiga noder.
 
@@ -59,12 +61,13 @@ Speed = Literal[1, 10, 60]
 SPEEDS: tuple[Speed, ...] = get_args(Speed)
 
 # Den virtuella radarn ser som en LD2450: 6 meter bort och 60° åt varje
-# sida, och följer högst tre personer åt gången.
+# sida. Den följer så många personer som nodens radar (`Node.radar`): tre
+# för LD2450 och fem för LD2461. Synfältet är LD2450:s även för LD2461,
+# eftersom LD2461:s räckvidd inte är provad än.
 RADAR_RANGE = 6.0
 """Så långt radarn ser, i meter."""
 RADAR_HALF_ANGLE = 60.0
 """Så många grader åt varje sida om riktningen den tittar åt som radarn ser."""
-RADAR_MAX_TARGETS = 3
 
 MAX_HISTORY = 1000
 """Så många av de senaste kommandona minns de virtuella lamporna."""
@@ -254,18 +257,18 @@ class SimulatedSource:
             for node in (node for room in floor.rooms for node in room.nodes):
                 if Capability.RADAR in node.capabilities and node.id not in real:
                     targets = _targets_seen_by(node, on_floor)
-                    self._sink(RadarTargetsObserved(self._source_id, node.id, targets))
+                    self._sink(RadarTargetsObserved(self._source_id, node.id, targets, node.radar))
 
 
 def _targets_seen_by(node: Node, positions: Iterable[Point]) -> tuple[RadarTarget, ...]:
-    """Det radarn på noden ser av personerna, närmast först och högst tre."""
+    """Det radarn på noden ser av personerna, närmast först och högst så många som den följer."""
     in_view = [
         target
         for target in (node.home_to_radar(position) for position in positions)
         if _in_view(target)
     ]
     in_view.sort(key=lambda target: math.hypot(target.x, target.y))
-    return tuple(RadarTarget(t.x, t.y) for t in in_view[:RADAR_MAX_TARGETS])
+    return tuple(RadarTarget(t.x, t.y) for t in in_view[: node.radar.max_targets])
 
 
 def _in_view(target: Point) -> bool:

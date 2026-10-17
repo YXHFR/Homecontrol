@@ -1,0 +1,152 @@
+# Homecontrol – det som är lika på alla rumskort, oavsett radar.
+#
+# Används som paket av homecontrol.yaml (LD2450) och homecontrol-ld2461.yaml
+# (LD2461). Bygg aldrig den här filen direkt. Substitutionerna rum,
+# firmware_version, i2c_sda_pin och i2c_scl_pin kommer från filen som
+# använder paketet.
+#
+# Konfigurationen är Apache-2.0. Den byggda firmware-binären innehåller
+# ESPectre och ESPHome:s C++-kod och blir därför GPL-3.0 (se firmware/README.md).
+
+esphome:
+  name: homecontrol-${rum}
+  friendly_name: Homecontrol ${rum}
+  # ESPHome-versionen låses i firmware/requirements.txt. min_version gör att
+  # en äldre ESPHome säger ifrån direkt.
+  min_version: 2026.9.1
+  project:
+    name: yxhfr.homecontrol
+    version: ${firmware_version}
+
+esp32:
+  variant: ESP32S3
+  board: esp32-s3-devkitc-1
+  # 4 MB räcker och fungerar på alla ESP32-S3-moduler.
+  flash_size: 4MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      # Bluetooth delar radio med Wi-Fi och stör CSI-mätningen.
+      CONFIG_BT_ENABLED: n
+  # Uttryckligen ESP-IDF, så att byggets sökväg till firmware-filen inte flyttar sig.
+  toolchain: esp-idf
+
+# ESPectre (GPL-3.0) låst på en exakt commit (taggen 3.0.0).
+external_components:
+  - source:
+      type: git
+      url: https://github.com/francescopace/espectre
+      ref: 12fce9354d3506290e70a853a4f22866f0e987ef
+      path: src/cpp/frontend/esphome/components
+    components: [espectre]
+    refresh: never
+
+logger:
+  level: INFO
+
+debug:
+  update_interval: 60s
+
+wifi:
+  # Inga uppgifter här. Nätet ställs in med Improv över USB och sparas i
+  # kortets flash.
+  # Strömsparläget stängs av: det ger luckor i CSI-mätningen och fördröjning.
+  power_save_mode: none
+
+# Medvetet utan egen åtkomstpunkt och captive portal. ESPHome:s captive
+# portal tar med firmwareuppladdning utan lösenord, och åtkomstpunkten
+# startar av sig själv när Wi-Fi försvinner. Då skulle vem som helst i
+# närheten kunna byta firmware.
+
+# Wi-Fi ställs in över USB (samma port som loggen).
+improv_serial:
+
+api:
+  encryption: {}
+  # Starta inte om kortet när kärnan är borta en stund (standard är 15 min).
+  # En omstart nollställer radarn och CSI-kalibreringen.
+  reboot_timeout: 0s
+
+# Uppdatering över nätverket utan lösenord: kortet tar inte emot någon
+# firmware, utan hämtar den själv från update_source över https och
+# kontrollerar md5-summan. Det sker bara när någon trycker på "Install" på
+# Firmware-entiteten via det krypterade API:t (kärnan frågar användaren).
+http_request:
+  verify_ssl: true
+  # Följ inga omdirigeringar, så att en hämtning aldrig hamnar på vanlig http.
+  follow_redirects: false
+
+ota:
+  - platform: http_request
+
+script:
+  # Släcker "Radar Online" om ingen ram kommit på 3 sekunder (kabel eller
+  # ström borta). Annars kan "Radar Presence" fastna på. Varje variant
+  # sätter "Radar Online" och startar skriptet när radarn skickar något.
+  - id: radar_watchdog
+    mode: restart
+    then:
+      - delay: 3s
+      - binary_sensor.template.publish:
+          id: radar_online
+          state: false
+
+i2c:
+  sda: ${i2c_sda_pin}
+  scl: ${i2c_scl_pin}
+  frequency: 100kHz
+
+espectre:
+  id: csi
+  # Ingen egen HTTP-server: allt går via det krypterade API:t.
+  direct_api: false
+  traffic_generator_mode: ping
+  evaluation_interval_ms: 250
+  motion_sensor:
+    name: CSI Motion
+  movement_sensor:
+    name: CSI Movement Score
+  calibration_active_sensor:
+    name: CSI Calibrating
+  recalibrate_button:
+    name: CSI Recalibrate
+
+sensor:
+  - platform: bh1750
+    name: Illuminance
+    update_interval: 5s
+
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s
+
+  # Drifttid och minne visar om kortet startar om eller läcker minne
+  # (används i hårdvarutestet).
+  - platform: uptime
+    name: Uptime
+    update_interval: 60s
+
+  - platform: debug
+    free:
+      name: Free Heap
+    loop_time:
+      name: Loop Time
+
+binary_sensor:
+  - platform: template
+    id: radar_online
+    name: Radar Online
+    device_class: connectivity
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: template
+    name: Firmware Version
+    entity_category: diagnostic
+    lambda: return {ESPHOME_PROJECT_VERSION};
+    update_interval: never
+
+  - platform: version
+    name: ESPHome Version
+    hide_timestamp: true

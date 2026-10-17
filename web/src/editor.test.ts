@@ -522,7 +522,7 @@ describe("kartredigeraren", () => {
     expect(text(root, ".save-status")).toBe("Hemmet har lästs om.");
     expect(core.document.home.floors[0].rooms.map((room) => room.name)).toEqual(["Köket"]);
   });
-  it("ett rumskort placeras i rummet, vrids, får höjd och spegling och tas bort", async () => {
+  it("ett rumskort placeras i rummet, vrids, får höjd, spegling och radar och tas bort", async () => {
     const { root, core, scenes, map, click, settled } = await setup();
     const nodes = () => core.document.home.floors[0].rooms[0].nodes ?? [];
     const input = (name: string) => {
@@ -562,6 +562,18 @@ describe("kartredigeraren", () => {
     mirrored.dispatchEvent(new Event("change"));
     await settled();
     expect(nodes()[0]).toMatchObject({ height: 2.4, mirrored: true });
+    expect(nodes()[0].radar).toBeUndefined();
+
+    // Simuleringen kan låtsas att kortet har en LD2461.
+    const radar = root.querySelector<HTMLSelectElement>('select[name="radar"]');
+    if (radar === null) {
+      throw new Error("Inget val av radar");
+    }
+    expect(radar.value).toBe("ld2450");
+    radar.value = "ld2461";
+    radar.dispatchEvent(new Event("change"));
+    await settled();
+    expect(nodes()[0].radar).toBe("ld2461");
 
     // En orimlig höjd sparas inte.
     const tooHigh = input("height");

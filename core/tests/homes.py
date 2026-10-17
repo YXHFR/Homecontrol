@@ -10,6 +10,7 @@ from homecontrol.home import (
     Lamp,
     Node,
     Point,
+    RadarModel,
     Room,
     RoomSettings,
     WallKind,
@@ -22,10 +23,10 @@ FLOOR = "plan"
 NODE_HEIGHT = 2.0
 
 
-def one_room_home() -> Home:
+def one_room_home(radar: RadarModel = RadarModel.LD2450) -> Home:
     """Ett vardagsrum på 5 × 4 meter med en taklampa i mitten, på en enda våning.
 
-    Rumskortet sitter mitt på övre väggen och tittar in i rummet.
+    Rumskortet sitter mitt på övre väggen och tittar in i rummet. Det har radarn `radar`.
     """
     return Home(
         name="Enrumshemmet",
@@ -34,7 +35,7 @@ def one_room_home() -> Home:
                 id=FLOOR,
                 name="Plan 1",
                 level=0,
-                rooms=(room("vardagsrum", "Vardagsrum", 0, 0, 5, 4, lamp="taklampa"),),
+                rooms=(room("vardagsrum", "Vardagsrum", 0, 0, 5, 4, lamp="taklampa", radar=radar),),
             ),
         ),
     )
@@ -52,16 +53,17 @@ def room(
     node: Node | None = None,
     walls: Sequence[WallKind] = (WallKind.PLASTERBOARD,) * 4,
     zones: Sequence[Zone] = (),
+    radar: RadarModel = RadarModel.LD2450,
 ) -> Room:
     """Ett rektangulärt rum med, om `lamp` anges, en taklampa i mitten.
 
-    Utan `node` sitter ett rumskort med radar och Wi-Fi mitt på övre väggen
-    och tittar rakt in i rummet. Väggarna är som standard av gips.
+    Utan `node` sitter ett rumskort med radarn `radar` och Wi-Fi mitt på övre
+    väggen och tittar rakt in i rummet. Väggarna är som standard av gips.
     """
     polygon = rectangle(x, y, width, height)
     center = Point(x + width / 2, y + height / 2)
     if node is None:
-        node = radar_node(f"nod-{room_id}", x + width / 2, y, rotation=90)
+        node = radar_node(f"nod-{room_id}", x + width / 2, y, rotation=90, radar=radar)
     return Room(
         id=room_id,
         name=name,
@@ -73,7 +75,9 @@ def room(
     )
 
 
-def radar_node(node_id: str, x: float, y: float, *, rotation: float) -> Node:
+def radar_node(
+    node_id: str, x: float, y: float, *, rotation: float, radar: RadarModel = RadarModel.LD2450
+) -> Node:
     return Node(
         id=node_id,
         name="Rumskort",
@@ -81,6 +85,7 @@ def radar_node(node_id: str, x: float, y: float, *, rotation: float) -> Node:
         height=NODE_HEIGHT,
         rotation=rotation,
         capabilities=(Capability.RADAR, Capability.CSI, Capability.LUX),
+        radar=radar,
     )
 
 
@@ -91,12 +96,15 @@ def zone(zone_id: str, kind: ZoneKind, x: float, y: float, width: float, height:
 
 
 def radar_sees(
-    *points: tuple[float, float], home: Home | None = None, source_id: str = "sim"
+    *points: tuple[float, float],
+    home: Home | None = None,
+    source_id: str = "sim",
+    radar: RadarModel = RadarModel.LD2450,
 ) -> RadarTargetsObserved:
     """Det rumskortet i hemmets första rum ser när personer står i `points` (hemmets meter)."""
     node = (home if home is not None else one_room_home()).rooms[0].nodes[0]
     targets = tuple(RadarTarget(*node.home_to_radar(Point(x, y))) for x, y in points)
-    return RadarTargetsObserved(source_id, node.id, targets)
+    return RadarTargetsObserved(source_id, node.id, targets, radar)
 
 
 def side_by_side_home(

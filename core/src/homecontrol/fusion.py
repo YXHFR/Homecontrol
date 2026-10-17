@@ -71,8 +71,6 @@ SMOOTHING = 0.5
 VELOCITY_SMOOTHING = 0.2
 """Hur mycket av den uppmätta fartändringen som tas med."""
 
-MAX_TARGETS = 16
-"""Fler mål än så här i en observation är fel i källan, och resten kastas."""
 MAX_TARGET_DISTANCE = 20.0
 """Mål längre bort än så här (meter, åt något håll) är fel i källan och kastas."""
 MAX_WARNINGS = 100
@@ -181,10 +179,12 @@ class Fusion:
         # Först släpps det vars tid redan har gått ut, så att det inte hittas igen.
         self._expire(now)
         self._heard(observation.source_id, (observation.node_id, Capability.RADAR))
+        # Fler mål än radarn kan följa är fel i källan, och resten kastas.
         targets = observation.targets
-        if len(targets) > MAX_TARGETS:
+        limit = observation.radar.max_targets
+        if len(targets) > limit:
             self._warn_once(placed.node.id, "för många mål", "Noden %r skickar för många mål")
-            targets = targets[:MAX_TARGETS]
+            targets = targets[:limit]
         self._associate(placed, list(self._detections(placed, targets)), now)
         self._refresh(now)
 

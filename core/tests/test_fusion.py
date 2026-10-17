@@ -11,11 +11,12 @@ import pytest
 
 from homecontrol.connectors import MotionObserved, RadarTarget, RadarTargetsObserved, SourceLost
 from homecontrol.fusion import HOLD_SECONDS, STILL_HOLD_MAX_SECONDS, Fusion, Occupancy, Presence
-from homecontrol.home import Capability, Home, Point, RoomSettings, ZoneKind
+from homecontrol.home import Capability, Home, Point, RadarModel, RoomSettings, ZoneKind
 from homes import home_with_zones, one_room_home, radar_sees, room, side_by_side_home, zone
 
 HOME = one_room_home()
 ROOM = HOME.rooms[0]
+LD2450 = RadarModel.LD2450
 NODE = ROOM.nodes[0]
 
 
@@ -52,7 +53,9 @@ def test_tracks_follow_the_persons_and_not_the_radar_numbering() -> None:
         bo = (4 - step * 0.1, 2.4)
         seen = radar_sees(anna, bo)
         if step % 2:
-            seen = RadarTargetsObserved(seen.source_id, seen.node_id, seen.targets[::-1])
+            seen = RadarTargetsObserved(
+                seen.source_id, seen.node_id, seen.targets[::-1], seen.radar
+            )
         fusion.radar(seen, now=step / 10)
 
     assert positions(fusion) == [(4, 2), (1, 2.4)]
@@ -111,8 +114,8 @@ def test_lost_source_makes_the_room_unknown_until_it_is_heard_again() -> None:
 def test_measurements_from_unknown_nodes_and_bad_values_are_ignored() -> None:
     fusion = Fusion(HOME, now=0)
 
-    fusion.radar(RadarTargetsObserved("sim", "finns-inte", (RadarTarget(0, 2),)), now=0)
-    fusion.radar(RadarTargetsObserved("sim", NODE.id, (RadarTarget(math.nan, 2),)), now=0)
+    fusion.radar(RadarTargetsObserved("sim", "finns-inte", (RadarTarget(0, 2),), LD2450), now=0)
+    fusion.radar(RadarTargetsObserved("sim", NODE.id, (RadarTarget(math.nan, 2),), LD2450), now=0)
     fusion.motion(MotionObserved("sim", NODE.id, True, score=1.5), now=0)
     fusion.motion(MotionObserved("sim", NODE.id, True, score=math.nan), now=0)
 
@@ -149,13 +152,28 @@ def test_tracks_of_an_unchanged_node_are_kept() -> None:
     assert fusion.rooms()[ROOM.id].since == pytest.approx(0)
 
 
-def test_too_many_targets_are_cut() -> None:
+@pytest.mark.parametrize(("radar", "limit"), [(RadarModel.LD2450, 3), (RadarModel.LD2461, 5)])
+def test_more_targets_than_the_radar_follows_are_cut(
+    radar: RadarModel, limit: int, caplog: pytest.LogCaptureFixture
+) -> None:
     fusion = Fusion(HOME, now=0)
-    many = [(0.5 + 0.2 * i, 3.0) for i in range(20)]
+    many = [(0.5 + 0.6 * i, 3.0) for i in range(7)]
 
-    fusion.radar(radar_sees(*many), now=0)
+    fusion.radar(radar_sees(*many, radar=radar), now=0)
 
-    assert len(fusion.tracks()) == 16
+    assert len(fusion.tracks()) == limit
+    assert "för många mål" in caplog.text
+
+
+def test_an_ld2461_follows_five_people_without_warning(caplog: pytest.LogCaptureFixture) -> None:
+    fusion = Fusion(HOME, now=0)
+    five = [(0.5 + i, 3.0) for i in range(5)]
+
+    fusion.radar(radar_sees(*five, radar=RadarModel.LD2461), now=0)
+
+    assert sorted(positions(fusion)) == pytest.approx(sorted(five))
+    assert fusion.rooms()[ROOM.id].status is Occupancy.OCCUPIED
+    assert "för många mål" not in caplog.text
 
 
 def test_node_coordinates_are_turned_into_home_coordinates() -> None:
@@ -163,7 +181,9 @@ def test_node_coordinates_are_turned_into_home_coordinates() -> None:
     fusion = Fusion(HOME, now=0)
     straight_ahead = math.hypot(2, NODE.height - 1)  # radarn mäter snett ned mot kroppen
 
-    fusion.radar(RadarTargetsObserved("sim", NODE.id, (RadarTarget(0, straight_ahead),)), now=0)
+    fusion.radar(
+        RadarTargetsObserved("sim", NODE.id, (RadarTarget(0, straight_ahead),), LD2450), now=0
+    )
 
     [track] = fusion.tracks()
     assert track.position.x == pytest.approx(2.5)
@@ -174,7 +194,7 @@ def seen_from(home: Home, node_id: str, *points: tuple[float, float]) -> RadarTa
     """Det noden `node_id` i hemmet ser när personer står i `points` (hemmets meter)."""
     node = next(n for r in home.rooms for n in r.nodes if n.id == node_id)
     targets = tuple(RadarTarget(*node.home_to_radar(Point(x, y))) for x, y in points)
-    return RadarTargetsObserved("sim", node_id, targets)
+    return RadarTargetsObserved("sim", node_id, targets, LD2450)
 
 
 @pytest.mark.parametrize(
@@ -236,7 +256,9 @@ def test_absurd_values_from_the_radar_are_ignored_and_warned_about_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     fusion = Fusion(HOME, now=0)
-    absurd = RadarTargetsObserved("sim", NODE.id, (RadarTarget(1e200, 2), RadarTarget(2, -1e200)))
+    absurd = RadarTargetsObserved(
+        "sim", NODE.id, (RadarTarget(1e200, 2), RadarTarget(2, -1e200)), LD2450
+    )
 
     for step in range(10):
         fusion.radar(absurd, now=step / 10)
@@ -252,7 +274,7 @@ def test_unknown_nodes_are_warned_about_once_each_and_not_without_end(
 
     for i in range(500):
         for _ in range(3):
-            fusion.radar(RadarTargetsObserved("sim", f"okänd-{i}\nfalsk rad", ()), now=0)
+            fusion.radar(RadarTargetsObserved("sim", f"okänd-{i}\nfalsk rad", (), LD2450), now=0)
 
     assert caplog.text.count("ignoreras") == 100
     assert caplog.text.count("Fler problem") == 1
