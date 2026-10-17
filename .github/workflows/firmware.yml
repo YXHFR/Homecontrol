@@ -1,8 +1,9 @@
 name: Firmware
 
-# Validerar och bygger rumskortens firmware och lägger ihop den till
-# webbinstalleraren, som sparas som artefakten "webbinstallerare". Den
-# publiceras inte på webben än.
+# Validerar och bygger rumskortens firmware, för korten med LD2450
+# (firmware/homecontrol.yaml) och med LD2461 (firmware/homecontrol-ld2461.yaml),
+# och lägger ihop den till webbinstalleraren, som sparas som artefakten
+# "webbinstallerare". Den publiceras inte på webben än.
 
 on:
   push:
@@ -35,7 +36,7 @@ jobs:
     name: Validera ESPHome-paketet
     runs-on: ubuntu-latest
     outputs:
-      rooms: ${{ steps.rooms.outputs.rooms }}
+      builds: ${{ steps.builds.outputs.builds }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -44,45 +45,59 @@ jobs:
           cache: pip
           cache-dependency-path: firmware/requirements.txt
       - run: pip install --require-hashes -r firmware/requirements.txt
-      - name: Rum att bygga
-        id: rooms
+      - name: Firmware att bygga
+        id: builds
         run: |
-          rooms=$(python3 scripts/firmware_site.py rooms)
-          # I en PR räcker det att bygga ett rum.
+          builds=$(python3 scripts/firmware_site.py builds)
+          # I en PR räcker det att bygga ett rum för varje radar.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            rooms=$(echo "$rooms" | jq -c '.[:1]')
+            builds=$(echo "$builds" | jq -c 'group_by(.radar) | map(.[0])')
           fi
-          echo "rooms=$rooms" >> "$GITHUB_OUTPUT"
+          echo "builds=$builds" >> "$GITHUB_OUTPUT"
       - name: Validera konfigurationen
         # "ci-test" är bara ett rumsnamn för valideringen.
-        run: esphome -s rum ci-test config firmware/homecontrol.yaml > resolved.yaml
+        run: |
+          esphome -s rum ci-test config firmware/homecontrol.yaml > resolved-ld2450.yaml
+          esphome -s rum ci-test config firmware/homecontrol-ld2461.yaml > resolved-ld2461.yaml
       - name: Kontrollera viktiga inställningar
         run: |
           fail() { echo "::error::$1"; exit 1; }
-          grep -qE '^\s+baud_rate: 256000$' resolved.yaml || fail "LD2450 ska köra 256000 baud"
-          ! grep -q throttle resolved.yaml || fail "Radarns strypfilter ska vara borttaget"
-          ! grep -qE '^(esp32_ble|esp32_ble_tracker|bluetooth_proxy|ble_client):' resolved.yaml \
-            || fail "Bluetooth ska vara avstängt"
-          grep -q 'CONFIG_BT_ENABLED: n' resolved.yaml || fail "Bluetooth ska vara avstängt i ESP-IDF"
-          grep -qE '^  encryption: \{\}$' resolved.yaml || fail "API:t ska vara krypterat utan inbyggd nyckel"
-          ! grep -qE '^(web_server|captive_portal):' resolved.yaml \
-            || fail "Ingen webbserver eller captive portal (de tar emot firmware utan lösenord)"
-          ! grep -qE '^\s+- platform: (esphome|web_server)$' resolved.yaml \
-            || fail "OTA får bara hämtas av kortet självt (platform: http_request)"
-          grep -qE '^\s+verify_ssl: true$' resolved.yaml || fail "Uppdateringar ska hämtas med kontrollerat https"
-          grep -qE '^\s+follow_redirects: false$' resolved.yaml || fail "Uppdateringar ska inte följa omdirigeringar"
-          ! grep -qE '^\s+(password|key|psk):' resolved.yaml || fail "Hemligheter hör inte hemma i paketet"
+          grep -qE '^\s+baud_rate: 256000$' resolved-ld2450.yaml || fail "LD2450 ska köra 256000 baud"
+          grep -qE '^\s+baud_rate: 9600$' resolved-ld2461.yaml || fail "LD2461 ska köra 9600 baud"
+          grep -q 'manifest-ci-test.json$' resolved-ld2450.yaml \
+            || fail "LD2450-kortet ska hämta uppdateringar för LD2450"
+          grep -q 'manifest-ld2461-ci-test.json$' resolved-ld2461.yaml \
+            || fail "LD2461-kortet ska hämta uppdateringar för LD2461"
+          for resolved in resolved-ld2450.yaml resolved-ld2461.yaml; do
+            ! grep -q throttle "$resolved" || fail "Radarns strypfilter ska vara borttaget ($resolved)"
+            ! grep -qE '^(esp32_ble|esp32_ble_tracker|bluetooth_proxy|ble_client):' "$resolved" \
+              || fail "Bluetooth ska vara avstängt ($resolved)"
+            grep -q 'CONFIG_BT_ENABLED: n' "$resolved" || fail "Bluetooth ska vara avstängt i ESP-IDF ($resolved)"
+            grep -qE '^  encryption: \{\}$' "$resolved" \
+              || fail "API:t ska vara krypterat utan inbyggd nyckel ($resolved)"
+            ! grep -qE '^(web_server|captive_portal):' "$resolved" \
+              || fail "Ingen webbserver eller captive portal, de tar emot firmware utan lösenord ($resolved)"
+            ! grep -qE '^\s+- platform: (esphome|web_server)$' "$resolved" \
+              || fail "OTA får bara hämtas av kortet självt, platform: http_request ($resolved)"
+            grep -qE '^\s+verify_ssl: true$' "$resolved" \
+              || fail "Uppdateringar ska hämtas med kontrollerat https ($resolved)"
+            grep -qE '^\s+follow_redirects: false$' "$resolved" \
+              || fail "Uppdateringar ska inte följa omdirigeringar ($resolved)"
+            ! grep -qE '^\s+(password|key|psk):' "$resolved" || fail "Hemligheter hör inte hemma i paketet ($resolved)"
+          done
 
   build:
-    name: Bygg firmware (${{ matrix.room }})
+    name: Bygg firmware (${{ matrix.name }})
     needs: validate
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        room: ${{ fromJSON(needs.validate.outputs.rooms) }}
+        include: ${{ fromJSON(needs.validate.outputs.builds) }}
     env:
       ROOM: ${{ matrix.room }}
+      CONFIG: ${{ matrix.config }}
+      NAME: ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -99,21 +114,21 @@ jobs:
       - name: Bygg
         run: |
           esphome -s rum "$ROOM" -s firmware_version "git-${GITHUB_SHA::7}" \
-            compile firmware/homecontrol.yaml
+            compile "firmware/$CONFIG"
           mkdir -p out
           build="firmware/.esphome/build/homecontrol-$ROOM/build"
-          cp "$build/firmware.factory.bin" "out/$ROOM.factory.bin"
-          cp "$build/firmware.ota.bin" "out/$ROOM.ota.bin"
+          cp "$build/firmware.factory.bin" "out/$NAME.factory.bin"
+          cp "$build/firmware.ota.bin" "out/$NAME.ota.bin"
       - uses: actions/upload-artifact@v7
         with:
-          name: firmware-${{ matrix.room }}
+          name: firmware-${{ matrix.name }}
           path: out/
           retention-days: 7
           if-no-files-found: error
 
   site:
     name: Bygg webbinstalleraren
-    # Bara från main. En PR bygger bara ett rum, och en PR (även från en fork)
+    # Bara från main. En PR bygger bara ett rum per radar, och en PR (även från en fork)
     # ska inte kunna ladda upp en installerare som någon tar för den riktiga.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
@@ -141,7 +156,7 @@ jobs:
       - name: Lägg till GPL-3.0-licensen
         run: |
           # Samma ESPectre-commit som firmware byggs med.
-          ref=$(grep -oP '^\s+ref: \K[0-9a-f]{40}$' firmware/homecontrol.yaml)
+          ref=$(grep -oP '^\s+ref: \K[0-9a-f]{40}$' firmware/common.yaml)
           curl -sSfL "https://raw.githubusercontent.com/francescopace/espectre/${ref}/LICENSE" \
             -o site/LICENSE-GPL-3.0.txt
       - uses: actions/upload-artifact@v7

@@ -45,7 +45,7 @@
       }
       h1 { margin-top: 0; }
       label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
-      select { font: inherit; padding: 0.4rem; min-width: 12rem; }
+      select { font: inherit; padding: 0.4rem; min-width: 12rem; max-width: 100%; }
       a { color: var(--accent); }
       .muted { color: var(--muted); font-size: 0.9rem; }
       esp-web-install-button { display: inline-block; margin-top: 1rem; }
@@ -66,6 +66,13 @@
         <select id="room"></select>
         <p class="muted">
           Kortet får namnet <code id="hostname">homecontrol-…</code> i nätverket.
+        </p>
+
+        <label for="radar">Radar på kortet</label>
+        <select id="radar"></select>
+        <p class="muted">
+          Välj den radar som sitter på kortet. LD2461 följer upp till 5 personer
+          enligt tillverkaren, men det är inte provat än.
         </p>
 
         <p><strong>2. Anslut kortet</strong> med USB-kabeln. Har kortet två
@@ -108,17 +115,20 @@
         <a href="LICENSE-GPL-3.0.txt">GPL-3.0</a>.
         <a id="source" href="https://github.com/YXHFR/Homecontrol">Källkoden för just den här versionen</a>.
         Installationssidan använder <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>
-        (Apache-2.0).
+        (Apache-2.0). Firmware för LD2461 innehåller också en rättad
+        <a href="https://github.com/Chreece/LD2461-ESPHome">LD2461-komponent</a> (Apache-2.0).
       </p>
     </main>
 
     <script type="module">
       const select = document.getElementById("room");
+      const radar = document.getElementById("radar");
       const button = document.getElementById("install");
       const hostname = document.getElementById("hostname");
 
-      function choose(room) {
-        button.setAttribute("manifest", `manifest-${room}.json`);
+      // Radarns förled i filnamnen, till exempel "ld2461-" (tomt för LD2450).
+      function choose(room, prefix) {
+        button.setAttribute("manifest", `manifest-${prefix}${room}.json`);
         hostname.textContent = `homecontrol-${room}`;
       }
 
@@ -129,10 +139,15 @@
         for (const room of info.rooms) {
           select.append(new Option(room, room));
         }
+        for (const choice of info.radars) {
+          radar.append(new Option(choice.label, choice.prefix));
+        }
         document.getElementById("version").textContent = info.version;
         document.getElementById("source").href = info.source;
-        choose(select.value);
-        select.addEventListener("change", () => choose(select.value));
+        const update = () => choose(select.value, radar.value);
+        update();
+        select.addEventListener("change", update);
+        radar.addEventListener("change", update);
       } catch {
         document.getElementById("error").hidden = false;
       }

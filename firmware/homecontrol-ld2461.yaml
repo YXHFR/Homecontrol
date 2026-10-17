@@ -1,0 +1,133 @@
+# Homecontrol – firmware för ett rumskort (ESP32-S3 med extern antenn) med
+# radarn LD2461 i stället för LD2450. Allt annat är som på LD2450-kortet
+# (common.yaml): Wi-Fi-CSI, ljussensorn, det krypterade API:t och
+# uppdateringarna.
+#
+# LD2461 följer upp till 5 personer enligt tillverkaren. Det, räckvidden och
+# precisionen är inte provat än (se firmware/README.md).
+#
+# Konfigurationen är Apache-2.0. Den byggda firmware-binären innehåller
+# ESPectre och ESPHome:s C++-kod och blir därför GPL-3.0 (se firmware/README.md).
+#
+# Bygg för ett rum:
+#   esphome -s rum kok compile firmware/homecontrol-ld2461.yaml
+#
+# Kortet heter homecontrol-<rum>, precis som med LD2450. Kärnan ser själv
+# vilken radar kortet har.
+
+substitutions:
+  rum: rum
+  firmware_version: dev
+  # Var kortet hämtar uppdateringar, som i homecontrol.yaml. Varianten har
+  # egna filer i webbinstalleraren, så att kortet aldrig får LD2450-firmware.
+  update_source: https://yxhfr.github.io/Homecontrol
+  # LD2461 (radar) på hårdvaru-UART, samma stift som LD2450.
+  ld2461_tx_pin: GPIO17
+  ld2461_rx_pin: GPIO18
+  # BH1750 (ljus) på I²C.
+  i2c_sda_pin: GPIO8
+  i2c_scl_pin: GPIO9
+
+packages:
+  common: !include common.yaml
+
+# LD2461-komponenten finns i firmware/components/ld2461. Den är tagen från
+# Chreece/LD2461-ESPHome (Apache-2.0), låst på en commit och rättad så att
+# målens läge skickas (se README i den mappen).
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ld2461]
+
+update:
+  - platform: http_request
+    name: Firmware
+    source: ${update_source}/manifest-ld2461-${rum}.json
+    update_interval: 6h
+
+uart:
+  id: ld2461_uart
+  tx_pin: ${ld2461_tx_pin}
+  rx_pin: ${ld2461_rx_pin}
+  # LD2461 kör 9600 baud från fabrik.
+  baud_rate: 9600
+  parity: NONE
+  stop_bits: 1
+  # LD2461-komponenten har ingen händelse för varje ram. Det här anropas i
+  # stället när radarn har skickat något och sedan tystnat en kort stund,
+  # och håller "Radar Online" på (se common.yaml). Inget loggas.
+  debug:
+    direction: RX
+    dummy_receiver: false
+    after:
+      timeout: 20ms
+    sequence:
+      - binary_sensor.template.publish:
+          id: radar_online
+          state: true
+      - script.execute: radar_watchdog
+
+ld2461:
+  id: radar
+  uart_id: ld2461_uart
+  # Hur ofta målen skickas till kärnan, ungefär som LD2450:s 10 gånger per sekund.
+  update_interval: 100ms
+
+# Komponentens nummer 0–4 blir mål 1–5, så att namnen är desamma som på
+# LD2450-kortet (som har mål 1–3). Läget är i mm. Ingen fart: komponenten
+# skickar den inte.
+sensor:
+  - platform: ld2461
+    ld2461_id: radar
+    target_count:
+      name: Radar Target Count
+      filters: []
+    person_0:
+      position_x:
+        name: Radar Target 1 X
+        filters: []
+      position_y:
+        name: Radar Target 1 Y
+        filters: []
+    person_1:
+      position_x:
+        name: Radar Target 2 X
+        filters: []
+      position_y:
+        name: Radar Target 2 Y
+        filters: []
+    person_2:
+      position_x:
+        name: Radar Target 3 X
+        filters: []
+      position_y:
+        name: Radar Target 3 Y
+        filters: []
+    person_3:
+      position_x:
+        name: Radar Target 4 X
+        filters: []
+      position_y:
+        name: Radar Target 4 Y
+        filters: []
+    person_4:
+      position_x:
+        name: Radar Target 5 X
+        filters: []
+      position_y:
+        name: Radar Target 5 Y
+        filters: []
+
+binary_sensor:
+  - platform: ld2461
+    ld2461_id: radar
+    has_target:
+      name: Radar Presence
+      filters: []
+
+text_sensor:
+  - platform: ld2461
+    ld2461_id: radar
+    version:
+      name: Radar Firmware

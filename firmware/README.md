@@ -4,12 +4,17 @@ Ett kort per rum. Kortet känner av närvaro på två sätt, mäter ljuset och
 skickar allt till kärnan:
 
 - **Radar (LD2450):** upp till 3 personer med läge (X/Y), cirka 10 gånger
-  per sekund, inom 6 m och ±60°.
+  per sekund, inom 6 m och ±60°. Som alternativ finns **LD2461**, som
+  enligt tillverkaren följer upp till 5 personer (se
+  [LD2461 i stället för LD2450](#ld2461-i-stället-för-ld2450)).
 - **Wi-Fi-CSI (ESPectre):** rörelse som syns i hur Wi-Fi-signalen ändras.
 - **Ljus (BH1750):** hur ljust det är i rummet (lux).
 
-Firmware byggs med [ESPHome](https://esphome.io). Allt finns i
-[`homecontrol.yaml`](homecontrol.yaml).
+Firmware byggs med [ESPHome](https://esphome.io). Det finns ett paket per
+radar: [`homecontrol.yaml`](homecontrol.yaml) för LD2450 och
+[`homecontrol-ld2461.yaml`](homecontrol-ld2461.yaml) för LD2461. Allt som är
+lika på båda (Wi-Fi-CSI, ljussensorn, API:t och uppdateringarna) finns i
+[`common.yaml`](common.yaml).
 
 ## Det här behövs
 
@@ -17,6 +22,7 @@ Firmware byggs med [ESPHome](https://esphome.io). Allt finns i
 | --- | --- |
 | ESP32-S3-kort med extern antenn | Till exempel ESP32-S3-DevKitC-1U (modul WROOM-1U) med en U.FL-antenn. Inbyggd kretskortsantenn ger sämre CSI. |
 | HLK-LD2450 | 5 V-matning. Signalerna är 3,3 V. |
+| eller HLK-LD2461 | I stället för LD2450. Se [LD2461 i stället för LD2450](#ld2461-i-stället-för-ld2450). |
 | BH1750 | Ljussensor på I²C, 3,3 V. |
 | USB-kabel som klarar data | Laddkablar fungerar inte. |
 
@@ -33,7 +39,11 @@ Firmware byggs med [ESPHome](https://esphome.io). Allt finns i
 | BH1750 SDA | GPIO8 |
 | BH1750 SCL | GPIO9 |
 
-Stiften kan ändras med `substitutions` överst i `homecontrol.yaml`.
+LD2461 kopplas på samma stift (TX till GPIO18, RX till GPIO17). Kontrollera
+matningsspänningen i Hi-Links datablad för LD2461 innan du kopplar in den.
+
+Stiften kan ändras med `substitutions` överst i `homecontrol.yaml` och
+`homecontrol-ld2461.yaml`.
 
 ## Installera
 
@@ -41,7 +51,9 @@ Stiften kan ändras med `substitutions` överst i `homecontrol.yaml`.
    publicerad på webben än: den byggs av workflowen Firmware och sparas som
    artefakten `webbinstallerare`. Hur du hämtar och öppnar den står i
    [README i repots rot](../README.md#steg-6-installera-rumskorten).
-2. Välj rum. Kortet får namnet `homecontrol-<rum>`.
+2. Välj rum. Kortet får namnet `homecontrol-<rum>`. Välj också radarn som
+   sitter på kortet: LD2450 eller LD2461. Med fel radar svarar kortets
+   radar inte.
 3. Anslut kortet med USB. På kort med två USB-uttag: använd det som är
    märkt **USB** (inte **UART**). Annars går det inte att ställa in Wi-Fi.
 4. Tryck på **Connect**, välj kortet i listan och sedan **Install**.
@@ -88,7 +100,8 @@ Ett nytt rum kan läggas till där (bara a–z, 0–9 och bindestreck, högst
 
 ```sh
 pip install --require-hashes -r firmware/requirements.txt
-esphome -s rum gastrum run firmware/homecontrol.yaml
+esphome -s rum gastrum run firmware/homecontrol.yaml          # LD2450
+esphome -s rum gastrum run firmware/homecontrol-ld2461.yaml   # LD2461
 ```
 
 Ett eget rum får inga uppdateringar över nätverket, eftersom
@@ -101,8 +114,8 @@ engelska och ändras inte, så att kärnan kan lita på dem.
 
 | Namn | Vad |
 | --- | --- |
-| Radar Target 1–3 X / Y | Läge i mm, cirka 10 Hz |
-| Radar Target 1–3 Speed | Fart i mm/s |
+| Radar Target 1–3 X / Y | Läge i mm, cirka 10 Hz. Med LD2461 också mål 4 och 5 |
+| Radar Target 1–3 Speed | Fart i mm/s. Finns inte med LD2461 |
 | Radar Target Count | Antal mål |
 | Radar Presence | Någon syns på radarn |
 | Radar Online | Radarn skickar data. Av efter 3 s utan data (lita då inte på Radar Presence) |
@@ -115,14 +128,50 @@ engelska och ändras inte, så att kärnan kan lita på dem.
 | Firmware Version | Homecontrol-versionen |
 | Firmware | Uppdatering: om en ny version finns, och knappen för att installera |
 | ESPHome Version | ESPHome-versionen |
-| Radar Firmware | LD2450:s egen firmware |
+| Radar Firmware | Radarns egen firmware |
 | Uptime, Free Heap, Loop Time | Hälsa (drifttid, ledigt minne, looptid) |
 
 Radarns värden skickas utan ESPHome:s vanliga strypning till 1 gång per
-sekund. Ett värde skickas bara när det ändras.
+sekund. Med LD2450 skickas ett värde bara när det ändras. Med LD2461 skickas
+alla mål 10 gånger per sekund.
+
+Kärnan ser på entiteterna vilken radar kortet har: bara kortet med LD2461
+har `Radar Target 4` och `5`.
 
 ESPectre lägger också till några egna inställningar och diagnostikvärden
 (tröskel, profil, paketflöden).
+
+## LD2461 i stället för LD2450
+
+LD2461 är en annan radar från Hi-Link. **Att den följer upp till 5
+personer, och hur noga den mäter, är tillverkarens uppgifter. Inget av det
+är provat med Homecontrol än.** LD2450 är fortfarande det som rekommenderas.
+
+- Kortet heter `homecontrol-<rum>` med båda radarerna, och allt annat på
+  kortet är likadant. Kärnan ser själv vilken radar kortet har.
+- Firmware för LD2461 har egna filer i webbinstalleraren
+  (`manifest-ld2461-<rum>.json`), så ett kort med LD2461 uppdateras bara
+  med firmware för LD2461.
+- Det finns ingen underhållen ESPHome-komponent för LD2461. Firmware
+  använder en rättad kopia av
+  [Chreece/LD2461-ESPHome](https://github.com/Chreece/LD2461-ESPHome),
+  låst på en commit. Vad som är ändrat står i
+  [`components/ld2461/README.md`](components/ld2461/README.md).
+- Radarn kör 9600 baud. Komponenten skickar ingen fart.
+- Kontrollera i livevyn att prickarna hamnar på rätt sida om kortet. Gör de
+  inte det: kryssa i **Spegelvänd sidled** för kortet i kartredigeraren.
+- Simuleringen kan låtsas att ett kort har en LD2461 (**Radar i
+  simuleringen** i kartredigeraren). Den ser då lika långt och brett som en
+  LD2450, eftersom LD2461:s räckvidd inte är provad.
+
+**Att prova med riktig hårdvara** innan LD2461 används på riktigt: gör
+[hårdvarutestet](#hårdvarutest-ld2450-och-espectre-på-samma-kort-i-24-h)
+med LD2461, och kontrollera också att
+
+- `Radar Target 1 X` och `Y` följer en person som går runt, och att
+  avståndet stämmer med ett måttband,
+- 4 och 5 personer i rummet ger 4 och 5 mål,
+- `Radar Online` är på hela tiden och `Radar Firmware` visar en version.
 
 ## Kända begränsningar
 
@@ -142,11 +191,14 @@ ESPectre lägger också till några egna inställningar och diagnostikvärden
 
 - **Konfigurationen** i den här mappen (YAML, installationssidan, skript)
   är [Apache-2.0](../LICENSE), som resten av Homecontrol.
+- **LD2461-komponenten** i [`components/ld2461`](components/ld2461) kommer
+  från Chreece/LD2461-ESPHome och är [Apache-2.0](components/ld2461/LICENSE),
+  med Homecontrols ändringar.
 - **Firmware-binären** som byggs innehåller [ESPectre](https://github.com/francescopace/espectre)
   (GPL-3.0) och ESPHome:s C++-kod (GPL-3.0). Binären som helhet sprids
   därför under **GPL-3.0**. Webbinstalleraren visar licenstexten och länkar
   till källkoden för exakt den version som installeras: den här mappen, den
-  låsta ESPectre-commiten i `homecontrol.yaml` och ESPHome-versionen i
+  låsta ESPectre-commiten i `common.yaml` och ESPHome-versionen i
   [`requirements.in`](requirements.in) (hela kedjan, med hashar, i
   `requirements.txt`).
 

@@ -1,7 +1,7 @@
 # Homecontrol
 
-Närvarostyrd belysning för hemmet. Radar (LD2450) och Wi-Fi-CSI på ESP32
-känner av var någon befinner sig, och lamporna (IKEA via Zigbee2MQTT) tänds
+Närvarostyrd belysning för hemmet. Radar (LD2450, eller LD2461 som
+alternativ) och Wi-Fi-CSI på ESP32 känner av var någon befinner sig, och lamporna (IKEA via Zigbee2MQTT) tänds
 och släcks efter det.
 
 > Projektet är i ett tidigt skede men fungerar från början till slut: du
@@ -53,7 +53,8 @@ och ser virtuella lampor tändas och släckas.
 | Del | Kommentar |
 | --- | --- |
 | ESP32-S3-kort med extern antenn | Till exempel ESP32-S3-DevKitC-1U med en U.FL-antenn. |
-| HLK-LD2450 | Radarn som ser var personerna är. |
+| HLK-LD2450 | Radarn som ser var personerna är, upp till 3 åt gången. |
+| eller HLK-LD2461 | Alternativ till LD2450 som följer upp till 5 personer. Antalet 5 och precisionen är tillverkarens uppgifter och inte provade än (se [firmware/README.md](firmware/README.md#ld2461-i-stället-för-ld2450)). |
 | BH1750 | Ljussensorn. Behövs inte i rum utan fönster. |
 | Kopplingskablar (dupont, hona–hona) | För att koppla ihop delarna. |
 | USB-kabel som klarar data, och en USB-laddare | En ren laddkabel fungerar inte för installationen. |
@@ -205,7 +206,10 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    det rummet. Den ljusa tårtbiten framför ett rumskort är vad radarn ser
    (6 meter, 60° åt vardera hållet). Välj kortet med **Välj och flytta** och
    vrid det med ringen runt kortet eller med knapparna, och ange höjden och om
-   det sitter spegelvänt. En lampa som dras in i ett annat rum styrs sedan av
+   det sitter spegelvänt. Under **Radar i simuleringen** väljer du om
+   kortet ska låtsas vara en LD2450 (3 personer) eller en LD2461 (5 personer)
+   i simuleringsläget. Ett riktigt kort säger själv vilken radar det har.
+   En lampa som dras in i ett annat rum styrs sedan av
    det rummet; du kan också byta rum i listan.
 
 Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
@@ -301,6 +305,7 @@ Installera sedan kortet:
 
 1. Öppna webbinstalleraren i Chrome eller Edge.
 2. Välj rummet där kortet ska sitta. Kortet får namnet `homecontrol-<rum>`.
+   Välj också radarn som sitter på kortet: LD2450 eller LD2461.
 3. Anslut kortet med USB. På kort med två USB-uttag: använd det som är
    märkt **USB** (inte **UART**).
 4. Tryck på **Connect**, välj kortet i listan och sedan **Install**. Första
@@ -427,7 +432,8 @@ Tänk på:
 
 ### Närvaro
 
-Varje rumskort ser personer med radarn. Kärnan räknar om det radarn ser
+Varje rumskort ser personer med radarn: upp till 3 med LD2450 och upp till
+5 med LD2461 (tillverkarens uppgift, inte provad än). Kärnan räknar om det radarn ser
 utifrån var kortet sitter, hur högt, åt vilket håll det tittar och om det är
 spegelvänt. Det radarn ser utanför kortets eget rum (genom en vägg) och i
 ignorera-zoner räknas inte med. Kvar blir anonyma spår, prickar på kartan.
@@ -907,9 +913,12 @@ kort med mDNS, ansluter krypterat med aioesphomeapi till de kort som är
 placerade (en nod vars id är kortets namn, `homecontrol-<rum>`) och tolkar
 entiteterna från firmware-paketet till observationer. Radarn,
 Wi-Fi-mätningen och ljussensorn på ett kort är var sin källa, så att en del
-som tystnar ger `SourceLost` för just den delen. Kopplingen testas mot
-exempelmeddelanden i `core/tests/esphome_exempel/`, i den form aioesphomeapi
-lämnar dem. De innehåller inga nycklar, nätverksnamn eller adresser. Spelas
+som tystnar ger `SourceLost` för just den delen. Kopplingen ser på kortets
+entiteter vilken radar det har (LD2461 har mål 4 och 5) och skickar det med
+radarmålen, så att sammanvägningen vet hur många mål som är rimligt.
+Kopplingen testas mot exempelmeddelanden i `core/tests/esphome_exempel/`, i
+den form aioesphomeapi lämnar dem. De innehåller inga nycklar, nätverksnamn
+eller adresser. Exemplen för LD2461 är påhittade, inte inspelade. Spelas
 nya exempel in från ett riktigt kort ska nycklar, nätverksnamn och adresser
 tas bort ur dem först.
 
