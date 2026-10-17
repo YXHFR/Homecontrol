@@ -86,7 +86,8 @@ const MIN_FURNITURE_AREA = 1e-4;
 /** Högre väggar än så här är fel i skanningen (samma gräns som MAX_HEIGHT i kärnans home.py). */
 const MAX_CEILING_HEIGHT = 20;
 /**
- * Högst så här många saker av varje slag (väggar, golv, möbler …) och hörn per golv läses.
+ * Högst så här många saker av varje slag (väggar, golv, möbler …) läses. Ett golv med fler
+ * hörn än så hoppas över.
  * En riktig skanning har några hundra; en enorm fil skulle annars kunna låsa webbläsaren.
  */
 export const MAX_ITEMS = 2000;
@@ -239,8 +240,11 @@ function readFloorPolygon(value: unknown): { polygon: Point[]; story: number } |
   }
   const matrix = readMatrix(data.transform) ?? IDENTITY;
   const story = finite(data.story) ? data.story : 0;
+  if (Array.isArray(data.polygonCorners) && data.polygonCorners.length > MAX_ITEMS) {
+    return `har fler än ${MAX_ITEMS} hörn`;
+  }
   const corners = Array.isArray(data.polygonCorners)
-    ? data.polygonCorners.slice(0, MAX_ITEMS).map((corner) => numbers(corner, 2))
+    ? data.polygonCorners.map((corner) => numbers(corner, 2))
     : [];
   if (corners.length >= 3 && corners.every((corner) => corner !== null)) {
     const local = (corners as number[][]).map((c): [number, number, number] => [
@@ -851,8 +855,9 @@ export function importScan(
     // Id:t räknas fram mot hemmet med de rum som redan är tillagda.
     const id = uniqueId(withRooms(empty, rooms, []), scanned.name);
     const room: RoomModel = { id, name: scanned.name, ...outline };
-    if (scanned.ceilingHeight !== null) {
-      room.ceiling_height = roundCm(scanned.ceilingHeight);
+    const ceiling = scanned.ceilingHeight === null ? 0 : roundCm(scanned.ceilingHeight);
+    if (ceiling > 0) {
+      room.ceiling_height = ceiling;
     }
     rooms.push(room);
   }

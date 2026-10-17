@@ -115,7 +115,7 @@ type Edit = (document: HomeDocument) => HomeDocument;
 
 /** Något som ska skickas till kärnan: en ändring av hemmet eller av en bild. */
 type Change =
-  /** `failed` körs om kärnan säger nej, innan kartan visar hemmet igen. */
+  /** `failed` körs om ändringen inte sparas, innan kartan visar hemmet igen. */
   | { kind: "edit"; edit: Edit; failed?: () => void }
   | { kind: "image"; send: () => Promise<void>; done?: () => void };
 
@@ -143,6 +143,11 @@ function errorText(error: unknown): string {
 
 function formatNumber(value: number, decimals = 1): string {
   return value.toLocaleString("sv-SE", { maximumFractionDigits: decimals });
+}
+
+/** Våningen som visas först: entréplanet, eller den första om inget plan är 0. */
+function startFloor(floors: FloorModel[]): string {
+  return (floors.find((floor) => floor.level === 0) ?? floors[0]).id;
 }
 
 /** Om det valda finns i hemmet. En ny sort som går att välja måste läggas till här. */
@@ -625,6 +630,20 @@ export function mountEditor(
     if (shown !== null && !stillThere(shown, selection)) {
       selection = null;
     }
+    // En våning kan ha försvunnit, till exempel en ny våning från en skanning som
+    // kärnan sa nej till, eller en som togs bort i ett annat fönster.
+    const floors = shown?.home.floors ?? [];
+    if (floors.length > 0 && !floors.some((floor) => floor.id === floorId)) {
+      floorId = startFloor(floors);
+    }
+    const target = scanImport?.target;
+    if (
+      scanImport !== null &&
+      target?.kind === "replace" &&
+      !floors.some((f) => f.id === target.floorId)
+    ) {
+      scanImport = { ...scanImport, target: { kind: "new" } };
+    }
   };
 
   const reload = async () => {
@@ -656,10 +675,13 @@ export function mountEditor(
       root.dataset.saves = String(savedCount);
     } catch (error) {
       // Resten av kön byggde på den här ändringen och skickas inte heller.
-      waiting = [];
-      if (change.kind === "edit") {
-        change.failed?.();
+      // De ångras alla, den senaste först.
+      for (const dropped of [...waiting].reverse()) {
+        if (dropped.kind === "edit") {
+          dropped.failed?.();
+        }
       }
+      waiting = [];
       changedView = true;
       showMessage(errorText(error));
       saveStatus.textContent =
@@ -697,7 +719,8 @@ export function mountEditor(
     saveStatus.textContent = "Sparar …";
     setBusy(true);
     render();
-    queue = queue.then(() => run(change));
+    // Ett oväntat fel får inte stoppa kön, för då sparas inget mer förrän sidan laddas om.
+    queue = queue.then(() => run(change)).catch((error: unknown) => showMessage(errorText(error)));
   };
 
   /** Ändrar hemmet. `edit` görs på det sparade hemmet när ändringen står på tur. */
@@ -1098,7 +1121,7 @@ export function mountEditor(
       revision = latest.revision;
       refreshShown();
       const floors = latest.document.home.floors;
-      floorId = (floors.find((floor) => floor.level === 0) ?? floors[0]).id;
+      floorId = startFloor(floors);
       saveStatus.textContent = "Alla ändringar är sparade.";
       setBusy(false);
       render();

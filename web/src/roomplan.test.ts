@@ -375,6 +375,27 @@ describe("en tolerant läsare", () => {
     });
   });
 
+  it("hoppar över ett golv med orimligt många hörn och säger till", () => {
+    const corners = Array.from({ length: MAX_ITEMS + 1 }, (_, i) => {
+      const a = (2 * Math.PI * i) / (MAX_ITEMS + 1);
+      return [Math.cos(a), 0, Math.sin(a)];
+    });
+    const scan = readScan(
+      JSON.stringify(boxScan({ floors: [{ category: { floor: {} }, polygonCorners: corners }] })),
+    );
+    expect(scan.problems).toContain(`Golv 1 har fler än ${MAX_ITEMS} hörn och hoppades över.`);
+  });
+
+  it("sparar ingen takhöjd som avrundas till noll", () => {
+    const low = boxScan();
+    for (const wall of low.walls as { dimensions: number[] }[]) {
+      wall.dimensions[1] = 0.004;
+    }
+    const placed = placeScan(readScan(JSON.stringify(low)), DEFAULT_PLACEMENT);
+    const room = importScan(home(), placed, { kind: "new" }).document.home.floors[1].rooms[0];
+    expect(room.ceiling_height).toBeUndefined();
+  });
+
   it("struntar i orimliga takhöjder", () => {
     const tall = boxScan();
     for (const wall of tall.walls as { dimensions: number[] }[]) {

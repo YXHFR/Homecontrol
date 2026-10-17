@@ -867,4 +867,37 @@ describe("kartredigeraren", () => {
       "Sovrum",
     ]);
   });
+
+  it("en skanning som skulle ersätta en våning som försvann läses in som en ny våning", async () => {
+    const { root, core, click, settled } = await setup();
+    const input = root.querySelector<HTMLInputElement>('input[accept=".json,application/json"]');
+    if (input === null) {
+      throw new Error("Inget filfält för skanningen");
+    }
+    Object.defineProperty(input, "files", { value: [new File([EXAMPLE_SCAN], "skanning.json")] });
+    input.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(text(root, ".instruction")).toMatch(/Så här blir skanningen/));
+    const where = root.querySelector<HTMLSelectElement>('select[name="target"]');
+    if (where === null) {
+      throw new Error("Inget val av våning");
+    }
+    where.value = "plan";
+    where.dispatchEvent(new Event("change"));
+
+    // Ett annat fönster byter ut våningen innan skanningen hinner sparas.
+    const other = home();
+    other.home.floors[0] = { ...other.home.floors[0], id: "annan", name: "Annan" };
+    core.document = other;
+    core.revision++;
+    click("Läs in");
+    await settled();
+    expect(text(root, ".message")).toMatch(/annat fönster/);
+    expect(text(root, ".instruction")).toMatch(/Så här blir skanningen/);
+    expect(root.querySelector<HTMLSelectElement>('select[name="target"]')?.value).toBe("");
+
+    // Kön fungerar fortfarande, och skanningen blir en ny våning.
+    click("Läs in");
+    await settled();
+    expect(core.document.home.floors.map((floor) => floor.id)).toEqual(["annan", "skannad-vaning"]);
+  });
 });
