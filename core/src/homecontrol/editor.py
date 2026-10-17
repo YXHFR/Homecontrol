@@ -206,7 +206,7 @@ class HomeChanges:
 _UNAVAILABLE = "Kunde inte nå databasen. Försök igen om en stund."
 _DATABASE_DOWN = (
     "Databasen svarar inte, så ändringar kan inte sparas just nu. Lamporna styrs som "
-    "vanligt med det senast sparade hemmet. Försök igen när varningen i livevyn är borta."
+    "vanligt med det senast sparade hemmet. Försök igen när varningen i hälsoraden är borta."
 )
 
 

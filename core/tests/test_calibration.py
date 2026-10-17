@@ -270,7 +270,7 @@ def test_changing_the_room_in_the_editor_stops_the_calibration() -> None:
         .daylight(10)
         .start_calibration()
         .remove_lamps()
-        .expect_calibration("avbruten", "kartredigeraren")
+        .expect_calibration("avbruten", "rummet ändrades")
     )
 
 

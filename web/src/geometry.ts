@@ -18,7 +18,7 @@ interface Bounds {
 }
 
 /** Rummets hörn som punkter. */
-export function corners(room: Room): Point[] {
+export function corners(room: Pick<Room, "polygon">): Point[] {
   return room.polygon.map(([x, y]) => ({ x, y }));
 }
 
@@ -38,7 +38,7 @@ export function wallSegments(room: Room): WallSegment[] {
   }));
 }
 
-function bounds(rooms: Room[]): Bounds {
+function bounds(rooms: Pick<Room, "polygon">[]): Bounds {
   const points = rooms.flatMap(corners);
   if (points.length === 0) {
     return { minX: 0, minY: 0, maxX: 1, maxY: 1 };
@@ -75,7 +75,7 @@ const PARKING_GAP_METERS = 1;
  * Person nummer `index` ställer sig under de som redan väntar, i en kö längs
  * rummens högra kant som börjar om uppifrån när den når botten.
  */
-export function parkingSpot(rooms: Room[], index = 0): Point {
+export function parkingSpot(rooms: Pick<Room, "polygon">[], index = 0): Point {
   const b = bounds(rooms);
   const places = Math.max(1, Math.floor((b.maxY - b.minY) / PARKING_GAP_METERS));
   return {

@@ -1,5 +1,5 @@
 /**
- * Hur kartredigeraren läser och sparar hemmet i kärnan (se core/src/homecontrol/editor.py).
+ * Hur sidan läser och sparar hemmet i kärnan (se core/src/homecontrol/editor.py).
  *
  * Varje ändring ger hemmet en ny revision. Redigeraren skickar med den
  * revision den utgår från, så att den aldrig skriver över en ändring som
@@ -24,7 +24,7 @@ export interface LoadedHome {
   revision: string;
 }
 
-/** Det kartredigeraren behöver av kärnan. Testerna byter ut det. */
+/** Det sidan behöver av kärnans REST-API. Testerna byter ut det. */
 export interface HomeApi {
   load(): Promise<LoadedHome>;
   /** Sparar hemmet och ger den nya revisionen. */
