@@ -1,4 +1,4 @@
-"""Hemmodellen: hem, våningar, rum, väggar, dörröppningar, zoner, noder, signalkällor och lampor.
+"""Hemmodellen: hem, våningar, rum, väggar, dörröppningar, zoner, noder, signalkällor, lampor och möbler.
 
 Varje våning kan också ha en planritning (en bild) att rita rummen ovanpå,
 och möbler, som visas på kartan men inte påverkar något (de kommer oftast

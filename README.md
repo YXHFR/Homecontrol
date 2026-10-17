@@ -217,28 +217,32 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
 Har du en iPhone med LiDAR (Pro-modellerna från iPhone 12 Pro) kan du skanna
 hemmet och läsa in skanningen i stället för att rita väggarna själv. Telefonen
 använder Apples RoomPlan, som ger väggar, dörrar, fönster och möbler med mått.
-Skanningen görs i telefonen och skickas inte till Apple.
+Skanningen görs i telefonen och skickas inte till Apple. Kontrollera i appens
+inställningar att den inte laddar upp skanningen till en egen molntjänst.
 
 1. Installera en gratisapp som skannar med RoomPlan, till exempel Room Scanner
    (roomscanner.app) eller 3d Scanner App.
 2. Skanna ett rum i taget eller flera rum i följd, som appen visar. Gå runt
-   långsamt och rikta telefonen mot alla väggar, dörrar och fönster. Golvens
-   form (för rum som inte är rektangulära) kom i iOS 17, så uppdatera
-   telefonen om du kan.
+   långsamt och rikta telefonen mot alla väggar, dörrar och fönster. Använd
+   iOS 17 eller senare om du kan. Med äldre iOS ritas rummen efter väggarna,
+   så kontrollera hörnen efteråt.
 3. Exportera skanningen som **JSON** (ibland kallat RoomPlan-JSON eller
-   CapturedRoom), inte som USDZ eller bild. Flytta filen till datorn eller
-   öppna redigeraren på telefonen.
+   CapturedRoom), inte som USDZ eller bild. Ge gärna filen ett namn med
+   ordet `skanning`, till exempel `skanning.json`. Flytta den till datorn med
+   till exempel AirDrop, e-post eller appen Filer, eller öppna kartredigeraren
+   i telefonens webbläsare (samma adress som på datorn) och välj filen där.
 4. Tryck **Läs in iPhone-skanning** under **Planritning** och välj filen.
-   Filen läses i webbläsaren; bara rummen och möblerna som blir kvar sparas
-   i Homecontrol.
-5. Kartan visar hur skanningen blir. Till höger står hur många rum,
-   dörröppningar, fönster och möbler som lästes, och på svenska vad som inte
-   gick att läsa. Skanningen rätas upp så att väggarna går rakt. Tryck
-   **Vrid 90°** tills den ligger som du vill och flytta den med **Från
-   vänster** och **Från toppen** (meter).
-6. Välj **Som en ny våning** eller **I stället för** en våning du redan har.
-   En våning som ersätts behåller namn, routrar och planritning, men rummen
-   på den tas bort, med sina zoner, rumskort och lampor.
+   Själva filen skickas inte någonstans. Homecontrol sparar bara rummen och
+   möblerna som du läser in.
+5. Kartan visar hur skanningen blir. Bredvid kartan (under den på mobilen)
+   står hur många rum, dörröppningar, fönster och möbler som lästes, och på
+   svenska vad som inte gick att läsa. Skanningen rätas upp så att väggarna
+   går rakt. Tryck **Vrid 90°** tills den ligger som du vill och flytta den
+   med **Från vänster** och **Från toppen** (meter).
+6. Välj **Som en ny våning** (den heter **Skannad våning**) eller **I stället
+   för** en våning du redan har. En våning som ersätts behåller namn, routrar
+   och planritning, men rummen på den tas bort, med sina zoner, rumskort och
+   lampor.
 7. Tryck **Läs in**. Rätta sedan med de vanliga verktygen: byt namn på rummen,
    ändra väggarnas material (skanningen vet inte vad väggarna är gjorda av,
    så de blir gips; fönster blir glas och dörrar dörröppningar) och rita
@@ -247,7 +251,8 @@ Skanningen görs i telefonen och skickas inte till Apple.
 
 Vill du prova först finns en påhittad skanning av en tvåa i
 `web/exempel/roomplan-exempel.json`. En riktig skanning visar hur ditt hem ser
-ut, så lägg den inte i repot eller på nätet.
+ut, så lägg den inte i Homecontrols kod på GitHub eller någon annanstans på
+nätet.
 
 Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
 Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
