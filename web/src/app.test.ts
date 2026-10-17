@@ -85,6 +85,7 @@ function state(
     cards: null,
     calibration: null,
     database: null,
+    zigbee: null,
   };
 }
 
