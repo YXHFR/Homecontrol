@@ -3,7 +3,6 @@ docs/
 CLAUDE.md
 .claude/*
 !.claude/agents/
-!.claude/skills/
 
 # Personlig konfiguration och hemligheter
 secrets.yaml
