@@ -208,6 +208,43 @@ mobilen ligger verktygen ovanför kartan och instruktionen under.
    det sitter spegelvänt. En lampa som dras in i ett annat rum styrs sedan av
    det rummet; du kan också byta rum i listan.
 
+#### Läs in en iPhone-skanning i stället för att rita
+
+Har du en iPhone med LiDAR (Pro-modellerna från iPhone 12 Pro) kan du skanna
+hemmet och läsa in skanningen i stället för att rita väggarna själv. Telefonen
+använder Apples RoomPlan, som ger väggar, dörrar, fönster och möbler med mått.
+Skanningen görs i telefonen och skickas inte till Apple.
+
+1. Installera en gratisapp som skannar med RoomPlan, till exempel Room Scanner
+   (roomscanner.app) eller 3d Scanner App.
+2. Skanna ett rum i taget eller flera rum i följd, som appen visar. Gå runt
+   långsamt och rikta telefonen mot alla väggar, dörrar och fönster. Golvens
+   form (för rum som inte är rektangulära) kom i iOS 17, så uppdatera
+   telefonen om du kan.
+3. Exportera skanningen som **JSON** (ibland kallat RoomPlan-JSON eller
+   CapturedRoom), inte som USDZ eller bild. Flytta filen till datorn eller
+   öppna redigeraren på telefonen.
+4. Tryck **Läs in iPhone-skanning** under **Planritning** och välj filen.
+   Filen läses i webbläsaren; bara rummen och möblerna som blir kvar sparas
+   i Homecontrol.
+5. Kartan visar hur skanningen blir. Till höger står hur många rum,
+   dörröppningar, fönster och möbler som lästes, och på svenska vad som inte
+   gick att läsa. Skanningen rätas upp så att väggarna går rakt. Tryck
+   **Vrid 90°** tills den ligger som du vill och flytta den med **Från
+   vänster** och **Från toppen** (meter).
+6. Välj **Som en ny våning** eller **I stället för** en våning du redan har.
+   En våning som ersätts behåller namn, routrar och planritning, men rummen
+   på den tas bort, med sina zoner, rumskort och lampor.
+7. Tryck **Läs in**. Rätta sedan med de vanliga verktygen: byt namn på rummen,
+   ändra väggarnas material (skanningen vet inte vad väggarna är gjorda av,
+   så de blir gips; fönster blir glas och dörrar dörröppningar) och rita
+   zonerna. Möblerna visas som ett grått lager, så att det är lätt att rita
+   stillhetszoner vid soffan och sängen. Takhöjden sparas per rum.
+
+Vill du prova först finns en påhittad skanning av en tvåa i
+`web/exempel/roomplan-exempel.json`. En riktig skanning visar hur ditt hem ser
+ut, så lägg den inte i repot eller på nätet.
+
 Bilden och rummen hör till våningen som är vald med knapparna ovanför kartan.
 Med tangentbordet avbryter Esc det du ritar, Backspace ångrar senaste hörnet
 och Enter stänger rummet eller zonen.
@@ -540,8 +577,8 @@ databasen hamnar.
 
 ### Hemmet: spara, flytta och läsa in
 
-Hemmet (våningar, rum, väggar, dörröppningar, zoner, rumskort, routrar och
-lampor) sparas i databasen. Första gången kärnan startar läggs ett påhittat
+Hemmet (våningar, rum, väggar, dörröppningar, zoner, rumskort, routrar,
+lampor och möbler) sparas i databasen. Första gången kärnan startar läggs ett påhittat
 exempelhem in. Hemmet kan sparas till en läsbar fil och läsas in igen, till
 exempel som säkerhetskopia eller för att flytta det till en annan dator:
 
@@ -592,6 +629,10 @@ Så läser du filen:
   åt höger (`rotation`), om kortet sitter upp och ned (`mirrored`) och vad
   det kan mäta (`radar`, `csi`, `lux`).
 - `signal_sources` är routrar och andra Wi-Fi-sändare.
+- `furniture` är våningens möbler, med namn (`name`, till exempel `Soffa`)
+  och yta ovanifrån (`polygon`). De kommer oftast från en iPhone-skanning,
+  visas bara på kartan och får saknas.
+- `ceiling_height` är rummets takhöjd i meter, om den är känd. Den får saknas.
 - `plan_image` säger var bilden av planritningen ligger (`position`, bildens
   övre vänstra hörn) och hur många meter en bildpunkt är
   (`meters_per_pixel`). Bilden själv finns bara i databasen.
@@ -879,6 +920,11 @@ avbryts med `DELETE /api/calibration` (se `core/src/homecontrol/calibration_api.
 Själva mätningen ligger i `calibration.py`, och läget strömmas i livevyn.
 Bidragen sparas på samma sätt som en ändring i kartredigeraren
 (`editor.HomeChanges`).
+En iPhone-skanning (RoomPlan-JSON) läses i webbläsaren av
+`web/src/roomplan.ts` och blir en vanlig ändring av hemmet, som sparas med
+`/api/home`. Kärnan får aldrig själva skanningen. Läsaren tar bara de fält
+den känner igen och säger vad den hoppade över, eftersom formatet inte är
+fullständigt dokumenterat.
 
 Kärnans flöde: källkopplingar (`connectors.Source`) lämnar observationer,
 sammanvägningen (`fusion.py`) gör om dem till spår och avgör vilka rum som

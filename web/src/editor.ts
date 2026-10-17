@@ -3,7 +3,8 @@
  * till höger (se #34). På en smal skärm staplas de. Väggar, rumskort,
  * routrar och lampor ändras med placing.ts och visas med editorItems.ts och
  * itemPanel.ts (se #35). Zonerna (#36) har sina delar i zones.ts och
- * zonePanel.ts.
+ * zonePanel.ts. En iPhone-skanning läses med roomplan.ts och läggs in med
+ * scanPanel.ts (#86).
  *
  * Varje ändring sparas direkt i kärnan, som kontrollerar hemmet och visar det
  * i livevyn. Säger kärnan nej visas varför, och kartan läses om från kärnan,
@@ -45,6 +46,8 @@ import {
   updateItem,
 } from "./placing";
 import type { Card, FoundLamp, Point, ZoneKind } from "./protocol";
+import { DEFAULT_PLACEMENT, importScan, placeScan, readScan, ScanError } from "./roomplan";
+import { SCAN_INSTRUCTION, scanForm, type ScanImport } from "./scanPanel";
 import {
   Drawing,
   INSTRUCTIONS,
@@ -183,6 +186,8 @@ export function mountEditor(
   /** Ändringarna skickas en i taget. */
   let queue: Promise<void> = Promise.resolve();
   let savedCount = 0;
+  /** En iPhone-skanning som visas på kartan men inte är inlagd än. */
+  let scanImport: ScanImport | null = null;
 
   // --- Verktygen ---
   const toolButtons = new Map<ToolName, HTMLButtonElement>();
@@ -200,6 +205,9 @@ export function mountEditor(
   fileInput.hidden = true;
   const uploadButton = button("Ladda upp bild", () => fileInput.click(), "tool");
   const removeImageButton = button("Ta bort bilden", () => removeImage(), "tool");
+  const scanInput = element("input", { type: "file", accept: ".json,application/json" });
+  scanInput.hidden = true;
+  const scanButton = button("Läs in iPhone-skanning", () => scanInput.click(), "tool");
   /** Riktiga rumskort som kärnan har hittat men som inte är placerade än. */
   const newCardsList = element("div", { className: "new-cards", hidden: true });
   newCardsList.setAttribute("aria-label", "Nya rumskort");
@@ -213,6 +221,8 @@ export function mountEditor(
     fileInput,
     toolButton("scale"),
     removeImageButton,
+    scanButton,
+    scanInput,
     element("h2", {}, "Rita"),
     toolButton("select"),
     toolButton("polygon"),
@@ -273,6 +283,12 @@ export function mountEditor(
 
   const currentFloor = (): FloorModel | null =>
     shown?.home.floors.find((floor) => floor.id === floorId) ?? null;
+
+  /** Hemmet som det blir med skanningen inlagd, och våningen den hamnar på. */
+  const scanPreview = (): { document: HomeDocument; floorId: string } | null =>
+    scanImport === null || shown === null
+      ? null
+      : importScan(shown, placeScan(scanImport.scan, scanImport.placement), scanImport.target);
 
   const showMessage = (text: string | null) => {
     message.textContent = text ?? "";
@@ -385,6 +401,24 @@ export function mountEditor(
     const draft = drawing.draft;
     instruction.textContent = instructionText();
     draftActions.replaceChildren();
+    if (scanImport !== null) {
+      instruction.textContent = SCAN_INSTRUCTION;
+      draftActions.replaceChildren(
+        ...scanForm(scanImport, shown?.home.floors ?? [], {
+          change: (next) => {
+            const turned = next.placement.quarterTurns !== scanImport?.placement.quarterTurns;
+            scanImport = next;
+            render();
+            if (turned) {
+              view.fit();
+            }
+          },
+          apply: applyScan,
+          cancel: cancelDrawing,
+        }),
+      );
+      return;
+    }
     if (draft.kind === "polygon") {
       const done = button(drawing.tool === "zone" ? "Stäng zonen" : "Stäng rummet", () =>
         handle(drawing.finish()),
@@ -544,7 +578,10 @@ export function mountEditor(
   };
 
   const renderMap = () => {
-    const floor = currentFloor();
+    const preview = scanPreview();
+    const floor =
+      preview?.document.home.floors.find((candidate) => candidate.id === preview.floorId) ??
+      currentFloor();
     if (floor === null) {
       return;
     }
@@ -668,6 +705,7 @@ export function mountEditor(
     scalePoints = null;
     cardToPlace = null;
     lampToPlace = null;
+    scanImport = null;
     if (tool !== "select") {
       selection = null;
     }
@@ -679,7 +717,24 @@ export function mountEditor(
   function cancelDrawing() {
     drawing.cancel();
     scalePoints = null;
+    scanImport = null;
     render();
+  }
+
+  /** Lägger in skanningen som visas och visar våningen den hamnade på. */
+  function applyScan() {
+    const preview = scanPreview();
+    const current = scanImport;
+    if (preview === null || current === null) {
+      return;
+    }
+    const placed = placeScan(current.scan, current.placement);
+    scanImport = null;
+    selection = null;
+    floorId = preview.floorId;
+    // Ändringen görs om på det sparade hemmet; utan konflikter blir våningens id detsamma.
+    commit((document) => importScan(document, placed, current.target).document);
+    view.fit();
   }
 
   /**
@@ -850,6 +905,42 @@ export function mountEditor(
     });
   };
 
+  const readScanFile = async (file: File) => {
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      showMessage("Kunde inte läsa filen. Försök igen.");
+      return;
+    }
+    try {
+      const scan = readScan(text);
+      if (scan.rooms.length === 0) {
+        showMessage(["Skanningen gav inga rum.", ...scan.problems].join(" "));
+        return;
+      }
+      chooseTool("select");
+      showMessage(null);
+      scanImport = { scan, placement: DEFAULT_PLACEMENT, target: { kind: "new" } };
+      render();
+      view.fit();
+    } catch (error) {
+      showMessage(
+        error instanceof ScanError
+          ? error.message
+          : `Kunde inte läsa skanningen: ${errorText(error)}`,
+      );
+    }
+  };
+
+  scanInput.addEventListener("change", () => {
+    const file = scanInput.files?.[0];
+    scanInput.value = "";
+    if (file !== undefined) {
+      void readScanFile(file);
+    }
+  });
+
   fileInput.addEventListener("change", () => {
     const file = fileInput.files?.[0];
     fileInput.value = "";
@@ -860,6 +951,9 @@ export function mountEditor(
 
   const view = deps.createView(stageContainer, {
     onPointerDown: (point) => {
+      if (scanImport !== null) {
+        return; // kartan visar skanningen, som inte går att ändra förrän den är inlagd
+      }
       // Med Välj och väggverktyget sköter kartan klicket själv. Att rita om nu
       // skulle byta ut det som är under pekaren mitt i klicket, och då kommer
       // klicket aldrig fram.
@@ -888,24 +982,42 @@ export function mountEditor(
       }
     },
     onSelect: (next) => {
+      if (scanImport !== null) {
+        return;
+      }
       selection = next;
       render();
     },
     onSelectItem: (itemId) => {
+      if (scanImport !== null) {
+        return;
+      }
       selection = { kind: "item", id: itemId };
       render();
     },
     onMoveItem: (itemId, point) => {
+      if (scanImport !== null) {
+        return;
+      }
       selection = { kind: "item", id: itemId };
       commit((document) => moveItem(document, itemId, point));
     },
     onRotateNode: (nodeId, rotation) => {
+      if (scanImport !== null) {
+        return;
+      }
       commit((document) => updateItem(document, nodeId, { rotation: normalizeRotation(rotation) }));
     },
     onClickWall: (roomId, index) => {
+      if (scanImport !== null) {
+        return;
+      }
       commit((document) => cycleWall(document, roomId, index));
     },
     onMoveRoom: (roomId, dx, dy) => {
+      if (scanImport !== null) {
+        return;
+      }
       if (shown !== null && (dx !== 0 || dy !== 0)) {
         commit((document) => moveRoom(document, roomId, dx, dy));
       }

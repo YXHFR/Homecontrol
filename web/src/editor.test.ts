@@ -5,6 +5,7 @@ import { setPlanImage } from "./editing";
 import { CoreError, type HomeApi } from "./homeApi";
 import type { HomeDocument } from "./homefile";
 import type { Card, FoundLamp } from "./protocol";
+import EXAMPLE_SCAN from "../exempel/roomplan-exempel.json?raw";
 
 function home(): HomeDocument {
   return {
@@ -588,8 +589,13 @@ describe("kartredigeraren", () => {
       firmware_version: null,
       update: null,
     };
-    const { root, core, map, click, settled } = await setup([card, { ...card, id: "homecontrol-hall", placed: true }]);
-    await vi.waitFor(() => expect(root.querySelector('[data-card="homecontrol-kok"]')).not.toBeNull());
+    const { root, core, map, click, settled } = await setup([
+      card,
+      { ...card, id: "homecontrol-hall", placed: true },
+    ]);
+    await vi.waitFor(() =>
+      expect(root.querySelector('[data-card="homecontrol-kok"]')).not.toBeNull(),
+    );
     // Ett kort som redan är placerat visas inte.
     expect(root.querySelector('[data-card="homecontrol-hall"]')).toBeNull();
 
@@ -599,14 +605,18 @@ describe("kartredigeraren", () => {
     await settled();
 
     const nodes = core.document.home.floors[0].rooms[0].nodes ?? [];
-    expect(nodes).toMatchObject([{ id: "homecontrol-kok", name: "Homecontrol kok", position: [1.5, 1] }]);
+    expect(nodes).toMatchObject([
+      { id: "homecontrol-kok", name: "Homecontrol kok", position: [1.5, 1] },
+    ]);
     expect(root.querySelector('[data-card="homecontrol-kok"]')).toBeNull();
 
     // Nästa rumskort är ett vanligt, simulerat kort.
     click("Rumskort (ESP32)");
     map.onPointerDown({ x: 2.5, y: 1 });
     await settled();
-    expect((core.document.home.floors[0].rooms[0].nodes ?? [])[1]).toMatchObject({ id: "rumskort-1" });
+    expect((core.document.home.floors[0].rooms[0].nodes ?? [])[1]).toMatchObject({
+      id: "rumskort-1",
+    });
   });
 
   it("rumskort och lampor går inte att placera utanför rummen", async () => {
@@ -621,10 +631,17 @@ describe("kartredigeraren", () => {
   it("en ny riktig lampa placeras med sitt id och sin profil", async () => {
     const found: FoundLamp[] = [
       { id: "zigbee-000b57fffe0000a1", name: "TRÅDFRI", profile: "ikea-tradfri", placed: false },
-      { id: "zigbee-000b57fffe0000a2", name: "Redan placerad", profile: "ikea-tradfri", placed: true },
+      {
+        id: "zigbee-000b57fffe0000a2",
+        name: "Redan placerad",
+        profile: "ikea-tradfri",
+        placed: true,
+      },
     ];
     const { root, core, map, click, settled } = await setup([], found);
-    await vi.waitFor(() => expect(root.querySelector(".new-lamps")?.hasAttribute("hidden")).toBe(false));
+    await vi.waitFor(() =>
+      expect(root.querySelector(".new-lamps")?.hasAttribute("hidden")).toBe(false),
+    );
     expect([...root.querySelectorAll(".new-lamps button")].map((b) => b.textContent)).toEqual([
       "Placera TRÅDFRI",
     ]);
@@ -742,5 +759,90 @@ describe("kartredigeraren", () => {
     expect(text(root, ".message")).toMatch(/lägre än ljusgränsen/);
     expect(field("dark_below_lux").value).toBe("15");
     expect(core.saved).toHaveLength(4);
+  });
+
+  it("en iPhone-skanning visas på kartan, vrids och läses in som en ny våning", async () => {
+    const { root, core, scenes, map, click, settled } = await setup();
+    const choose = (contents: string) => {
+      const input = root.querySelector<HTMLInputElement>('input[accept=".json,application/json"]');
+      if (input === null) {
+        throw new Error("Inget filfält för skanningen");
+      }
+      Object.defineProperty(input, "files", {
+        value: [new File([contents], "skanning.json")],
+        configurable: true,
+      });
+      input.dispatchEvent(new Event("change"));
+    };
+
+    choose("inte json");
+    await vi.waitFor(() => expect(text(root, ".message")).toMatch(/inte en JSON-fil/));
+
+    choose(EXAMPLE_SCAN);
+    await vi.waitFor(() => expect(text(root, ".instruction")).toMatch(/Så här blir skanningen/));
+    expect(text(root, ".actions")).toContain("2 rum, 2 dörröppningar, 2 fönster och 6 möbler");
+    // Kartan visar skanningen innan något är sparat, och klick på den gör inget.
+    const preview = () => scenes[scenes.length - 1].floor;
+    expect(preview().rooms.map((room) => room.name)).toEqual(["Vardagsrum", "Sovrum"]);
+    expect(preview().furniture).toHaveLength(6);
+    map.onClickWall("vardagsrum", 0);
+    expect(core.saved).toHaveLength(0);
+
+    // Vardagsrummet är 5 m brett och 4 m djupt. Efter ett kvarts varv är det tvärtom.
+    const width = () => {
+      const xs = preview().rooms[0].polygon.map(([x]) => x);
+      return Math.max(...xs) - Math.min(...xs);
+    };
+    expect(width()).toBeCloseTo(5, 1);
+    click("Vrid 90°");
+    expect(width()).toBeCloseTo(4, 1);
+
+    click("Läs in");
+    await settled();
+    const floors = core.document.home.floors;
+    expect(floors).toHaveLength(2);
+    expect(floors[1]).toMatchObject({ name: "Skannad våning", level: 1 });
+    expect(floors[1].rooms.map((room) => room.id)).toEqual(["vardagsrum", "sovrum"]);
+    expect(floors[1].rooms[0].walls).toContain("dörröppning");
+    expect(floors[1].furniture).toHaveLength(6);
+    // Den nya våningen visas, och kartan går att redigera igen.
+    expect(preview().id).toBe(floors[1].id);
+    expect(text(root, ".instruction")).not.toMatch(/Så här blir skanningen/);
+  });
+
+  it("en skanning kan ersätta våningens rum, och Avbryt lämnar hemmet orört", async () => {
+    const { root, core, click, settled } = await setup();
+    const input = root.querySelector<HTMLInputElement>('input[accept=".json,application/json"]');
+    if (input === null) {
+      throw new Error("Inget filfält för skanningen");
+    }
+    const choose = () => {
+      Object.defineProperty(input, "files", {
+        value: [new File([EXAMPLE_SCAN], "skanning.json")],
+        configurable: true,
+      });
+      input.dispatchEvent(new Event("change"));
+    };
+    choose();
+    await vi.waitFor(() => expect(text(root, ".instruction")).toMatch(/Så här blir skanningen/));
+    click("Avbryt");
+    expect(core.saved).toHaveLength(0);
+
+    choose();
+    await vi.waitFor(() => expect(text(root, ".instruction")).toMatch(/Så här blir skanningen/));
+    const where = root.querySelector<HTMLSelectElement>('select[name="target"]');
+    if (where === null) {
+      throw new Error("Inget val av våning");
+    }
+    where.value = "plan";
+    where.dispatchEvent(new Event("change"));
+    expect(text(root, ".actions")).toMatch(/Rummen på Plan 1 tas bort/);
+    click("Läs in");
+    await settled();
+    expect(core.document.home.floors).toHaveLength(1);
+    expect(core.document.home.floors[0].rooms.map((room) => room.name)).toEqual([
+      "Vardagsrum",
+      "Sovrum",
+    ]);
   });
 });
