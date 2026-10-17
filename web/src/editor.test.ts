@@ -849,6 +849,16 @@ describe("kartredigeraren", () => {
     where.value = "plan";
     where.dispatchEvent(new Event("change"));
     expect(text(root, ".actions")).toMatch(/Rummen på Plan 1 tas bort/);
+
+    // Säger kärnan nej visas skanningen igen, med samma val, så att den kan läsas in en gång till.
+    core.failures = [new CoreError("Kärnan sa nej.")];
+    click("Läs in");
+    await settled();
+    expect(text(root, ".message")).toContain("Kärnan sa nej.");
+    expect(text(root, ".instruction")).toMatch(/Så här blir skanningen/);
+    expect(root.querySelector<HTMLSelectElement>('select[name="target"]')?.value).toBe("plan");
+    expect(core.document.home.floors[0].rooms.map((room) => room.id)).toEqual(["kok"]);
+
     click("Läs in");
     await settled();
     expect(core.document.home.floors).toHaveLength(1);

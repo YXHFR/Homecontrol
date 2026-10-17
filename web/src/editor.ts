@@ -31,7 +31,12 @@ import {
   toXY,
 } from "./editing";
 import { button, element } from "./dom";
-import { createKonvaEditorView, type EditorViewFactory, type Selection } from "./editorView";
+import {
+  createKonvaEditorView,
+  type EditorViewCallbacks,
+  type EditorViewFactory,
+  type Selection,
+} from "./editorView";
 import { coreApi, CoreError, type HomeApi } from "./homeApi";
 import type { FloorModel, HomeDocument } from "./homefile";
 import { itemProperties, type PanelActions, roomSettingsForm } from "./itemPanel";
@@ -76,6 +81,8 @@ export interface EditorDependencies {
 const MAX_IMAGE_SIDE = 4000;
 /** Så ofta redigeraren frågar kärnan om nya rumskort och lampor. */
 const FOUND_REFRESH_MS = 10_000;
+/** Större filer än så här är inte en skanning (en stor lägenhet ger några hundra kilobyte). */
+const MAX_SCAN_BYTES = 20_000_000;
 /** Så nära (i skärmpunkter) ett klick måste vara ett hörn för att träffa det. */
 const SNAP_PIXELS = 12;
 
@@ -108,7 +115,8 @@ type Edit = (document: HomeDocument) => HomeDocument;
 
 /** Något som ska skickas till kärnan: en ändring av hemmet eller av en bild. */
 type Change =
-  | { kind: "edit"; edit: Edit }
+  /** `failed` körs om kärnan säger nej, innan kartan visar hemmet igen. */
+  | { kind: "edit"; edit: Edit; failed?: () => void }
   | { kind: "image"; send: () => Promise<void>; done?: () => void };
 
 const defaultDependencies: EditorDependencies = {
@@ -405,14 +413,7 @@ export function mountEditor(
       instruction.textContent = SCAN_INSTRUCTION;
       draftActions.replaceChildren(
         ...scanForm(scanImport, shown?.home.floors ?? [], {
-          change: (next) => {
-            const turned = next.placement.quarterTurns !== scanImport?.placement.quarterTurns;
-            scanImport = next;
-            render();
-            if (turned) {
-              view.fit();
-            }
-          },
+          change: changeScan,
           apply: applyScan,
           cancel: cancelDrawing,
         }),
@@ -656,6 +657,9 @@ export function mountEditor(
     } catch (error) {
       // Resten av kön byggde på den här ändringen och skickas inte heller.
       waiting = [];
+      if (change.kind === "edit") {
+        change.failed?.();
+      }
       changedView = true;
       showMessage(errorText(error));
       saveStatus.textContent =
@@ -697,7 +701,7 @@ export function mountEditor(
   };
 
   /** Ändrar hemmet. `edit` görs på det sparade hemmet när ändringen står på tur. */
-  const commit = (edit: Edit) => enqueue({ kind: "edit", edit });
+  const commit = (edit: Edit, failed?: () => void) => enqueue({ kind: "edit", edit, failed });
 
   // --- Verktyg och ritande ---
   const chooseTool = (tool: ToolName) => {
@@ -721,19 +725,39 @@ export function mountEditor(
     render();
   }
 
-  /** Lägger in skanningen som visas och visar våningen den hamnade på. */
+  /** Visar skanningen vriden, flyttad eller på väg till en annan våning. */
+  function changeScan(next: ScanImport) {
+    const turned = next.placement.quarterTurns !== scanImport?.placement.quarterTurns;
+    scanImport = next;
+    render();
+    if (turned) {
+      view.fit(); // vriden kan skanningen bli högre än kartan
+    }
+  }
+
+  /**
+   * Lägger in skanningen som visas och visar våningen den hamnade på. Säger
+   * kärnan nej visas skanningen igen, så att den inte behöver läsas in,
+   * vridas och flyttas en gång till.
+   */
   function applyScan() {
-    const preview = scanPreview();
     const current = scanImport;
-    if (preview === null || current === null) {
+    if (current === null || shown === null) {
       return;
     }
     const placed = placeScan(current.scan, current.placement);
+    const previousFloor = floorId;
     scanImport = null;
     selection = null;
-    floorId = preview.floorId;
+    floorId = importScan(shown, placed, current.target).floorId;
     // Ändringen görs om på det sparade hemmet; utan konflikter blir våningens id detsamma.
-    commit((document) => importScan(document, placed, current.target).document);
+    commit(
+      (document) => importScan(document, placed, current.target).document,
+      () => {
+        scanImport = current;
+        floorId = previousFloor;
+      },
+    );
     view.fit();
   }
 
@@ -906,6 +930,13 @@ export function mountEditor(
   };
 
   const readScanFile = async (file: File) => {
+    if (file.size > MAX_SCAN_BYTES) {
+      showMessage(
+        `Filen är ${formatNumber(file.size / 1e6)} MB. En skanning är mycket mindre än så; ` +
+          "välj JSON-filen från skanningen.",
+      );
+      return;
+    }
     let text: string;
     try {
       text = await file.text();
@@ -919,9 +950,14 @@ export function mountEditor(
         showMessage(["Skanningen gav inga rum.", ...scan.problems].join(" "));
         return;
       }
+      const next: ScanImport = { scan, placement: DEFAULT_PLACEMENT, target: { kind: "new" } };
+      if (shown !== null) {
+        // Prova att lägga in skanningen innan den visas, så att ett fel syns här och inte vid ritningen.
+        importScan(shown, placeScan(scan, next.placement), next.target);
+      }
       chooseTool("select");
       showMessage(null);
-      scanImport = { scan, placement: DEFAULT_PLACEMENT, target: { kind: "new" } };
+      scanImport = next;
       render();
       view.fit();
     } catch (error) {
@@ -949,80 +985,84 @@ export function mountEditor(
     }
   });
 
-  const view = deps.createView(stageContainer, {
-    onPointerDown: (point) => {
-      if (scanImport !== null) {
-        return; // kartan visar skanningen, som inte går att ändra förrän den är inlagd
-      }
-      // Med Välj och väggverktyget sköter kartan klicket själv. Att rita om nu
-      // skulle byta ut det som är under pekaren mitt i klicket, och då kommer
-      // klicket aldrig fram.
-      if (mapHandlesClicks(drawing.tool)) {
-        return;
-      }
-      if (drawing.tool === "scale" && currentFloor()?.plan_image == null) {
-        return;
-      }
-      if (drawing.tool === "scale") {
-        scalePoints = null; // ett nytt klick börjar om med två nya punkter
-      }
-      // Hörnen dras till befintliga hörn; det som placeras ut hamnar där man klickar.
-      const snapped = drawing.tool === "scale" || isPlacingTool(drawing.tool) ? point : snap(point);
-      handle(drawing.pointerDown(snapped, SNAP_PIXELS * view.metersPerPixel()));
-    },
-    onPointerMove: (point) => {
-      if (drawing.draft.kind !== "none") {
-        drawing.pointerMove(drawing.tool === "scale" ? point : snap(point));
-        renderMap();
-      }
-    },
-    onPointerUp: (point) => {
-      if (drawing.tool === "rectangle") {
-        handle(drawing.pointerUp(snap(point)));
-      }
-    },
-    onSelect: (next) => {
-      if (scanImport !== null) {
-        return;
-      }
-      selection = next;
-      render();
-    },
-    onSelectItem: (itemId) => {
-      if (scanImport !== null) {
-        return;
-      }
-      selection = { kind: "item", id: itemId };
-      render();
-    },
-    onMoveItem: (itemId, point) => {
-      if (scanImport !== null) {
-        return;
-      }
-      selection = { kind: "item", id: itemId };
-      commit((document) => moveItem(document, itemId, point));
-    },
-    onRotateNode: (nodeId, rotation) => {
-      if (scanImport !== null) {
-        return;
-      }
-      commit((document) => updateItem(document, nodeId, { rotation: normalizeRotation(rotation) }));
-    },
-    onClickWall: (roomId, index) => {
-      if (scanImport !== null) {
-        return;
-      }
-      commit((document) => cycleWall(document, roomId, index));
-    },
-    onMoveRoom: (roomId, dx, dy) => {
-      if (scanImport !== null) {
-        return;
-      }
-      if (shown !== null && (dx !== 0 || dy !== 0)) {
-        commit((document) => moveRoom(document, roomId, dx, dy));
-      }
-    },
-  });
+  /**
+   * Kartans klick och drag gör inget medan kartan visar en skanning, som inte
+   * går att ändra förrän den är inlagd.
+   */
+  const unlessPreviewingScan = (callbacks: EditorViewCallbacks): EditorViewCallbacks => {
+    const guarded: Record<string, unknown> = {};
+    for (const [name, handler] of Object.entries(callbacks) as [
+      string,
+      (...a: never[]) => void,
+    ][]) {
+      guarded[name] = (...args: never[]) => {
+        if (scanImport === null) {
+          handler(...args);
+        }
+      };
+    }
+    return guarded as unknown as EditorViewCallbacks;
+  };
+
+  const view = deps.createView(
+    stageContainer,
+    unlessPreviewingScan({
+      onPointerDown: (point) => {
+        // Med Välj och väggverktyget sköter kartan klicket själv. Att rita om nu
+        // skulle byta ut det som är under pekaren mitt i klicket, och då kommer
+        // klicket aldrig fram.
+        if (mapHandlesClicks(drawing.tool)) {
+          return;
+        }
+        if (drawing.tool === "scale" && currentFloor()?.plan_image == null) {
+          return;
+        }
+        if (drawing.tool === "scale") {
+          scalePoints = null; // ett nytt klick börjar om med två nya punkter
+        }
+        // Hörnen dras till befintliga hörn; det som placeras ut hamnar där man klickar.
+        const snapped =
+          drawing.tool === "scale" || isPlacingTool(drawing.tool) ? point : snap(point);
+        handle(drawing.pointerDown(snapped, SNAP_PIXELS * view.metersPerPixel()));
+      },
+      onPointerMove: (point) => {
+        if (drawing.draft.kind !== "none") {
+          drawing.pointerMove(drawing.tool === "scale" ? point : snap(point));
+          renderMap();
+        }
+      },
+      onPointerUp: (point) => {
+        if (drawing.tool === "rectangle") {
+          handle(drawing.pointerUp(snap(point)));
+        }
+      },
+      onSelect: (next) => {
+        selection = next;
+        render();
+      },
+      onSelectItem: (itemId) => {
+        selection = { kind: "item", id: itemId };
+        render();
+      },
+      onMoveItem: (itemId, point) => {
+        selection = { kind: "item", id: itemId };
+        commit((document) => moveItem(document, itemId, point));
+      },
+      onRotateNode: (nodeId, rotation) => {
+        commit((document) =>
+          updateItem(document, nodeId, { rotation: normalizeRotation(rotation) }),
+        );
+      },
+      onClickWall: (roomId, index) => {
+        commit((document) => cycleWall(document, roomId, index));
+      },
+      onMoveRoom: (roomId, dx, dy) => {
+        if (shown !== null && (dx !== 0 || dy !== 0)) {
+          commit((document) => moveRoom(document, roomId, dx, dy));
+        }
+      },
+    }),
+  );
 
   document.addEventListener("keydown", (event) => {
     if (event.target instanceof HTMLInputElement) {

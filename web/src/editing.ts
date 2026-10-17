@@ -263,6 +263,20 @@ export function addRoom(
   };
 }
 
+/** Lägger till en tom våning ett plan ovanför den översta. */
+export function addFloor(
+  document: HomeDocument,
+  name: string,
+): { document: HomeDocument; floorId: string } {
+  const floorId = uniqueId(document, name);
+  const level = Math.max(...document.home.floors.map((floor) => floor.level)) + 1;
+  const floor: FloorModel = { id: floorId, name, level, rooms: [] };
+  return {
+    floorId,
+    document: { ...document, home: { ...document.home, floors: [...document.home.floors, floor] } },
+  };
+}
+
 /** Byter namn. Id:t behålls, så det som pekar på rummet fortsätter att fungera. */
 export function renameRoom(document: HomeDocument, roomId: string, name: string): HomeDocument {
   return updateRoom(document, roomId, (room) => ({ ...room, name }));

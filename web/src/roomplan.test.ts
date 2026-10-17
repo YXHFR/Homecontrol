@@ -4,6 +4,7 @@ import type { Point } from "./protocol";
 import {
   DEFAULT_PLACEMENT,
   importScan,
+  MAX_ITEMS,
   placeScan,
   readMatrix,
   readScan,
@@ -279,7 +280,7 @@ describe("en tolerant läsare", () => {
       expect.arrayContaining([
         "Dörr 1 saknar mått och hoppades över.",
         "Möbel 2 saknar mått eller läge och hoppades över.",
-        'Okända sorters möbler visas som "Möbel": piano.',
+        'Möbler av okänd sort visas som "Möbel" (sorten i skanningen: piano).',
       ]),
     );
   });
@@ -298,6 +299,32 @@ describe("en tolerant läsare", () => {
     expect(scan.problems).toContain(
       "1 dörr eller öppning låg inte vid någon vägg och kom inte med.",
     );
+  });
+
+  it("slår inte upp sorter i objektens prototyp", () => {
+    const scan = readScan(
+      JSON.stringify(
+        boxScan({
+          objects: ["constructor", "__proto__", "toString"].map((category) => ({
+            category,
+            dimensions: [1, 1, 1],
+            transform: transform(1, 1),
+          })),
+          sections: [{ label: { toString: {} }, center: [2, 0, 1.5] }],
+        }),
+      ),
+    );
+    expect(scan.furniture.map((item) => item.name)).toEqual(["Möbel", "Möbel", "Möbel"]);
+    expect(scan.rooms[0].name).toBe("Rum 1");
+  });
+
+  it("läser högst MAX_ITEMS av varje sort och säger till", () => {
+    const sofa = { category: { sofa: {} }, dimensions: [1, 1, 1], transform: transform(1, 1) };
+    const scan = readScan(
+      JSON.stringify(boxScan({ objects: Array.from({ length: MAX_ITEMS + 5 }, () => sofa) })),
+    );
+    expect(scan.furniture).toHaveLength(MAX_ITEMS);
+    expect(scan.problems.join(" ")).toContain(`Bara de första ${MAX_ITEMS} lästes.`);
   });
 
   it("läser ett rum i taget ur en skanning av flera rum", () => {
