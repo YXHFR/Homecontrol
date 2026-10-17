@@ -191,6 +191,51 @@ med LD2461, och kontrollera också att
   Wi-Fi är borta i 15 minuter.
 - ESPectre skickar ping till routern för att få jämn CSI-trafik.
 
+## Dörrklockan
+
+[`dorrklocka.yaml`](dorrklocka.yaml) är firmware för dörrklockan, ett
+valfritt tillägg (se [Tillägg: dörrklocka](../README.md#tillägg-dörrklocka)
+i README i repots rot): en Seeed XIAO ESP32S3 Sense med kamera och en
+tryckknapp mellan D1 (GPIO2) och GND.
+
+Dörrklockan finns inte i webbinstalleraren. Den behöver hemligheter (Wi-Fi,
+MQTT och kamerans nyckel), så du bygger den själv:
+
+1. Installera ESPHome i samma version som CI:
+
+   ```sh
+   python3 -m venv .venv && .venv/bin/pip install --require-hashes -r firmware/requirements.txt
+   ```
+
+2. Kopiera hemligheterna och fyll i dem. `secrets.yaml` är gitignorerad.
+
+   ```sh
+   cp firmware/dorrklocka-secrets.example.yaml firmware/secrets.yaml
+   ```
+
+   `mqtt_password` och `api_key` ska vara samma som `MQTT_DOORBELL_PASSWORD`
+   och `DOORBELL_CAMERA_KEY` i `.env`.
+3. Anslut kortet med USB och bygg och installera:
+
+   ```sh
+   .venv/bin/esphome run firmware/dorrklocka.yaml
+   ```
+
+   Senare uppdateringar kan göras över nätverket med samma kommando. De
+   kräver kamerans nyckel.
+
+Det här gör dörrklockan:
+
+- Ett tryck (avstudsat, 50 ms) publicerar `{"tryck": "<id>"}` på
+  `dorr/ringer` med QoS 1 och utan retain. Id:t är unikt för varje tryck.
+- Kameran tar bilder bara när kärnan ber om det över det krypterade API:t
+  (`idle_framerate: 0`). Ingen webbserver, ingen captive portal.
+- MQTT-meddelanden ligger bara under `dorr/` (status under `dorr/klocka`).
+  Loggen skickas inte över MQTT.
+
+CI validerar och bygger dörrklockan med påhittade hemligheter och
+kontrollerar inställningarna ovan (se `.github/workflows/firmware.yml`).
+
 ## Licens
 
 - **Konfigurationen** i den här mappen (YAML, installationssidan, skript)
