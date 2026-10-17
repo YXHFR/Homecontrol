@@ -184,6 +184,21 @@ export interface StateMessage {
    * Utan kontakt styr kärnan med sin kopia av hemmet, och ändringar sparas inte.
    */
   database: { connected: boolean } | null;
+  /** MQTT-brokern och Zigbee2MQTT, eller null om kärnan inte styr några Zigbee-lampor. */
+  zigbee: ZigbeeStatus | null;
+}
+
+/** Om kärnan når Zigbee-lamporna (se core/src/homecontrol/zigbee.py). */
+export interface ZigbeeStatus {
+  /** Kärnan har en anslutning till MQTT-brokern. */
+  mqtt_connected: boolean;
+  /**
+   * Det Zigbee2MQTT senast sa om sig själv (`bridge/state`), eller null när
+   * kärnan inte är ansluten till brokern eller inte har hört något än.
+   */
+  bridge_online: boolean | null;
+  /** När läget senast ändrades, som ISO 8601 i UTC, till exempel "2026-10-17T19:42:00Z". */
+  since: string;
 }
 
 /** Hur lampkalibreringen går (se core/src/homecontrol/calibration.py). */

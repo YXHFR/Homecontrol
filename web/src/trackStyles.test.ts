@@ -29,6 +29,7 @@ describe("spåren i livevyn", () => {
       cards: null,
       calibration: null,
       database: null,
+      zigbee: null,
     };
 
     expect(tracksOnFloor(state, "uppe")).toEqual([{ floor_id: "uppe", x: 2, y: 2, held: true }]);
