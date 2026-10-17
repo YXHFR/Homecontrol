@@ -1,6 +1,6 @@
 """Källkopplingen ESPHome: rumskorten (ESP32) med radar, Wi-Fi-mätning och ljussensor.
 
-Korten heter ``homecontrol-<rum>`` (se firmware/homecontrol.yaml) och hittas
+Korten heter ``homecontrol-<rum>`` (se firmware/common.yaml) och hittas
 med mDNS. Ett kort som hittas visas som ett nytt kort att placera, men
 kärnan ansluter inte till det förrän det har placerats på kartan. Ett
 placerat kort är en nod vars id är kortets namn.
@@ -111,8 +111,6 @@ PROVISION_SECONDS = 10 * 60.0
 """Så länge efter placeringen som ett kort utan nyckel får sin nyckel."""
 
 
-# Entiteterna som firmware-paketet exponerar (firmware/homecontrol.yaml).
-# Namnen ändras inte, så att kärnan kan lita på dem (se firmware/README.md).
 def radar_targets(radar: RadarModel) -> tuple[tuple[str, str], ...]:
     """Entiteterna för målen som radarn följer: X och Y för varje mål, i mm."""
     return tuple(
@@ -120,11 +118,15 @@ def radar_targets(radar: RadarModel) -> tuple[tuple[str, str], ...]:
     )
 
 
+# Entiteterna som firmware-paketen exponerar (firmware/common.yaml,
+# firmware/homecontrol.yaml och firmware/homecontrol-ld2461.yaml). Namnen
+# ändras inte, så att kärnan kan lita på dem (se firmware/README.md).
 RADAR_TARGETS = radar_targets(RadarModel.LD2450)
 """Målen på ett kort med LD2450. Ett kort med LD2461 har också mål 4 och 5."""
 ALL_RADAR_TARGETS = frozenset(
     name for model in RadarModel for pair in radar_targets(model) for name in pair
 )
+"""Alla radarmålens entiteter, för alla radarer."""
 RADAR_ONLINE = "Radar Online"
 CSI_MOTION = "CSI Motion"
 CSI_MOVEMENT = "CSI Movement Score"
@@ -148,11 +150,12 @@ REQUIRED_ENTITIES = (
 def card_radar(names: Iterable[str]) -> RadarModel:
     """Vilken radar ett kort har, utifrån dess entiteter.
 
-    Bara firmware-varianten med LD2461 har mål 4 och 5 (se firmware/README.md).
+    Bara firmware-varianten med LD2461 har mål 4 och 5 (se firmware/README.md),
+    så ett kort med LD2461:s sista mål, mål 5, har en LD2461.
     """
     last_x, last_y = radar_targets(RadarModel.LD2461)[-1]
-    names = set(names)
-    return RadarModel.LD2461 if {last_x, last_y} <= names else RadarModel.LD2450
+    present = set(names)
+    return RadarModel.LD2461 if {last_x, last_y} <= present else RadarModel.LD2450
 
 
 PARTS = (Capability.RADAR, Capability.CSI, Capability.LUX)

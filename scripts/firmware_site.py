@@ -8,7 +8,8 @@ radarns förled för LD2461, till exempel "kok" och "ld2461-kok".
 
 Användning:
     python3 scripts/firmware_site.py rooms
-        Skriver rummen i firmware/rooms.txt som en JSON-lista.
+        Skriver rummen i firmware/rooms.txt som en JSON-lista (för den som
+        vill se dem; CI använder builds).
 
     python3 scripts/firmware_site.py builds
         Skriver alla firmware att bygga som en JSON-lista (för CI), en per
@@ -65,6 +66,7 @@ class Radar:
     """Förledet i firmwarens namn. Tomt för LD2450, så att dess filer heter som förut."""
 
     def name(self, room: str) -> str:
+        """Firmwarens namn för rummet, till exempel "kok" eller "ld2461-kok"."""
         return f"{self.prefix}{room}"
 
 
@@ -86,6 +88,9 @@ def validate_room(room: str) -> str | None:
         return f"{room!r}: bara a–z, 0–9 och enstaka bindestreck mellan dem"
     if len(room) > MAX_ROOM_LENGTH:
         return f"{room!r}: högst {MAX_ROOM_LENGTH} tecken"
+    # Annars kunde rummets firmware få samma filer som ett annat rums LD2461-firmware.
+    if any(radar.prefix and room.startswith(radar.prefix) for radar in RADARS):
+        return f"{room!r}: får inte börja som en radar, till exempel ld2461-"
     return None
 
 

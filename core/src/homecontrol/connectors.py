@@ -48,8 +48,11 @@ class RadarTargetsObserved:
     source_id: str
     node_id: str
     targets: tuple[RadarTarget, ...]
-    radar: RadarModel = RadarModel.LD2450
-    """Radarn som såg målen. Den avgör hur många mål som är rimligt (`RadarModel.max_targets`)."""
+    radar: RadarModel
+    """Radarn som såg målen. Den avgör hur många mål som är rimligt (`RadarModel.max_targets`).
+
+    Den har inget standardvärde, så att en källa inte av misstag får sina mål kapade.
+    """
 
 
 @dataclass(frozen=True)

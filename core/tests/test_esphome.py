@@ -163,7 +163,7 @@ def test_one_radar_frame_is_one_observation_in_meters() -> None:
 
     radar = [o for o in harness.observed if isinstance(o, RadarTargetsObserved)]
     assert radar[-1] == RadarTargetsObserved(
-        part_source(CARD, Capability.RADAR), CARD, (RadarTarget(-0.6, 3.2),)
+        part_source(CARD, Capability.RADAR), CARD, (RadarTarget(-0.6, 3.2),), RadarModel.LD2450
     )
     # Ögonblicket vid anslutningen och den första ramen, inte ett per värde.
     assert len(radar) == 2
@@ -207,6 +207,24 @@ def test_an_ld2461_card_sends_four_and_then_five_people_in_meters() -> None:
     assert harness.status() is Occupancy.OCCUPIED
     assert harness.lamp_on()
     assert harness.card().problems == ()
+
+
+def test_a_card_installed_again_with_the_other_radar_is_read_as_that_radar() -> None:
+    """Samma kort (samma namn) får firmware för LD2461 och sedan för LD2450 igen."""
+    harness = Harness()
+    five = recording("ld2461_fem_personer")
+    harness.connect(five)
+    harness.play(five)
+    assert len(harness.controller.snapshot().tracks) == 5
+
+    harness.link.events.disconnected()
+    walk = recording("person_gar_in")
+    harness.connect(walk)
+    harness.play(walk, until=1.0)
+
+    radar = [o for o in harness.observed if isinstance(o, RadarTargetsObserved)]
+    assert radar[-1].radar is RadarModel.LD2450
+    assert radar[-1].targets == (RadarTarget(-0.6, 3.2),)
 
 
 def test_an_ld2461_card_without_people_sends_no_targets() -> None:

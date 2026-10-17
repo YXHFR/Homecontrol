@@ -26,7 +26,7 @@ def test_valid_room_names(room: str) -> None:
 
 @pytest.mark.parametrize(
     "room",
-    ["kök", "Kok", "sov rum", "-kok", "kok-", "sov--rum", "kok_1", TOO_LONG, ""],
+    ["kök", "Kok", "sov rum", "-kok", "kok-", "sov--rum", "kok_1", TOO_LONG, "", "ld2461-kok"],
 )
 def test_invalid_room_names(room: str) -> None:
     assert validate_room(room) is not None

@@ -15,7 +15,7 @@ from homecontrol.connectors import (
     RadarTargetsObserved,
     SourceLost,
 )
-from homecontrol.home import Point, Target
+from homecontrol.home import Point, RadarModel, Target
 from homecontrol.lamplimit import LIMIT_BURST
 from homecontrol.simulation import (
     LAMP_LUX_AT_ONE_METER,
@@ -40,7 +40,7 @@ def at(x: float, y: float) -> Target:
 def radar(*points: tuple[float, float]) -> RadarTargetsObserved:
     """Det rumskortet ser när personer står i `points`, i radarns egna koordinater."""
     targets = tuple(RadarTarget(*NODE.home_to_radar(Point(x, y))) for x, y in points)
-    return RadarTargetsObserved("sim", NODE.id, targets)
+    return RadarTargetsObserved("sim", NODE.id, targets, RadarModel.LD2450)
 
 
 def make(enabled: bool = True) -> tuple[Simulation, list[Observation], SystemClock]:
