@@ -108,7 +108,7 @@ test("en bild av planritningen laddas upp och skalas med två punkter", async ({
   await openEditor(page);
   const map = page.locator(".editor-stage canvas").first();
 
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.locator('input[type="file"][accept^="image"]').setInputFiles({
     name: "planritning.png",
     mimeType: "image/png",
     buffer: png(400, 300),

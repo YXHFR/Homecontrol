@@ -1,6 +1,8 @@
-"""Hemmodellen: hem, våningar, rum, väggar, dörröppningar, zoner, noder, signalkällor och lampor.
+"""Hemmodellen: hem, våningar, rum, väggar, zoner, noder, signalkällor, lampor och möbler.
 
-Varje våning kan också ha en planritning (en bild) att rita rummen ovanpå.
+Varje våning kan också ha en planritning (en bild) att rita rummen ovanpå,
+och möbler, som visas på kartan men inte påverkar något (de kommer oftast
+från en iPhone-skanning, se web/src/roomplan.ts).
 
 Koordinater är meter i ett plan per våning, med origo uppe till vänster:
 x växer åt höger och y nedåt, precis som på en ritning eller skärm. Rotation
@@ -305,6 +307,8 @@ class Room(_Model):
     walls: tuple[WallKind, ...]
     """En vägg per sida i polygonen: väggen från hörn i till hörn i + 1."""
     settings: RoomSettings = RoomSettings()
+    ceiling_height: Annotated[float, Field(gt=0, le=MAX_HEIGHT, allow_inf_nan=False)] | None = None
+    """Takhöjden i meter, om den är känd (till exempel från en iPhone-skanning)."""
     zones: tuple[Zone, ...] = ()
     nodes: tuple[Node, ...] = ()
     lamps: tuple[Lamp, ...] = ()
@@ -358,6 +362,19 @@ class SignalSource(_Model):
     height: Height
 
 
+class Furniture(_Model):
+    """En möbel sedd ovanifrån, till exempel en soffa. Den visas bara på kartan.
+
+    Möblerna gör det lättare att rita stillhetszoner och ignorera-zoner på rätt
+    ställe. De hör till våningen och inte till ett rum, eftersom en möbel kan
+    stå i en dörröppning eller sticka ut lite genom en vägg i en skanning.
+    """
+
+    name: Name
+    """Vad möbeln är, till exempel "Soffa"."""
+    polygon: Polygon
+
+
 class PlanImage(_Model):
     """Var bilden av våningens planritning ligger och hur stor den är.
 
@@ -380,6 +397,7 @@ class Floor(_Model):
     signal_sources: tuple[SignalSource, ...] = ()
     plan_image: PlanImage | None = None
     """Bilden av planritningen som rummen ritas ovanpå, om någon har laddats upp."""
+    furniture: tuple[Furniture, ...] = ()
 
     @model_validator(mode="after")
     def _shared_walls_agree(self) -> Self:

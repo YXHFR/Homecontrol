@@ -22,3 +22,10 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# iPhone-skanningar visar hur hemmet ser ut och committas aldrig. Bara den
+# påhittade skanningen i web/exempel/ hör hemma i repot.
+*.usdz
+*skanning*.json
+*roomplan*.json
+!web/exempel/roomplan-exempel.json

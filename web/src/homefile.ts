@@ -81,6 +81,8 @@ export interface RoomModel {
   /** En vägg per sida: väggen från hörn i till hörn i + 1. */
   walls: WallKind[];
   settings?: RoomSettings;
+  /** Takhöjden i meter, om den är känd (till exempel från en iPhone-skanning). */
+  ceiling_height?: number | null;
   zones?: ZoneModel[];
   nodes?: NodeModel[];
   lamps?: LampModel[];
@@ -100,6 +102,13 @@ export interface PlanImage {
   meters_per_pixel: number;
 }
 
+/** En möbel sedd ovanifrån. Den visas bara på kartan, som hjälp att rita zoner. */
+export interface FurnitureModel {
+  /** Vad möbeln är, till exempel "Soffa". */
+  name: string;
+  polygon: XY[];
+}
+
 export interface FloorModel {
   id: string;
   name: string;
@@ -107,6 +116,7 @@ export interface FloorModel {
   rooms: RoomModel[];
   signal_sources?: SignalSourceModel[];
   plan_image?: PlanImage | null;
+  furniture?: FurnitureModel[];
 }
 
 export interface HomeModel {

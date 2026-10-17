@@ -77,6 +77,9 @@ const COLORS = {
   grid: "#ebe7de",
   room: "rgba(244, 241, 234, 0.8)",
   roomSelected: "rgba(196, 218, 250, 0.85)",
+  /** Möblerna är ett grått lager ovanpå rummen, som hjälp att rita zoner. */
+  furniture: "rgba(110, 110, 110, 0.22)",
+  furnitureEdge: "rgba(90, 90, 90, 0.6)",
   wall: "#4a4a4a",
   selected: "#2f6fed",
   draft: "#2f6fed",
@@ -96,10 +99,11 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
   const gridLayer = new Konva.Layer({ listening: false });
   const imageLayer = new Konva.Layer({ listening: false });
   const roomLayer = new Konva.Layer();
+  const furnitureLayer = new Konva.Layer({ listening: false });
   const wallLayer = new Konva.Layer();
   const itemLayer = new Konva.Layer();
   const draftLayer = new Konva.Layer({ listening: false });
-  stage.add(gridLayer, imageLayer, roomLayer, wallLayer, itemLayer, draftLayer);
+  stage.add(gridLayer, imageLayer, roomLayer, furnitureLayer, wallLayer, itemLayer, draftLayer);
 
   const images = new Map<string, HTMLImageElement>();
   let scene: EditorScene | null = null;
@@ -278,6 +282,38 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     }
   };
 
+  /** Möblerna, gråa och utan namn som tar plats: de är bara till hjälp och går inte att välja. */
+  const drawFurniture = (current: EditorScene) => {
+    furnitureLayer.destroyChildren();
+    const metersPerScreenPixel = 1 / pixelsPerMeter();
+    for (const item of current.floor.furniture ?? []) {
+      const xs = item.polygon.map(([x]) => x);
+      const ys = item.polygon.map(([, y]) => y);
+      const fontSize = 10 * metersPerScreenPixel;
+      furnitureLayer.add(
+        new Konva.Line({
+          points: item.polygon.flat(),
+          closed: true,
+          fill: COLORS.furniture,
+          stroke: COLORS.furnitureEdge,
+          strokeWidth: 1,
+          strokeScaleEnabled: false,
+        }),
+        new Konva.Text({
+          x: Math.min(...xs),
+          y: (Math.min(...ys) + Math.max(...ys)) / 2 - fontSize / 2,
+          width: Math.max(...xs) - Math.min(...xs),
+          align: "center",
+          text: item.name,
+          wrap: "none",
+          ellipsis: true,
+          fontSize,
+          fill: COLORS.furnitureEdge,
+        }),
+      );
+    }
+  };
+
   /** Rummets zoner i sina färger. De ritas i rummets grupp, så att de följer med när det dras. */
   const drawZones = (
     room: RoomModel,
@@ -397,6 +433,7 @@ export const createKonvaEditorView: EditorViewFactory = (container, callbacks) =
     drawGrid();
     drawImage(scene);
     drawRooms(scene);
+    drawFurniture(scene);
     const itemScene = {
       ...scene,
       selectedItemId: scene.selection?.kind === "item" ? scene.selection.id : null,

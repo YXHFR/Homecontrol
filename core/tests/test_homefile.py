@@ -58,6 +58,8 @@ def test_example_home_uses_every_concept_on_two_floors() -> None:
     assert any(lamp.zone_id is not None for lamp in home.lamps)
     assert {lamp.profile for lamp in home.lamps} == set(LampProfile)
     assert any(room.settings != rooms[0].settings for room in rooms)
+    assert all(floor.furniture for floor in home.floors)
+    assert all(room.ceiling_height is not None for room in rooms)
 
 
 @pytest.mark.parametrize(
