@@ -2,7 +2,7 @@
 # Ett rum per rad. Bara a–z, 0–9 och bindestreck, högst 19 tecken.
 # Namnet blir värdnamnet homecontrol-<rum> och syns för alla i nätverket.
 # Andra rum kan byggas själv, se firmware/README.md.
-# Tills vidare bara ett rum (se "Omfattning just nu" i README.md i roten).
+# Tills vidare bara ett rum.
 # Fler rum läggs till här igen när det första fungerar, till exempel:
 # vardagsrum, kok, hall, sovrum-2.
 mitt-rum

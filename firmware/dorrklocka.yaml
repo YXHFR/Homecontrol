@@ -2,7 +2,7 @@
 #
 # Ett tryck på knappen publicerar dorr/ringer på MQTT. Kärnan hämtar då en
 # stillbild, skickar en notis, spelar dingdong och tänder dörrlampan (se
-# core/src/homecontrol/doorbell.py och README i repots rot).
+# core/src/homecontrol/doorbell.py).
 #
 # Integritet:
 #   - Kameran tar bara bilder när kärnan ber om det, över det krypterade

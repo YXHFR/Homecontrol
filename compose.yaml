@@ -28,7 +28,7 @@ services:
       HOMECONTROL_DATABASE: host=/var/run/postgresql dbname=homecontrol user=homecontrol_core require_auth=scram-sha-256
       HOMECONTROL_PREPARE_DATABASE: "false"
       # Kärnans egen kopia av hemmet. Svarar inte databasen vid start används
-      # kopian, så att lamporna styrs ändå (se README).
+      # kopian, så att lamporna styrs ändå.
       HOMECONTROL_HOME_COPY: /var/lib/homecontrol/hem.json
       PGPASSWORD: ${CORE_DATABASE_PASSWORD:?CORE_DATABASE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
       # Rumskortens nycklar räknas fram ur den här. Tom: inga kort ansluts.
@@ -42,7 +42,7 @@ services:
       # ämnen (mosquitto/acl).
       HOMECONTROL_MQTT_USER: homecontrol_core
       HOMECONTROL_MQTT_PASSWORD: ${MQTT_CORE_PASSWORD:?MQTT_CORE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
-      # Dörrklockan (valfri, se README). Avstängd så länge DOORBELL_NTFY_TOPIC är tom.
+      # Dörrklockan (valfri). Avstängd så länge DOORBELL_NTFY_TOPIC är tom.
       HOMECONTROL_DOORBELL_NTFY_TOPIC: ${DOORBELL_NTFY_TOPIC:-}
       HOMECONTROL_DOORBELL_NTFY_URL: ${DOORBELL_NTFY_URL:-}
       HOMECONTROL_DOORBELL_NTFY_TOKEN: ${DOORBELL_NTFY_TOKEN:-}
@@ -52,7 +52,7 @@ services:
       HOMECONTROL_DOORBELL_SPEAKER_VOLUME: ${DOORBELL_SPEAKER_VOLUME:-}
       HOMECONTROL_DOORBELL_MEDIA_HOST: ${DOORBELL_MEDIA_HOST:-}
       HOMECONTROL_DOORBELL_LAMP: ${DOORBELL_LAMP:-}
-      # En egen ljudfil måste också monteras i containern (se README).
+      # En egen ljudfil måste också monteras i containern.
       HOMECONTROL_DOORBELL_SOUND_FILE: ${DOORBELL_SOUND_FILE:-}
     volumes:
       # Skrivskyddad, så att kärnan inte kan lägga en egen socket i stället
@@ -85,7 +85,7 @@ services:
       HOMECONTROL_DATABASE: host=/var/run/postgresql dbname=homecontrol user=homecontrol require_auth=scram-sha-256
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD saknas – kopiera .env.example till .env och fyll i}
       HOMECONTROL_CORE_DATABASE_PASSWORD: ${CORE_DATABASE_PASSWORD:?CORE_DATABASE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
-      # Hur länge historiken sparas (se README). Tomt betyder utan tidsgräns.
+      # Hur länge historiken sparas. Tomt betyder utan tidsgräns.
       HOMECONTROL_HISTORY_FULL_HOURS: ${HISTORY_FULL_HOURS:-24}
       HOMECONTROL_HISTORY_KEEP_DAYS: ${HISTORY_KEEP_DAYS:-}
     volumes:

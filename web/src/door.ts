@@ -133,7 +133,7 @@ export function mountDoor(root: HTMLElement, api: DoorApi = coreDoorApi): () => 
   };
   const applyState = (state: DoorState | null) => {
     if (state === null) {
-      status.textContent = "Ingen dörrklocka är inställd. Hur den ställs in står i README.";
+      status.textContent = "Ingen dörrklocka är inställd. Den ställs in i .env.";
       showButton.hidden = true;
       closesAt = 0;
       stopStream();
