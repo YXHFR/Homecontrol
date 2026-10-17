@@ -7,7 +7,7 @@ services:
     # Färdig avbild från releasen (amd64 och arm64). release-please byter
     # versionen vid varje release. Finns avbilden inte att hämta byggs den
     # på datorn från koden i repot; docker compose up --build bygger alltid själv.
-    image: ghcr.io/yxhfr/homecontrol:0.1.0 # x-release-please-version
+    image: ghcr.io/yxhfr/homecontrol:0.2.0 # x-release-please-version
     build:
       context: .
       dockerfile: core/Dockerfile
@@ -42,6 +42,18 @@ services:
       # ämnen (mosquitto/acl).
       HOMECONTROL_MQTT_USER: homecontrol_core
       HOMECONTROL_MQTT_PASSWORD: ${MQTT_CORE_PASSWORD:?MQTT_CORE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
+      # Dörrklockan (valfri, se README). Avstängd så länge DOORBELL_NTFY_TOPIC är tom.
+      HOMECONTROL_DOORBELL_NTFY_TOPIC: ${DOORBELL_NTFY_TOPIC:-}
+      HOMECONTROL_DOORBELL_NTFY_URL: ${DOORBELL_NTFY_URL:-}
+      HOMECONTROL_DOORBELL_NTFY_TOKEN: ${DOORBELL_NTFY_TOKEN:-}
+      HOMECONTROL_DOORBELL_CAMERA_HOST: ${DOORBELL_CAMERA_HOST:-}
+      HOMECONTROL_DOORBELL_CAMERA_KEY: ${DOORBELL_CAMERA_KEY:-}
+      HOMECONTROL_DOORBELL_SPEAKER_HOST: ${DOORBELL_SPEAKER_HOST:-}
+      HOMECONTROL_DOORBELL_SPEAKER_VOLUME: ${DOORBELL_SPEAKER_VOLUME:-}
+      HOMECONTROL_DOORBELL_MEDIA_HOST: ${DOORBELL_MEDIA_HOST:-}
+      HOMECONTROL_DOORBELL_LAMP: ${DOORBELL_LAMP:-}
+      # En egen ljudfil måste också monteras i containern (se README).
+      HOMECONTROL_DOORBELL_SOUND_FILE: ${DOORBELL_SOUND_FILE:-}
     volumes:
       # Skrivskyddad, så att kärnan inte kan lägga en egen socket i stället
       # för databasens.
@@ -60,7 +72,7 @@ services:
   # aldrig finns hos den kärna som är igång. Skapar kärnans roll om den saknas,
   # så att en databas från en tidigare version uppgraderas med datan kvar.
   db-setup:
-    image: ghcr.io/yxhfr/homecontrol:0.1.0 # x-release-please-version
+    image: ghcr.io/yxhfr/homecontrol:0.2.0 # x-release-please-version
     build:
       context: .
       dockerfile: core/Dockerfile
@@ -119,11 +131,13 @@ services:
     restart: unless-stopped
     entrypoint: ["sh", "/homecontrol/entrypoint.sh"]
     command: ["mosquitto", "-c", "/homecontrol/mosquitto.conf"]
-    # Kärnan, Zigbee2MQTT och hälsokontrollen har var sin användare.
+    # Kärnan, Zigbee2MQTT, dörrklockan och hälsokontrollen har var sin användare.
     # mosquitto/acl bestämmer vilka ämnen var och en får läsa och skriva.
     environment:
       MQTT_CORE_PASSWORD: ${MQTT_CORE_PASSWORD:?MQTT_CORE_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
       MQTT_ZIGBEE2MQTT_PASSWORD: ${MQTT_ZIGBEE2MQTT_PASSWORD:?MQTT_ZIGBEE2MQTT_PASSWORD saknas – kopiera raden från .env.example till .env och fyll i}
+      # Dörrklockans egen användare. Tom: ingen dörrklocka kan logga in.
+      MQTT_DOORBELL_PASSWORD: ${MQTT_DOORBELL_PASSWORD:-}
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${MQTT_PORT:-1883}:1883"
     volumes:

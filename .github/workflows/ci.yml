@@ -201,6 +201,16 @@ jobs:
           denied z2m '$SYS/broker/uptime'
           # Utan lösenord kommer ingen in. HOME pekar bort från hälsokontrollens inloggning.
           denied env HOME=/tmp mosquitto_sub -h 127.0.0.1 -t zigbee2mqtt/# -C 1 -W 3
+          # Dörrklockan är avstängd i .env.example: dess användare finns inte.
+          denied env HOME=/tmp mosquitto_pub -h 127.0.0.1 -u dorrklocka -P "" -t dorr/ringer -m ring
+          # Kärnan läser dörrens ämnen och får skriva ett ring (homecontrol ringa),
+          # men inte låtsas vara radarn.
+          mosquitto_pub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -r -t dorr/ringer -m ci
+          test "$(core dorr/ringer)" = ci
+          mosquitto_pub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -r -t dorr/radar -m ON
+          denied core dorr/radar
+          # Rensa de sparade meddelandena, så att kärnan inte ser dem som ett ring.
+          mosquitto_pub -h 127.0.0.1 -u homecontrol_core -P "$CORE" -r -n -t dorr/ringer
           EOF
       - name: Exportera hemmet från databasen och importera det igen
         run: |

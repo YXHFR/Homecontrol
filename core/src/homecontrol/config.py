@@ -4,11 +4,16 @@ Hemligheter läggs i en gitignorerad .env-fil i repots rot (se .env.example)
 och skickas in i containern av Docker Compose.
 """
 
+import base64
+import binascii
+import ipaddress
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import overload
+from urllib.parse import urlsplit
 
 HISTORY_FULL_RESOLUTION = timedelta(days=1)
 """Hur länge varje punkt i historiken sparas innan bara en punkt per sekund och spår finns kvar."""
@@ -25,6 +30,80 @@ class MqttSettings:
     username: str | None = None
     password: str | None = field(default=None, repr=False)
     """Visas aldrig när inställningarna skrivs ut, till exempel i en logg."""
+
+
+NTFY_TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+"""Ett ämne i ntfy: a–z, A–Z, siffror, - och _ (som ntfy själv kräver)."""
+MIN_OPEN_NTFY_TOPIC = 32
+"""Utan inloggning hos ntfy är ämnet det enda som skyddar notiserna, så det ska vara långt."""
+DEFAULT_NTFY_URL = "https://ntfy.sh"
+DEFAULT_SPEAKER_VOLUME = 50
+DOORBELL_API_KEY_BYTES = 32
+"""ESPHome:s krypteringsnyckel är 32 byte, skriven som base64."""
+
+
+@dataclass(frozen=True)
+class DoorbellSettings:
+    """Dörrklockan (se doorbell.py). Alla delar utom notisen är valfria.
+
+    Allt här är personligt eller hemligt och visas därför inte när
+    inställningarna skrivs ut.
+    """
+
+    ntfy_topic: str = field(repr=False)
+    """Ämnet i ntfy som notiserna skickas till. Den som kan gissa det kan läsa dem."""
+    ntfy_url: str = DEFAULT_NTFY_URL
+    ntfy_token: str | None = field(default=None, repr=False)
+    """Inloggning hos ntfy, för en egen ntfy-server eller ett reserverat ämne."""
+    camera_host: str | None = field(default=None, repr=False)
+    """Kamerans (XIAO ESP32S3 Sense) fasta IP-adress. Utan den skickas notisen utan bild."""
+    camera_key: bytes | None = field(default=None, repr=False)
+    """Nyckeln till kamerans krypterade ESPHome-API, samma som i firmware/secrets.yaml."""
+    speaker_host: str | None = field(default=None, repr=False)
+    """Google Home-högtalarens fasta IP-adress. Utan den spelas inget ljud."""
+    speaker_volume: int = DEFAULT_SPEAKER_VOLUME
+    """Volymen i procent (0–100) som dingdong spelas med. Högtalarens volym återställs sedan."""
+    media_host: str | None = field(default=None, repr=False)
+    """Datorns adress som högtalaren hämtar ljudet från. Utan den räknas den ut."""
+    sound_file: Path | None = None
+    """Ljudet som spelas. Utan det används dingdong.mp3 som följer med."""
+    lamp: str | None = field(default=None, repr=False)
+    """Lampans namn i Zigbee2MQTT. Utan det tänds ingen lampa."""
+
+    def __post_init__(self) -> None:
+        if not NTFY_TOPIC.match(self.ntfy_topic):
+            raise ValueError(
+                "DOORBELL_NTFY_TOPIC i .env får bara innehålla a–z, A–Z, 0–9, - och _ "
+                "(högst 64 tecken)"
+            )
+        if self.ntfy_token is None and len(self.ntfy_topic) < MIN_OPEN_NTFY_TOPIC:
+            raise ValueError(
+                f"DOORBELL_NTFY_TOPIC i .env är för kort (minst {MIN_OPEN_NTFY_TOPIC} tecken "
+                "utan DOORBELL_NTFY_TOKEN): den som gissar ämnet ser stillbilderna. "
+                "Skapa ett med: openssl rand -hex 16"
+            )
+        if not _secure_url(self.ntfy_url):
+            raise ValueError(
+                "DOORBELL_NTFY_URL i .env ska börja med https:// "
+                "(http:// går bara till en ntfy-server i hemnätet)"
+            )
+        if (self.camera_host is None) != (self.camera_key is None):
+            raise ValueError(
+                "DOORBELL_CAMERA_HOST och DOORBELL_CAMERA_KEY i .env ska fyllas i tillsammans"
+            )
+        for name, host in (
+            ("DOORBELL_CAMERA_HOST", self.camera_host),
+            ("DOORBELL_SPEAKER_HOST", self.speaker_host),
+            ("DOORBELL_MEDIA_HOST", self.media_host),
+        ):
+            if host is not None:
+                _parse_ip(name, host)
+        if not 0 <= self.speaker_volume <= 100:
+            raise ValueError("DOORBELL_SPEAKER_VOLUME i .env ska vara 0–100")
+        if self.lamp is not None and (
+            any(char in self.lamp for char in "+#\0") or self.lamp.startswith("bridge")
+        ):
+            raise ValueError("DOORBELL_LAMP i .env ska vara lampans namn i Zigbee2MQTT")
 
 
 @dataclass(frozen=True)
@@ -69,6 +148,8 @@ class Settings:
     """Hur länge historiken sparas med full upplösning innan den bara finns nedsamplad."""
     history_keep: timedelta | None = None
     """Hur länge historiken sparas över huvud taget, eller None för utan tidsgräns."""
+    doorbell: DoorbellSettings | None = None
+    """Dörrklockan (se doorbell.py). Utan den är dörrklockan avstängd."""
 
     def __post_init__(self) -> None:
         if self.history_keep is not None and self.history_keep <= self.history_full_resolution:
@@ -114,6 +195,7 @@ class Settings:
             core_database_password=os.environ.get("HOMECONTROL_CORE_DATABASE_PASSWORD") or None,
             esphome_secret=os.environ.get("HOMECONTROL_ESPHOME_SECRET", "").strip() or None,
             mqtt=_mqtt_from_env(),
+            doorbell=_doorbell_from_env(),
         )
 
 
@@ -178,3 +260,73 @@ def _mqtt_from_env() -> MqttSettings | None:
         username=os.environ.get("HOMECONTROL_MQTT_USER", "").strip() or None,
         password=os.environ.get("HOMECONTROL_MQTT_PASSWORD") or None,
     )
+
+
+def _env(name: str) -> str | None:
+    return os.environ.get(name, "").strip() or None
+
+
+def _doorbell_from_env() -> DoorbellSettings | None:
+    """Dörrklockan är påslagen bara när den har ett ämne i ntfy att skicka notiser till."""
+    topic = _env("HOMECONTROL_DOORBELL_NTFY_TOPIC")
+    if topic is None:
+        return None
+    volume = _env("HOMECONTROL_DOORBELL_SPEAKER_VOLUME")
+    key = _env("HOMECONTROL_DOORBELL_CAMERA_KEY")
+    sound = _env("HOMECONTROL_DOORBELL_SOUND_FILE")
+    try:
+        speaker_volume = DEFAULT_SPEAKER_VOLUME if volume is None else int(volume)
+    except ValueError:
+        raise ValueError(
+            f"DOORBELL_SPEAKER_VOLUME i .env ska vara ett tal 0–100 (inte {volume!r})"
+        ) from None
+    return DoorbellSettings(
+        ntfy_topic=topic,
+        ntfy_url=(_env("HOMECONTROL_DOORBELL_NTFY_URL") or DEFAULT_NTFY_URL).rstrip("/"),
+        ntfy_token=_env("HOMECONTROL_DOORBELL_NTFY_TOKEN"),
+        camera_host=_env("HOMECONTROL_DOORBELL_CAMERA_HOST"),
+        camera_key=None if key is None else _parse_api_key(key),
+        speaker_host=_env("HOMECONTROL_DOORBELL_SPEAKER_HOST"),
+        speaker_volume=speaker_volume,
+        media_host=_env("HOMECONTROL_DOORBELL_MEDIA_HOST"),
+        sound_file=None if sound is None else Path(sound),
+        lamp=_env("HOMECONTROL_DOORBELL_LAMP"),
+    )
+
+
+def _parse_api_key(text: str) -> bytes:
+    try:
+        key = base64.b64decode(text, validate=True)
+    except binascii.Error, ValueError:
+        key = b""
+    if len(key) != DOORBELL_API_KEY_BYTES:
+        raise ValueError(
+            "DOORBELL_CAMERA_KEY i .env ska vara 32 byte i base64. "
+            "Skapa en med: openssl rand -base64 32"
+        )
+    return key
+
+
+def _parse_ip(name: str, text: str) -> None:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        raise ValueError(
+            f"{name} i .env ska vara en IP-adress, till exempel 192.168.1.30"
+        ) from None
+
+
+def _secure_url(url: str) -> bool:
+    """https, eller http till en adress i hemnätet (där inget går ut på internet)."""
+    parts = urlsplit(url)
+    if parts.scheme == "https":
+        return bool(parts.hostname)
+    if parts.scheme != "http" or parts.hostname is None:
+        return False
+    if parts.hostname == "localhost" or parts.hostname.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(parts.hostname)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback

@@ -19,6 +19,19 @@ topic write zigbee2mqtt/+/+/get
 topic write zigbee2mqtt/+/+/+/set
 topic write zigbee2mqtt/+/+/+/get
 topic write zigbee2mqtt/bridge/request/group/#
+# Dörrklockan (valfri): kärnan läser ringen och radarn vid dörren. Den får
+# också skriva ett ring, för testkommandot homecontrol ringa.
+topic read dorr/ringer
+topic read dorr/radar
+topic write dorr/ringer
+
+# Dörrklockan (XIAO ESP32S3 Sense): får bara skriva ringen, radarn vid
+# dörren och sin egen status. Den finns bara när MQTT_DOORBELL_PASSWORD är
+# satt i .env (se entrypoint.sh).
+user dorrklocka
+topic write dorr/ringer
+topic write dorr/radar
+topic write dorr/klocka/#
 
 # Hälsokontrollen i compose.yaml: bara brokerns drifttid.
 user healthcheck

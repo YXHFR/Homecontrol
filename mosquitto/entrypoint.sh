@@ -1,6 +1,7 @@
 #!/bin/sh
 # Skapar Mosquittos lösenordsfil och behörighetsfil och startar sedan
-# brokern. Kärnan och Zigbee2MQTT har var sin användare (se acl).
+# brokern. Kärnan och Zigbee2MQTT har var sin användare (se acl), och
+# dörrklockan får en egen när MQTT_DOORBELL_PASSWORD är satt.
 # Lösenorden hamnar bara hashade på disk.
 set -eu
 
@@ -20,6 +21,10 @@ printf -- '-u healthcheck\n-P %s\n' "$healthcheck_password" > /root/.config/mosq
 
 printf 'homecontrol_core:%s\nzigbee2mqtt:%s\nhealthcheck:%s\n' \
     "$MQTT_CORE_PASSWORD" "$MQTT_ZIGBEE2MQTT_PASSWORD" "$healthcheck_password" > "$passwd_file"
+# Utan lösenord finns ingen dörrklocka, och ingen kan logga in som den.
+if [ -n "${MQTT_DOORBELL_PASSWORD:-}" ]; then
+    printf 'dorrklocka:%s\n' "$MQTT_DOORBELL_PASSWORD" >> "$passwd_file"
+fi
 mosquitto_passwd -U "$passwd_file"
 cp /homecontrol/acl "$acl_file"
 chown mosquitto:mosquitto "$passwd_file" "$acl_file"

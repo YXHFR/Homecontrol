@@ -1074,3 +1074,134 @@ def test_turning_off_by_remote_just_after_the_grace_is_a_change_from_outside() -
     harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "OFF"}')
 
     assert harness.take_reports()[-1].external
+
+
+# --- Dörrlampan: tänd en stund utanför automatiken ---
+
+HUE_NAME = "0x0017880100000c01"
+"""Hue-lampan heter som sin adress i Zigbee2MQTT och är inte placerad på kartan."""
+
+
+def tick_until(harness: Harness, until: float) -> None:
+    while harness.now < until:
+        harness.now += 1
+        harness.output.tick()
+
+
+def test_an_unplaced_lamp_is_lit_for_a_while_and_gets_its_state_back() -> None:
+    harness = started()
+    harness.output.handle(f"zigbee2mqtt/{HUE_NAME}", b'{"state": "OFF", "brightness": 120}')
+
+    harness.output.light_for(HUE_NAME, 30)
+    lit = harness.take()
+    harness.output.handle(f"zigbee2mqtt/{HUE_NAME}", b'{"state": "ON", "brightness": 254}')
+    tick_until(harness, 29)
+    assert harness.take() == []
+    tick_until(harness, 30)
+
+    assert lit == [
+        (f"zigbee2mqtt/{HUE_NAME}/set", {"state": "ON", "brightness": 254, "transition": 1.0})
+    ]
+    assert harness.take() == [(f"zigbee2mqtt/{HUE_NAME}/set", {"state": "OFF", "transition": 1.0})]
+    assert harness.take_reports() == []
+
+
+def test_a_lamp_whose_state_is_unknown_is_turned_off_afterwards() -> None:
+    harness = Harness()
+    harness.receive("start")
+    harness.take()
+
+    harness.output.light_for(HUE_NAME, 30)
+    harness.take()
+    tick_until(harness, 30)
+
+    assert harness.take() == [(f"zigbee2mqtt/{HUE_NAME}/set", {"state": "OFF", "transition": 1.0})]
+
+
+def test_a_lamp_changed_while_lit_is_left_alone() -> None:
+    harness = started()
+    harness.output.light_for(HUE_NAME, 30)
+    harness.take()
+
+    harness.now = 10
+    harness.output.handle(f"zigbee2mqtt/{HUE_NAME}", b'{"state": "OFF", "brightness": 254}')
+    tick_until(harness, 31)
+
+    assert harness.take() == []
+
+
+def test_lighting_again_while_lit_keeps_it_lit_longer() -> None:
+    harness = started()
+    harness.output.light_for(HUE_NAME, 30)
+    harness.take()
+
+    harness.now = 20
+    harness.output.light_for(HUE_NAME, 30)
+    tick_until(harness, 49)
+    assert harness.take() == []
+    tick_until(harness, 50)
+
+    assert len(harness.take()) == 1
+
+
+def test_a_placed_lamp_is_not_controlled_or_reported_while_lit() -> None:
+    harness = started()
+
+    harness.output.light_for("fonsterlampa", 30)
+    harness.take()
+    harness.send(off(FONSTERLAMPA))
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+
+    assert harness.take() == []
+    assert harness.take_reports() == []
+
+
+def test_a_placed_lamp_gets_its_state_back_without_counting_as_manual_control() -> None:
+    harness = started()
+    # Kärnan har tänt lampan till hälften, och lampan har svarat.
+    harness.send(on(FONSTERLAMPA, 50))
+    harness.take()
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 127}')
+    harness.take_reports()
+
+    harness.output.light_for("fonsterlampa", 30)
+    harness.take()
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+    tick_until(harness, 30)
+    restore = harness.take()
+    # Lampan svarar på återställningen, först med ett eko av det tända läget.
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 127}')
+
+    assert restore == [
+        ("zigbee2mqtt/fonsterlampa/set", {"state": "ON", "brightness": 127, "transition": 1.0})
+    ]
+    reports = harness.take_reports()
+    # Lampan räknas aldrig som borta eller ändrad för hand.
+    assert all(report.on is not None and not report.external for report in reports)
+    assert reports[-1] == LampStateReported(FONSTERLAMPA, True, 50)
+    harness.send(off(FONSTERLAMPA))
+    assert harness.take()[0][0] == "zigbee2mqtt/fonsterlampa/set"
+
+
+def test_a_lamp_that_is_not_in_zigbee2mqtt_is_not_lit() -> None:
+    harness = started()
+
+    harness.output.light_for("finns-inte", 30)
+
+    assert harness.take() == []
+
+
+def test_a_command_waiting_for_an_answer_when_the_lamp_is_lit_does_not_make_it_gone() -> None:
+    harness = started()
+    harness.send(on(FONSTERLAMPA, 50))
+    harness.take()
+
+    # Det ringer innan lampan har svarat, och svaren under tiden räknas inte.
+    harness.output.light_for("fonsterlampa", 30)
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+    tick_until(harness, 30)
+
+    sent = harness.take()
+    assert not any(topic.endswith("/get") for topic, _ in sent)
+    assert all(report.on is not None for report in harness.take_reports())

@@ -33,6 +33,10 @@ kartredigeraren (steg 4). Fler rum, Wi-Fi-CSI som andra källa och egna
 kretskort läggs till igen när det här fungerar: lägg då till rummen i
 `firmware/rooms.txt` och följ resten av guiden som den står.
 
+Dörrklockan (se [Tillägg: dörrklocka](#tillägg-dörrklocka)) är ett
+fristående tillägg. Den är avstängd tills den är inställd i `.env`, och
+rummet fungerar precis likadant utan den.
+
 ## Installera steg för steg
 
 Guiden kräver ingen programmering. Du skriver av några kommandon i ett
@@ -491,6 +495,151 @@ Tänk på:
 - Har du satt `BIND_ADDRESS` till datorns adress i hemnätet når du inte
   Homecontrol via Tailscale. Se **Vem som når Homecontrol**.
 
+## Tillägg: dörrklocka
+
+Ett valfritt tillägg: en dörrklocka med kamera. Den är **avstängd** så länge
+`DOORBELL_NTFY_TOPIC` är tom i `.env`, och resten av Homecontrol fungerar
+precis som vanligt utan den.
+
+När någon trycker på knappen
+
+- får din telefon en **push-notis med en stillbild** från dörren (via
+  [ntfy](https://ntfy.sh)),
+- spelar **Google Home-högtalaren** ett dingdong,
+- **tänds lampan** (till exempel KAJPLATS-lampan) i 30 sekunder och får
+  sedan tillbaka sitt tidigare läge,
+- visar sidan **Dörren** i Homecontrol kameran i **2 minuter**.
+
+### Integritet
+
+- **Inget filmas och inget sparas utan ring.** Kameran tar bara bilder när
+  Homecontrol ber om det, och Homecontrol gör det bara efter ett ring eller
+  när någon har tryckt på **Visa dörren**, och bara i 2 minuter. Sedan
+  kopplar Homecontrol ner kameran.
+- **Stillbilden raderas** så fort notisen har skickats. Den finns bara i
+  minnet och skrivs aldrig till disk.
+- **Strömmen går bara genom Homecontrol.** Kameran har ingen egen
+  webbserver; den svarar bara på Homecontrols krypterade anslutning (med
+  nyckeln i `.env`). Sidan Dörren har samma kontroll av adress och avsändare
+  som resten av Homecontrol, så en främmande webbsida kan inte öppna den.
+  Alla som når Homecontrol (se **Vem som når Homecontrol**) kan däremot
+  trycka på Visa dörren, även gäster på samma Wi-Fi. Ett gästnätverk i
+  routern hindrar det.
+- **Radarn vid dörren ger bara en textnotis** och startar aldrig kameran.
+  En radar (eller annan närvarogivare) som publicerar `ON` på `dorr/radar`
+  ger högst en notis var femte minut.
+- Mikrofonen på kortet används inte.
+
+### Vad som skickas var
+
+| Vad | Från | Till | Sparas |
+| --- | --- | --- | --- |
+| Ringet (`dorr/ringer`, ett id per tryck) | Dörrklockan | Mosquitto på datorn | Nej |
+| Stillbilden | Kameran, över krypterat API | Homecontrol, sedan ntfy | Hos ntfy, se nedan. Aldrig hos Homecontrol. |
+| Notisen (text och stillbild) | Homecontrol | ntfy-servern (`DOORBELL_NTFY_URL`), sedan din telefon | ntfy.sh sparar meddelanden och bilagor i några timmar enligt sina villkor. Med en egen ntfy-server bestämmer du själv. |
+| Kamerans ström | Kameran, över krypterat API | Homecontrol, sedan webbläsaren | Nej |
+| Dingdong (mp3) | Homecontrol (`/api/dorr/dingdong.mp3`) | Google Home-högtalaren | Nej |
+| Radarnotisen (bara text: att någon är vid dörren) | Homecontrol | ntfy-servern, sedan din telefon | Som notisen ovan. |
+| Kommandon till lampan (tänd och släck) | Homecontrol | Zigbee2MQTT, sedan lampan | Nej |
+
+Den som känner till ntfy-ämnet kan läsa notiserna och se stillbilden.
+Därför måste ämnet vara minst 32 tecken långt och slumpat, om du inte
+använder en ntfy-server med inloggning (`DOORBELL_NTFY_TOKEN`). Notiserna
+går krypterat (https) till ntfy-servern; vanlig http godtas bara till en
+egen server i hemnätet. Homecontrols egna loggrader nämner aldrig ämnet,
+nycklar eller adresser.
+
+### Det här behövs
+
+| Del | Kommentar |
+| --- | --- |
+| Seeed XIAO ESP32S3 Sense | Kortet med kameran (OV2640 eller OV3660). |
+| En tryckknapp | Kopplas mellan **D1** (GPIO2) och **GND**. Kortets inbyggda pullup används, så inget motstånd behövs. |
+| USB-C-kabel och 5 V-matning | För installationen och sedan som ström. |
+| Google Home-högtalare (valfri) | Med en fast IP-adress i routern. |
+| ntfy-appen | På telefonen ([Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy) eller [iPhone](https://apps.apple.com/app/ntfy/id1625396347)). |
+
+### Installera dörrklockan
+
+1. **Fasta adresser.** Ge dörrklockan och högtalaren var sin fast IP-adress
+   i routern (ofta "DHCP-reservation" eller "statisk IP").
+2. **Hemligheter.** Skapa ett ntfy-ämne, ett MQTT-lösenord och kamerans
+   nyckel:
+
+   ```sh
+   openssl rand -hex 16       # ntfy-ämnet
+   openssl rand -hex 24       # MQTT-lösenordet
+   openssl rand -base64 32    # kamerans nyckel
+   ```
+
+3. **Fyll i `.env`** (alla rader finns i `.env.example`):
+
+   | Inställning | Vad |
+   | --- | --- |
+   | `DOORBELL_NTFY_TOPIC` | ntfy-ämnet. Slår på dörrklockan. |
+   | `DOORBELL_NTFY_URL` | ntfy-servern. Standard `https://ntfy.sh`. |
+   | `DOORBELL_NTFY_TOKEN` | Inloggning hos ntfy, om ämnet är skyddat. |
+   | `MQTT_DOORBELL_PASSWORD` | Dörrklockans MQTT-lösenord. |
+   | `DOORBELL_CAMERA_HOST` | Dörrklockans fasta IP-adress. |
+   | `DOORBELL_CAMERA_KEY` | Kamerans nyckel. Utan adress och nyckel skickas notisen utan bild. |
+   | `DOORBELL_SPEAKER_HOST` | Högtalarens fasta IP-adress. Utan den spelas inget ljud. |
+   | `DOORBELL_SPEAKER_VOLUME` | Volymen för dingdong, 0–100 (standard 50). Högtalaren får sedan tillbaka sin volym. |
+   | `DOORBELL_MEDIA_HOST` | Datorns adress som högtalaren hämtar ljudet från. Räknas ut av sig själv. |
+   | `DOORBELL_LAMP` | Lampans namn i Zigbee2MQTT, till exempel `KAJPLATS hall`. Utan det tänds ingen lampa. |
+   | `DOORBELL_SOUND_FILE` | Ett eget ljud i stället för det som följer med (se nedan). |
+
+4. **Bygg och installera firmware** på kortet med ESPHome (se
+   [firmware/README.md](firmware/README.md#dörrklockan)). Hemligheterna
+   står i `firmware/secrets.yaml`, med samma MQTT-lösenord och nyckel som i
+   `.env`.
+5. **Starta om Homecontrol** med `docker compose up -d`. Loggen säger vilka
+   delar som är på:
+
+   ```sh
+   docker compose logs core | grep Dörrklockan
+   ```
+
+6. **Prenumerera** på ämnet i ntfy-appen på telefonen (samma server och ämne
+   som i `.env`).
+7. **Prova utan att gå till dörren:**
+
+   ```sh
+   docker compose exec core homecontrol ringa
+   ```
+
+   Det skickar ett ring precis som knappen gör. Du får en notis (utan bild
+   om kameran inte är inkopplad än), högtalaren spelar och lampan tänds.
+   Öppna sidan **Dörren** i Homecontrol för att se kameran.
+
+Lampan behöver inte vara placerad på kartan. Är den det (som rummets
+KAJPLATS-lampa) styr automatiken inte lampan under de 30 sekunderna. Sedan
+får lampan tillbaka sitt läge och automatiken tar över igen. Att dörrklockan
+tände lampan räknas inte som att någon har styrt den för hand. Ändrar någon
+lampan medan den lyser får den vara som den är.
+
+**Eget ljud.** Homecontrol har ett eget, genererat dingdong
+([`scripts/make_dingdong.py`](scripts/make_dingdong.py)). Vill du ha ett
+annat ljud, lägg mp3-filen i en mapp och montera den i kärnan med en
+`compose.override.yaml` bredvid `compose.yaml`:
+
+```yaml
+services:
+  core:
+    volumes:
+      - ./ljud:/app/ljud:ro
+```
+
+och skriv `DOORBELL_SOUND_FILE=/app/ljud/min-klocka.mp3` i `.env`. Använd
+bara ljud som du har rätt att använda.
+
+**Bra att veta.**
+
+- Högtalaren slutar spela det den spelade när dingdong kommer.
+- Homecontrol måste lyssna på hemnätet (`BIND_ADDRESS` får inte vara
+  `127.0.0.1`), annars når högtalaren inte ljudet.
+- Tryck tätare än 5 sekunder räknas som samma ring, och samma tryck räknas
+  bara en gång även om MQTT levererar det två gånger.
+
 ## Så fungerar det
 
 ### Närvaro
@@ -764,6 +913,9 @@ Blir en del angripen eller går fel kommer den inte åt resten.
 | `MQTT_CORE_PASSWORD` | Kärnan (MQTT-användaren `homecontrol_core`) | Läsa allt från Zigbee2MQTT och tända, släcka och gruppera lamporna. Inte släppa in eller ta bort enheter eller ändra Zigbee2MQTT:s inställningar. |
 | `MQTT_ZIGBEE2MQTT_PASSWORD` | Zigbee2MQTT (MQTT-användaren `zigbee2mqtt`) | Läsa och skriva sina egna ämnen (`zigbee2mqtt/...`). |
 | `ZIGBEE2MQTT_AUTH_TOKEN` | Du, i webbläsaren | Logga in på Zigbee2MQTT:s webbsida. |
+| `MQTT_DOORBELL_PASSWORD` | Dörrklockan (MQTT-användaren `dorrklocka`, valfri) | Skriva på dörrens ämnen (`dorr/...`), inget annat. Utan lösenord finns användaren inte. |
+| `DOORBELL_CAMERA_KEY` | Kärnan och dörrklockan | Se kameran över det krypterade API:t och uppdatera dörrklockans firmware. |
+| `DOORBELL_NTFY_TOPIC` | Kärnan och din telefon | Skicka och läsa dörrklockans notiser. |
 
 - **Databasen:** `db-setup` skapar och uppdaterar tabellerna, ställer in
   hur länge historiken sparas och skapar kärnans roll om den saknas. Först
@@ -881,7 +1033,7 @@ Stoppa Homecontrol med `docker compose down`. Inget sparat försvinner;
 | ------------ | ---------------------------------------------------------- |
 | `core/`      | Kärnan i Python. Svarar på `/health` och serverar webbgränssnittet. |
 | `web/`       | Webbgränssnittet i TypeScript.                             |
-| `firmware/` | ESPHome-firmware för rumskorten och webbinstalleraren, se [firmware/README.md](firmware/README.md). |
+| `firmware/` | ESPHome-firmware för rumskorten, dörrklockan och webbinstalleraren, se [firmware/README.md](firmware/README.md). |
 | `mosquitto/` | Inställningar för MQTT-brokern, med användarnas rättigheter (`acl`). |
 | `postgres/`  | Vilka som får logga in i databasen och hur (`pg_hba.conf`). |
 | `scripts/`   | Hjälpskript, t.ex. för att klassa ändringar inför granskning. |

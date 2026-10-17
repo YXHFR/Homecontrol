@@ -1,0 +1,144 @@
+# Homecontrol – dörrklockan: Seeed XIAO ESP32S3 Sense med kamera och en knapp.
+#
+# Ett tryck på knappen publicerar dorr/ringer på MQTT. Kärnan hämtar då en
+# stillbild, skickar en notis, spelar dingdong och tänder dörrlampan (se
+# core/src/homecontrol/doorbell.py och README i repots rot).
+#
+# Integritet:
+#   - Kameran tar bara bilder när kärnan ber om det, över det krypterade
+#     API:t. Ingen webbserver, ingen bild i viloläge (idle_framerate: 0).
+#   - Mikrofonen på kortet används inte.
+#
+# Hemligheterna står i firmware/secrets.yaml, som är gitignorerad. Kopiera
+# dorrklocka-secrets.example.yaml dit och fyll i (se firmware/README.md).
+#
+# Bygg och installera över USB:
+#   esphome run firmware/dorrklocka.yaml
+#
+# Konfigurationen är Apache-2.0. Den byggda firmware-binären innehåller
+# ESPHome:s C++-kod och blir därför GPL-3.0 (se firmware/README.md).
+
+substitutions:
+  # Knappen, mellan stiftet och GND (D1 på XIAO). Kortets interna pullup används.
+  button_pin: GPIO2
+
+esphome:
+  # Kärnan ansluter bara till en enhet med just det här namnet.
+  name: homecontrol-dorr
+  friendly_name: Homecontrol dörrklocka
+  min_version: 2026.9.1
+  on_boot:
+    then:
+      # Ett slumptal per start, så att tryckens id inte upprepas efter en omstart.
+      - lambda: id(boot_id) = random_uint32();
+
+esp32:
+  variant: ESP32S3
+  board: seeed_xiao_esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      # Bluetooth används inte.
+      CONFIG_BT_ENABLED: n
+  toolchain: esp-idf
+
+# Kameran behöver kortets PSRAM (8 MB, octal).
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: INFO
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Ingen egen åtkomstpunkt eller captive portal: den tar emot firmware utan
+  # lösenord och startar av sig själv när Wi-Fi försvinner.
+
+api:
+  encryption:
+    key: !secret api_key
+  # Kärnan ansluter bara medan den behöver en bild, så kortet ska inte
+  # starta om när ingen är ansluten (standard är efter 15 minuter).
+  reboot_timeout: 0s
+
+# Uppdatering över nätverket kräver samma nyckel som API:t.
+ota:
+  - platform: esphome
+    encryption: {}
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: dorrklocka
+  password: !secret mqtt_password
+  client_id: homecontrol-dorr
+  # Allt dörrklockan skickar ligger under dorr/ (se mosquitto/acl). Ingen
+  # logg och inga meddelanden till Home Assistant.
+  topic_prefix: dorr/klocka
+  log_topic: null
+  discovery: false
+  discover_ip: false
+
+globals:
+  - id: boot_id
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  - id: press_count
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+
+binary_sensor:
+  - platform: gpio
+    id: button
+    pin:
+      number: ${button_pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    # Avstudsning: kontakten ska vara sluten (och sedan öppen) i 50 ms
+    # innan det räknas. Kärnan slår dessutom ihop tryck tätare än 5 s.
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    on_press:
+      - lambda: id(press_count) += 1;
+      - mqtt.publish:
+          topic: dorr/ringer
+          qos: 1
+          retain: false
+          # Varje tryck har ett eget id, så att ett meddelande som MQTT
+          # levererar två gånger bara ringer en gång.
+          payload: !lambda |-
+            return str_sprintf("{\"tryck\":\"%08x-%u\"}", id(boot_id), id(press_count));
+
+# Kameran på XIAO ESP32S3 Sense (OV2640 eller OV3660), med Seeeds stift.
+i2c:
+  id: camera_i2c
+  sda: GPIO40
+  scl: GPIO39
+
+esp32_camera:
+  name: Dörren
+  external_clock:
+    pin: GPIO10
+    frequency: 20MHz
+  i2c_id: camera_i2c
+  data_pins: [GPIO15, GPIO17, GPIO18, GPIO16, GPIO14, GPIO12, GPIO11, GPIO48]
+  vsync_pin: GPIO38
+  href_pin: GPIO47
+  pixel_clock_pin: GPIO13
+  resolution: 800x600
+  jpeg_quality: 12
+  max_framerate: 10 fps
+  # Inga bilder när ingen ber om dem.
+  idle_framerate: 0 fps
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s

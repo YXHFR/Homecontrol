@@ -7,6 +7,8 @@
     homecontrol importera --exempelhem
     homecontrol förbered-databasen   skapar och uppdaterar tabellerna och
                                      kärnans databasroll, och avslutas
+    homecontrol ringa                låtsas att någon ringer på dörrklockan
+                                     (som ett tryck på knappen, se doorbell.py)
 
 Export och import kräver databasen (HOMECONTROL_DATABASE). Efter en import
 startas kärnan om för att läsa in det nya hemmet.
@@ -23,6 +25,7 @@ Med HOMECONTROL_HOME_COPY har kärnan en lokal kopia av hemmet och startar
 """
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
@@ -35,8 +38,9 @@ import uvicorn
 
 from homecontrol import history, store
 from homecontrol.app import create_app
-from homecontrol.config import Settings
+from homecontrol.config import DoorbellSettings, Settings
 from homecontrol.databaselink import DatabaseLink, Fetch
+from homecontrol.doorbell import DEFAULT_SOUND, Doorbell, simulate_ring
 from homecontrol.editor import HomeStore
 from homecontrol.esphome import MIN_SECRET_LENGTH
 from homecontrol.home import Home
@@ -69,6 +73,9 @@ def main(argv: list[str] | None = None) -> None:
         "förbered-databasen",
         help="skapa och uppdatera tabellerna och kärnans databasroll (som databasens ägare)",
     )
+    commands.add_parser(
+        "ringa", help="låtsas att någon ringer på dörrklockan, för att prova den utan hårdvara"
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -78,6 +85,9 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(str(error))
     if args.command is None:
         serve(settings)
+        return
+    if args.command == "ringa":
+        ring(settings)
         return
     if settings.database is None:
         sys.exit("HOMECONTROL_DATABASE är inte satt, så det finns inget sparat hem.")
@@ -103,6 +113,15 @@ def serve(settings: Settings) -> None:
     if secret is None:
         logger.info("ESPHOME_SECRET är inte satt: inga rumskort ansluts")
     home, home_store, database = open_home(settings)
+    doorbell, doorbell_mqtt = None, None
+    if settings.doorbell is not None:
+        if settings.mqtt is None:
+            logger.warning(
+                "Dörrklockan behöver MQTT-brokern (HOMECONTROL_MQTT_HOST); den är avstängd"
+            )
+        else:
+            doorbell = build_doorbell(settings.doorbell, settings.port)
+            doorbell_mqtt = mqtt_connect(settings.mqtt, "homecontrol-dorr")
     uvicorn.run(
         create_app(
             settings.web_dir,
@@ -113,12 +132,61 @@ def serve(settings: Settings) -> None:
             history=prepare_history(settings),
             esphome_secret=secret,
             mqtt=None if settings.mqtt is None else mqtt_connect(settings.mqtt),
+            doorbell=doorbell,
+            doorbell_mqtt=doorbell_mqtt,
         ),
         host=settings.host,
         port=settings.port,
         # Livevyns meddelanden är små; större meddelanden avvisas.
         ws_max_size=64 * 1024,
     )
+
+
+def build_doorbell(settings: DoorbellSettings, port: int) -> Doorbell:
+    """Dörrklockan med de delar som är inställda. Notisen finns alltid; resten är valfritt."""
+    # Kopplingarna (och pychromecast) laddas bara när dörrklockan är inställd.
+    from homecontrol.doorbell_devices import (
+        ChromecastSpeaker,
+        EsphomeCamera,
+        NtfyNotifier,
+    )
+
+    if settings.sound_file is not None and not settings.sound_file.is_file():
+        sys.exit(f"DOORBELL_SOUND_FILE i .env: hittar inte filen {settings.sound_file}")
+    camera = None
+    if settings.camera_host is not None and settings.camera_key is not None:
+        camera = EsphomeCamera(settings.camera_host, settings.camera_key)
+    speaker = None
+    if settings.speaker_host is not None:
+        speaker = ChromecastSpeaker(
+            settings.speaker_host, settings.speaker_volume, port, settings.media_host
+        )
+    logger.info(
+        "Dörrklockan är på: notis%s%s%s",
+        " med bild" if camera is not None else " utan bild (ingen kamera inställd)",
+        ", ljud på högtalaren" if speaker is not None else "",
+        ", dörrlampan" if settings.lamp is not None else "",
+    )
+    return Doorbell(
+        NtfyNotifier(settings.ntfy_url, settings.ntfy_topic, settings.ntfy_token),
+        camera=camera,
+        speaker=speaker,
+        lamp=settings.lamp,
+        sound=DEFAULT_SOUND if settings.sound_file is None else settings.sound_file,
+    )
+
+
+def ring(settings: Settings) -> None:
+    """Publicerar ett ring på MQTT som om någon tryckte på dörrklockan."""
+    if settings.doorbell is None:
+        sys.exit("Dörrklockan är inte inställd: fyll i DOORBELL_NTFY_TOPIC i .env (se README).")
+    if settings.mqtt is None:
+        sys.exit("HOMECONTROL_MQTT_HOST är inte satt, så ringet kan inte skickas.")
+    try:
+        asyncio.run(simulate_ring(mqtt_connect(settings.mqtt, "homecontrol-ringa")))
+    except ConnectionError as error:
+        sys.exit(f"Når inte MQTT-brokern: {error}")
+    logger.info("Ringde på dörrklockan. Kärnan skickar notisen om en stund.")
 
 
 def prepare_database_for_core(database: str, settings: Settings) -> None:

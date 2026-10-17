@@ -136,12 +136,20 @@
         font-weight: 600;
         text-decoration: none;
       }
+      .door-stream {
+        display: block;
+        width: 100%;
+        max-width: 800px;
+        margin-top: 12px;
+        border-radius: 8px;
+      }
     </style>
   </head>
   <body>
     <nav class="pages" aria-label="Sidor">
       <a href="#" data-page="live">Livevy</a>
       <a href="#redigera" data-page="editor">Kartredigerare</a>
+      <a href="#dorren" data-page="door" hidden>Dörren</a>
     </nav>
     <main id="app"></main>
     <script type="module" src="/src/main.ts"></script>
