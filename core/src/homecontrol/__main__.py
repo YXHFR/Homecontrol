@@ -179,7 +179,7 @@ def build_doorbell(settings: DoorbellSettings, port: int) -> Doorbell:
 def ring(settings: Settings) -> None:
     """Publicerar ett ring på MQTT som om någon tryckte på dörrklockan."""
     if settings.doorbell is None:
-        sys.exit("Dörrklockan är inte inställd: fyll i DOORBELL_NTFY_TOPIC i .env (se README).")
+        sys.exit("Dörrklockan är inte inställd: fyll i DOORBELL_NTFY_TOPIC i .env.")
     if settings.mqtt is None:
         sys.exit("HOMECONTROL_MQTT_HOST är inte satt, så ringet kan inte skickas.")
     try:

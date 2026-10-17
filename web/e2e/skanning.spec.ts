@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { openEditor, savedHome, waitUntilSaved } from "./helpers";
 
-/** Den påhittade tvåan som också README pekar på. */
+/** Den påhittade tvåan. */
 const EXAMPLE_SCAN = fileURLToPath(new URL("../exempel/roomplan-exempel.json", import.meta.url));
 
 test("en iPhone-skanning blir en ny våning med rum, dörröppningar, fönster och möbler", async ({

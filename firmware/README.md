@@ -49,8 +49,7 @@ Stiften kan ändras med `substitutions` överst i `homecontrol.yaml` och
 
 1. Öppna webbinstalleraren i Chrome eller Edge på en dator. Den är inte
    publicerad på webben än: den byggs av workflowen Firmware och sparas som
-   artefakten `webbinstallerare`. Hur du hämtar och öppnar den står i
-   [README i repots rot](../README.md#steg-6-installera-rumskorten).
+   artefakten `webbinstallerare` under workflowen i fliken Actions.
 2. Välj rum. Kortet får namnet `homecontrol-<rum>`. Välj också radarn som
    sitter på kortet: LD2450 eller LD2461. Med fel radar svarar kortets
    radar inte.
@@ -71,7 +70,7 @@ det tar kortet bara emot krypterade anslutningar med just den nyckeln.
 
 Kärnan hittar nya kort själv (mDNS). Ett nytt kort syns som **ny enhet** i
 hälsoraden och i listan **Enheter** i rummets kort. Tryck på det och sedan
-på **Placera på kartan** i dess kort (se README i repots rot); först då
+på **Placera på kartan** i dess kort; först då
 ansluter kärnan och ger kortet dess nyckel. Nyckeln räknas fram ur `ESPHOME_SECRET` i `.env`
 och kortets namn, så den sparas ingenstans. Placera därför kortet så snart
 det har fått Wi-Fi: innan kärnan har kopplat kortet kan vem som helst i
@@ -196,8 +195,7 @@ med LD2461, och kontrollera också att
 ## Dörrklockan
 
 [`dorrklocka.yaml`](dorrklocka.yaml) är firmware för dörrklockan, ett
-valfritt tillägg (se [Tillägg: dörrklocka](../README.md#tillägg-dörrklocka)
-i README i repots rot): en Seeed XIAO ESP32S3 Sense med kamera och en
+valfritt tillägg: en Seeed XIAO ESP32S3 Sense med kamera och en
 tryckknapp mellan D1 (GPIO2) och GND.
 
 Dörrklockan finns inte i webbinstalleraren. Den behöver hemligheter (Wi-Fi,

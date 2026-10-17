@@ -364,7 +364,7 @@ export function nodeCard(found: FoundItem, data: CardData, actions: CardActions)
       "p",
       { className: "help" },
       "Installera på ett nytt kort: det kräver en dator med Chrome eller Edge och webbinstalleraren " +
-        "(se README, steg 6). Det går inte från mobilen.",
+        "(se firmware/README.md). Det går inte från mobilen.",
     ),
   );
   return parts;
