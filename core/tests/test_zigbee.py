@@ -1074,3 +1074,42 @@ def test_turning_off_by_remote_just_after_the_grace_is_a_change_from_outside() -
     harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "OFF"}')
 
     assert harness.take_reports()[-1].external
+
+
+# --- Lampor som dörrklockan lånar ---
+
+
+def test_a_borrowed_lamp_gets_no_commands_and_its_changes_are_not_manual() -> None:
+    harness = started()
+
+    harness.output.borrow("fonsterlampa")
+    harness.send(off(FONSTERLAMPA))
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+
+    assert harness.take() == []
+    assert harness.take_reports() == []
+
+
+def test_a_lamp_given_back_is_read_again_and_its_state_is_not_an_outside_change() -> None:
+    harness = started()
+    harness.output.borrow("fonsterlampa")
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "ON", "brightness": 254}')
+
+    harness.output.give_back("fonsterlampa")
+    asked = harness.take()
+    harness.output.handle("zigbee2mqtt/fonsterlampa", b'{"state": "OFF", "brightness": 254}')
+
+    assert asked == [("zigbee2mqtt/fonsterlampa/get", {"state": "", "brightness": ""})]
+    assert harness.take_reports() == [LampStateReported(FONSTERLAMPA, False, 100, external=False)]
+    harness.send(on(FONSTERLAMPA))
+    assert harness.take()[0][0] == "zigbee2mqtt/fonsterlampa/set"
+
+
+def test_borrowing_a_lamp_that_is_not_placed_changes_nothing() -> None:
+    harness = started()
+
+    harness.output.borrow("en-annan-lampa")
+    harness.output.give_back("en-annan-lampa")
+    harness.send(on(TAKLAMPA))
+
+    assert harness.take()

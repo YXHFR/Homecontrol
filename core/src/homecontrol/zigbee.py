@@ -31,6 +31,11 @@ med `LampStateReported`.
 * **Lampprofiler.** Hur kommandot ser ut avgörs av lampans profil (se
   `Profile`), till exempel IKEA TRÅDFRI:s egenheter.
 
+* **Utlånade lampor.** Dörrklockan (se doorbell.py) kan låna en lampa en
+  stund (`ZigbeeOutput.borrow`). Under tiden skickar utgången inga kommandon
+  till den och lämnar inte dess besked till kärnan, så att blinket inte
+  räknas som manuell styrning. När lampan lämnas tillbaka läses dess läge
+  om, och kärnan räknar om vad som behövs.
 * **Styrgräns.** Varje lampa får bara ett fåtal kommandon i sekunden (se
   `LampLimit`). Ett kommando som gränsen stoppar skjuts upp och skickas från
   `tick` så fort lampan får styras igen; kommer ett nyare kommando till samma
@@ -331,8 +336,12 @@ Connect = Callable[[], AbstractAsyncContextManager[MqttConnection]]
 """Ansluter till brokern. Ger ConnectionError om det inte går."""
 
 
-def mqtt_connect(settings: MqttSettings) -> Connect:
-    """Anslutningen till den riktiga brokern med aiomqtt."""
+def mqtt_connect(settings: MqttSettings, identifier: str = "homecontrol") -> Connect:
+    """Anslutningen till den riktiga brokern med aiomqtt.
+
+    `identifier` skiljer kärnans anslutningar åt; brokern kopplar ner en
+    gammal anslutning när en ny ansluter med samma.
+    """
 
     @contextlib.asynccontextmanager
     async def connect() -> AsyncIterator[MqttConnection]:
@@ -341,7 +350,7 @@ def mqtt_connect(settings: MqttSettings) -> Connect:
             settings.port,
             username=settings.username,
             password=settings.password,
-            identifier="homecontrol",
+            identifier=identifier,
         )
         try:
             async with client:
@@ -475,6 +484,8 @@ class ZigbeeOutput:
         self._limit = LampLimit(now)
         self._held: dict[str, _Pending] = {}
         """Kommandon som styrgränsen har skjutit upp, det senaste per lampa."""
+        self._borrowed: set[str] = set()
+        """Namnen i Zigbee2MQTT på lamporna som dörrklockan har lånat."""
         self._place_lamps(home)
 
     # --- Det kärnan anropar ---
@@ -489,6 +500,9 @@ class ZigbeeOutput:
         address = ieee_address(command.lamp_id)
         device = None if self._devices is None or address is None else self._devices.get(address)
         if status is None or device is None:
+            return
+        if device.friendly_name in self._borrowed:
+            # Kärnan räknar om när lampan har lämnats tillbaka och lästs.
             return
         if not status.state_known:
             # Kärnan får lampans läge snart och räknar då om vad som behövs.
@@ -516,6 +530,25 @@ class ZigbeeOutput:
         self._place_lamps(home)
         self._sync_groups()
         self._ask_lamps()
+
+    def borrow(self, friendly_name: str) -> None:
+        """Någon annan styr lampan en stund: kärnan varken styr den eller hör vad den säger."""
+        self._borrowed.add(friendly_name)
+        address = self._names.get(friendly_name)
+        if address is not None:
+            self._pending.pop(zigbee_lamp_id(address), None)
+            self._held.pop(zigbee_lamp_id(address), None)
+
+    def give_back(self, friendly_name: str) -> None:
+        """Lampan är tillbaka. Den frågas om sitt läge, och kärnan räknar om vad som behövs."""
+        self._borrowed.discard(friendly_name)
+        address = self._names.get(friendly_name)
+        status = None if address is None else self._lamps.get(zigbee_lamp_id(address))
+        if status is not None and not status.gone:
+            status.state_known = False
+            status.asked_at = None
+            status.expected = None
+            self._ask_lamps()
 
     def lamps(self) -> list[FoundLamp]:
         """Lamporna i Zigbee-nätet, för webbgränssnittet. De oplacerade väntar på att placeras."""
@@ -772,6 +805,9 @@ class ZigbeeOutput:
     def _device_state(self, address: str, data: Mapping[str, object]) -> None:
         lamp_id = zigbee_lamp_id(address)
         status = self._lamps.get(lamp_id)
+        device = None if self._devices is None else self._devices.get(address)
+        if device is not None and device.friendly_name in self._borrowed:
+            return  # lampan är utlånad; den läses om när den lämnas tillbaka
         state = data.get("state")
         if status is None or state not in ("ON", "OFF"):
             return  # en oplacerad lampa, eller ett besked om något annat än ljuset
