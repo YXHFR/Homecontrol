@@ -134,6 +134,21 @@ class Capability(StrEnum):
     LUX = "lux"
 
 
+class RadarModel(StrEnum):
+    """Vilken radar ett rumskort har (se firmware/README.md)."""
+
+    LD2450 = "ld2450"
+    LD2461 = "ld2461"
+
+    @property
+    def max_targets(self) -> int:
+        """Så många personer radarn som mest följer åt gången, enligt tillverkaren.
+
+        LD2461:s fem personer är tillverkarens uppgift och inte provad än.
+        """
+        return 5 if self is RadarModel.LD2461 else 3
+
+
 class LampProfile(StrEnum):
     """Hur lampan ska styras. Lamputgången anpassar sig efter lampans egenheter."""
 
@@ -207,6 +222,13 @@ class Node(_Model):
     mirrored: bool = False
     """Kortet sitter upp och ned, så radarns sidled är spegelvänd."""
     capabilities: tuple[Capability, ...] = ()
+    radar: Annotated[RadarModel, Field(exclude_if=lambda radar: radar is RadarModel.LD2450)] = (
+        RadarModel.LD2450
+    )
+    """Radarn som simuleringen låtsas vara. Ett riktigt kort säger själv vilken radar det har.
+
+    Den skrivs bara ut när den inte är LD2450, så att hem utan LD2461 sparas som förut.
+    """
 
     @model_validator(mode="after")
     def _unique_capabilities(self) -> Self:

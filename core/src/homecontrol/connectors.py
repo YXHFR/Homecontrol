@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from homecontrol.home import Capability
+from homecontrol.home import Capability, RadarModel
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,11 @@ class RadarTargetsObserved:
     source_id: str
     node_id: str
     targets: tuple[RadarTarget, ...]
+    radar: RadarModel
+    """Radarn som såg målen. Den avgör hur många mål som är rimligt (`RadarModel.max_targets`).
+
+    Den har inget standardvärde, så att en källa inte av misstag får sina mål kapade.
+    """
 
 
 @dataclass(frozen=True)

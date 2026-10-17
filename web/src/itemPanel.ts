@@ -9,6 +9,7 @@ import type {
   HomeDocument,
   LampModel,
   NodeModel,
+  RadarModel,
   RoomModel,
   RoomSettings,
   SignalSourceModel,
@@ -25,6 +26,12 @@ import {
   settingsProblem,
   updateItem,
 } from "./placing";
+
+/** Radarerna som simuleringen kan låtsas vara, och hur många personer de följer enligt tillverkaren. */
+const RADARS: [RadarModel, string][] = [
+  ["ld2450", "LD2450 (3 personer)"],
+  ["ld2461", "LD2461 (5 personer)"],
+];
 
 /** Så många grader vrider knapparna rumskortet åt gången. */
 export const ROTATION_STEP = 15;
@@ -124,6 +131,14 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
       name: "mirrored",
     });
     mirrored.addEventListener("change", () => update({ mirrored: mirrored.checked }));
+    const radar = element("select", { name: "radar" });
+    const currentRadar = node.radar ?? "ld2450";
+    radar.append(
+      ...RADARS.map(([value, label]) =>
+        element("option", { value, selected: value === currentRadar }, label),
+      ),
+    );
+    radar.addEventListener("change", () => update({ radar: radar.value as RadarModel }));
     const turnLeft = button(`↺ ${ROTATION_STEP}°`, () => rotate(rotation - ROTATION_STEP));
     turnLeft.setAttribute("aria-label", `Vrid ${ROTATION_STEP}° moturs`);
     const turnRight = button(`↻ ${ROTATION_STEP}°`, () => rotate(rotation + ROTATION_STEP));
@@ -154,6 +169,12 @@ export function itemProperties(found: FoundItem, actions: PanelActions): HTMLEle
         "p",
         { className: "muted" },
         "Kryssa i om personerna i livevyn hamnar på fel sida om rumskortet, till exempel om kortet sitter upp och ned.",
+      ),
+      element("label", {}, "Radar i simuleringen ", radar),
+      element(
+        "p",
+        { className: "muted" },
+        "Simuleringen låtsas vara den här radarn. Ett riktigt kort säger själv vilken radar det har. Att LD2461 följer 5 personer är tillverkarens uppgift och inte provat än.",
       ),
     );
   }

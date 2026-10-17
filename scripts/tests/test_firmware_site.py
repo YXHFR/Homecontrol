@@ -4,7 +4,17 @@ from pathlib import Path
 
 import firmware_site
 import pytest
-from firmware_site import ROOMS_FILE, build_site, main, manifest, parse_rooms, validate_room
+from firmware_site import (
+    RADARS,
+    REPO,
+    ROOMS_FILE,
+    build_site,
+    firmware_builds,
+    main,
+    manifest,
+    parse_rooms,
+    validate_room,
+)
 
 TOO_LONG = "x" * (firmware_site.MAX_ROOM_LENGTH + 1)
 
@@ -16,7 +26,7 @@ def test_valid_room_names(room: str) -> None:
 
 @pytest.mark.parametrize(
     "room",
-    ["kök", "Kok", "sov rum", "-kok", "kok-", "sov--rum", "kok_1", TOO_LONG, ""],
+    ["kök", "Kok", "sov rum", "-kok", "kok-", "sov--rum", "kok_1", TOO_LONG, "", "ld2461-kok"],
 )
 def test_invalid_room_names(room: str) -> None:
     assert validate_room(room) is not None
@@ -64,11 +74,60 @@ def test_manifest_has_usb_install_and_ota_parts() -> None:
     ]
 
 
+def test_ld2461_manifest_points_at_its_own_files() -> None:
+    ld2461 = next(radar for radar in RADARS if radar.id == "ld2461")
+
+    data = manifest("kok", "1.2.3", "abc", "src", ld2461)
+
+    assert data["name"] == "Homecontrol kok (LD2461)"
+    assert data["builds"] == [
+        {
+            "chipFamily": "ESP32-S3",
+            "parts": [{"path": "firmware/ld2461-kok.bin", "offset": 0}],
+            "ota": {
+                "path": "firmware/ld2461-kok.ota.bin",
+                "md5": "abc",
+                "summary": "Homecontrol 1.2.3",
+                "release_url": "src",
+            },
+        }
+    ]
+
+
+def test_every_room_is_built_for_both_radars() -> None:
+    assert firmware_builds(["kok", "hall"]) == [
+        {"room": "kok", "radar": "ld2450", "config": "homecontrol.yaml", "name": "kok"},
+        {"room": "hall", "radar": "ld2450", "config": "homecontrol.yaml", "name": "hall"},
+        {
+            "room": "kok",
+            "radar": "ld2461",
+            "config": "homecontrol-ld2461.yaml",
+            "name": "ld2461-kok",
+        },
+        {
+            "room": "hall",
+            "radar": "ld2461",
+            "config": "homecontrol-ld2461.yaml",
+            "name": "ld2461-hall",
+        },
+    ]
+
+
+@pytest.mark.parametrize("radar", RADARS, ids=lambda radar: radar.id)
+def test_each_radar_package_fetches_updates_for_its_own_radar(radar: firmware_site.Radar) -> None:
+    """Ett kort med LD2461 får aldrig firmware för LD2450, och tvärtom."""
+    config = (REPO / "firmware" / radar.config).read_text(encoding="utf-8")
+
+    assert f"source: ${{update_source}}/manifest-{radar.prefix}${{rum}}.json" in config
+
+
 def write_builds(directory: Path, rooms: list[str]) -> None:
     directory.mkdir(exist_ok=True)
-    for room in rooms:
-        (directory / f"{room}.factory.bin").write_bytes(f"factory-{room}".encode())
-        (directory / f"{room}.ota.bin").write_bytes(f"ota-{room}".encode())
+    for radar in RADARS:
+        for room in rooms:
+            name = radar.name(room)
+            (directory / f"{name}.factory.bin").write_bytes(f"factory-{name}".encode())
+            (directory / f"{name}.ota.bin").write_bytes(f"ota-{name}".encode())
 
 
 def test_build_site_writes_firmware_manifests_and_pages(tmp_path: Path) -> None:
@@ -79,11 +138,17 @@ def test_build_site_writes_firmware_manifests_and_pages(tmp_path: Path) -> None:
 
     assert (out / "firmware" / "kok.bin").read_bytes() == b"factory-kok"
     assert (out / "firmware" / "hall.ota.bin").read_bytes() == b"ota-hall"
+    assert (out / "firmware" / "ld2461-kok.bin").read_bytes() == b"factory-ld2461-kok"
+    assert (out / "manifest-ld2461-hall.json").is_file()
     info = json.loads((out / "info.json").read_text())
     assert info == {
         "version": "1.2.3",
         "source": "https://example.invalid/src",
         "rooms": ["kok", "hall"],
+        "radars": [
+            {"id": "ld2450", "label": RADARS[0].label, "prefix": ""},
+            {"id": "ld2461", "label": RADARS[1].label, "prefix": "ld2461-"},
+        ],
     }
     assert (out / "index.html").is_file()
 
@@ -102,7 +167,7 @@ def test_manifest_paths_point_at_written_files(tmp_path: Path) -> None:
     assert build["ota"]["md5"] == hashlib.md5(ota.read_bytes(), usedforsecurity=False).hexdigest()
 
 
-@pytest.mark.parametrize("missing", ["hall.factory.bin", "hall.ota.bin"])
+@pytest.mark.parametrize("missing", ["hall.factory.bin", "hall.ota.bin", "ld2461-hall.ota.bin"])
 def test_build_site_fails_when_firmware_is_missing(tmp_path: Path, missing: str) -> None:
     write_builds(tmp_path, ["kok", "hall"])
     (tmp_path / missing).unlink()
@@ -115,6 +180,13 @@ def test_main_prints_rooms_as_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["rooms"]) == 0
 
     assert json.loads(capsys.readouterr().out) == parse_rooms(ROOMS_FILE.read_text())
+
+
+def test_main_prints_builds_as_json(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["builds"]) == 0
+
+    rooms = parse_rooms(ROOMS_FILE.read_text())
+    assert json.loads(capsys.readouterr().out) == firmware_builds(rooms)
 
 
 def test_main_site_reports_missing_firmware(
