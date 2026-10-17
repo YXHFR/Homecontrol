@@ -12,6 +12,27 @@ lamporna (IKEA via Zigbee2MQTT) tänds och släcks efter det.
 > hårdvara kan allt provas i simuleringsläget, med låtsaspersoner som du
 > drar runt i hemmet.
 
+## Omfattning just nu: ett rum
+
+Tills vidare byggs och testas Homecontrol i **ett enda rum**. Mjukvaran
+klarar flera rum och våningar, men hårdvaran och firmware-bygget är
+nedskalade tills ett rum fungerar hela vägen:
+
+| Del | Antal | Kommentar |
+| --- | --- | --- |
+| HLK-LD2450 | 1 | Radarn i rummet. |
+| ESP32-S3 (till exempel ESP32-S3-Zero) | 1 | Rumskortet. Kort med inbyggd kretskortsantenn ger sämre Wi-Fi-CSI, så CSI är parkerat tills vidare och radarn är huvudkällan. Kontrollera att kortet har stiften i [kopplingen](firmware/README.md#koppling), annars ändras de med `substitutions`. |
+| BH1750 | 1 | Ljussensorn. |
+| Zigbee-sticka | 1 | Sonoff Dongle Plus MG24 med Zigbee2MQTT. |
+| IKEA KAJPLATS | 1 | Lampan. KAJPLATS säljs som Matter over Thread men har ett dolt Zigbee-läge som [Zigbee2MQTT stöder](https://www.zigbee2mqtt.io/devices/KAJPLATS_WS.html): slå av och på lampan 12 gånger (15 på vissa modeller) för att para den. Fungerar det inte, använd en TRÅDFRI-lampa. |
+| Dator som hjärna | 1 | En gammal laptop eller dator som står på räcker. |
+
+Webbinstalleraren bygger därför bara firmware för rummet i
+[`firmware/rooms.txt`](firmware/rooms.txt). Rita bara det rummet i
+kartredigeraren (steg 4). Fler rum, Wi-Fi-CSI som andra källa och egna
+kretskort läggs till igen när det här fungerar: lägg då till rummen i
+`firmware/rooms.txt` och följ resten av guiden som den står.
+
 ## Installera steg för steg
 
 Guiden kräver ingen programmering. Du skriver av några kommandon i ett
