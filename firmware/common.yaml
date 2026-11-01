@@ -2,8 +2,8 @@
 #
 # Används som paket av homecontrol.yaml (LD2450) och homecontrol-ld2461.yaml
 # (LD2461). Bygg aldrig den här filen direkt. Substitutionerna rum,
-# firmware_version, i2c_sda_pin och i2c_scl_pin kommer från filen som
-# använder paketet.
+# firmware_version, i2c_sda_pin, i2c_scl_pin och test_lamp_pin kommer från
+# filen som använder paketet.
 #
 # Konfigurationen är Apache-2.0. Den byggda firmware-binären innehåller
 # ESPectre och ESPHome:s C++-kod och blir därför GPL-3.0 (se firmware/README.md).
@@ -124,6 +124,26 @@ sensor:
       name: Free Heap
     loop_time:
       name: Loop Time
+
+# Testlampan: en vanlig lysdiod (med motstånd) på test_lamp_pin, som kärnan
+# styr som en lampa innan det finns någon Zigbee-lampa (se firmware/README.md
+# och core/src/homecontrol/cardled.py). Kommandona kommer genom det krypterade
+# API:t ovan, som allt annat. Utan lysdiod händer inget.
+output:
+  - platform: ledc
+    id: test_lamp_output
+    pin: ${test_lamp_pin}
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    id: test_lamp
+    name: Test Lamp
+    output: test_lamp_output
+    # Släckt från start och efter varje omstart. Kärnan tänder den igen om
+    # rummet ska vara tänt.
+    restore_mode: ALWAYS_OFF
+    default_transition_length: 0s
 
 binary_sensor:
   - platform: template

@@ -25,6 +25,7 @@ lika på båda (Wi-Fi-CSI, ljussensorn och API:t) finns i
 | eller HLK-LD2461 | I stället för LD2450. Se [LD2461 i stället för LD2450](#ld2461-i-stället-för-ld2450). |
 | BH1750 | Ljussensor på I²C, 3,3 V. |
 | USB-kabel som klarar data | Laddkablar fungerar inte. |
+| Testlampa (valfri) | En vanlig 5 mm-lysdiod och ett motstånd på 220–330 Ω, eller en färdig LED-modul med inbyggt motstånd. Se [Testlampa](#testlampa-prova-utan-zigbee-lampa). |
 
 ### Koppling
 
@@ -38,6 +39,7 @@ lika på båda (Wi-Fi-CSI, ljussensorn och API:t) finns i
 | BH1750 GND | GND |
 | BH1750 SDA | GPIO8 |
 | BH1750 SCL | GPIO9 |
+| Testlampa (valfri) | GPIO4 → motstånd → lysdiodens långa ben; korta benet → GND |
 
 LD2461 kopplas på samma stift (TX till GPIO18, RX till GPIO17). Kontrollera
 matningsspänningen i Hi-Links datablad för LD2461 innan du kopplar in den.
@@ -295,6 +297,7 @@ engelska och ändras inte, så att kärnan kan lita på dem.
 | ESPHome Version | ESPHome-versionen |
 | Radar Firmware | Radarns egen firmware |
 | Uptime, Free Heap, Loop Time | Hälsa (drifttid, ledigt minne, looptid) |
+| Test Lamp | Lampa som kärnan styr: testlampan på GPIO4. Släckt efter varje omstart. Valfri för kärnan |
 
 Radarns värden skickas utan ESPHome:s vanliga strypning till 1 gång per
 sekund. Med LD2450 skickas ett värde bara när det ändras. Med LD2461 skickar
@@ -323,6 +326,7 @@ fungerar lika bra.
 | Stift | Var på kortet |
 | --- | --- |
 | GPIO8, GPIO9 | Kantstiften på högra sidan (märkta 8 och 9). |
+| GPIO4 | Kantstiften på vänstra sidan (märkt 4). Testlampan. |
 | GPIO17, GPIO18 | **Inte** på kantstiften. Bara som små lödpunkter på kortets undersida (märkta 17 och 18, bredvid 38–45). |
 | 5V, GND, 3V3 | Kantstiften på vänstra sidan, överst. |
 
@@ -359,6 +363,86 @@ finns två sätt:
 - Kommer kortet inte in i installationsläget: håll knappen **BOOT** nere
   när du sätter i USB-kabeln.
 - Den färgade lysdioden sitter på GPIO21 och används inte av firmware.
+
+## Testlampa: prova utan Zigbee-lampa
+
+Vill du prova hela idén innan Zigbee-stickan och en riktig lampa finns?
+Koppla en vanlig lysdiod till rumskortet. Kärnan styr den precis som en
+lampa: den tänds när radarn ser någon och ljussensorn säger att det är
+mörkt, och släcks när rummet har varit tomt en stund. Samma regler,
+inställningar och ljusgräns gäller som för en Zigbee-lampa.
+
+**Vad händer?** När kärnan bestämmer att lampan ska tändas skickar den
+"tänd" till kortet, krypterat genom samma anslutning som radarn och
+ljussensorn redan använder. Kortet slår då på stiftet GPIO4 så att ström går
+genom lysdioden. Kortet berättar sedan för kärnan att lysdioden lyser, och
+webben visar det.
+
+### Det här behövs
+
+- En vanlig lysdiod, 5 mm, valfri färg.
+- Ett motstånd på 220–330 Ω (ohm).
+- Eller i stället en **färdig LED-modul** (en liten bricka med lysdiod och
+  motstånd, ofta med stiften `S`/`IN`, `+` och `-`/`GND`). Då behövs inget
+  eget motstånd.
+- Två eller tre kopplingskablar, gärna med en kopplingsplatta (breadboard).
+
+**Glöm inte motståndet.** Kortets stift ger 3,3 V och tål bara en liten
+ström (några tiotals milliampere). Utan motstånd drar lysdioden för mycket
+ström, och både lysdioden och kortet kan gå sönder. Med 220–330 Ω blir
+strömmen ungefär 5–15 mA, vilket är lagom.
+
+**Dra ur USB-kabeln innan du kopplar**, och koppla aldrig något till
+**5V** här: på ESP32-S3-Zero sitter 5V precis bredvid GND och 3V3.
+
+En röd, gul eller grön lysdiod lyser bra. En blå eller vit lyser svagare på
+3,3 V, särskilt med 330 Ω; välj då 220 Ω.
+
+### Koppling
+
+```text
+GPIO4 ── motstånd 220–330 Ω ── långa benet (anod, +) ─▶|─ korta benet (katod, −) ── GND
+```
+
+1. Koppla en kabel från **GPIO4** till ena änden av motståndet.
+2. Koppla motståndets andra ände till lysdiodens **långa ben** (anoden, +).
+3. Koppla lysdiodens **korta ben** (katoden, −) till **GND**.
+
+Det spelar ingen roll åt vilket håll motståndet sitter. Lysdioden måste
+däremot vända rätt; lyser den aldrig, vänd på den. På en LED-modul går
+`S`/`IN` till GPIO4 och `-`/`GND` till GND (och `+` till 3V3, aldrig 5V, om
+modulen har det stiftet).
+
+GPIO4 sitter på kantstiften på både ESP32-S3-DevKitC-1U och
+[ESP32-S3-Zero](#waveshare-esp32-s3-zero) (vänstra sidan). Det är inget
+strapping-stift, så kortet startar som vanligt med lysdioden inkopplad.
+Vill du använda ett annat stift: bygg firmware själv med till exempel
+`-s test_lamp_pin GPIO5`.
+
+### Lägg till testlampan i webben
+
+Kortet behöver firmware med testlampan. Syns ingen **LED på rumskort …**
+under **Nya lampor** fast kortet är placerat och anslutet: installera om
+kortet med webbinstalleraren.
+
+1. Placera rumskortet på kartan som vanligt.
+2. Tryck på **Ändra rummet**. Under **Placera** står efter några sekunder
+   **Nya lampor som kärnan har hittat:** med **Placera LED på rumskort
+   homecontrol-…** för varje placerat kort. Välj kortet vars lysdiod du vill
+   använda.
+3. Klicka på kartan där lampan ska synas och tryck på **Klar**.
+
+Livevyn visar testlampan som andra lampor: tänd, släckt eller **svarar
+inte** (när kortet inte är anslutet eller saknar testlampan). Du kan också
+tända och släcka den för hand i lampans kort.
+
+Lysdioden är alltid släckt när kortet startar. Var den tänd och kortet är
+anslutet igen inom en minut tänder kärnan den igen. Efter ett längre
+avbrott förblir den släckt tills någon kommer in i rummet på nytt. När den riktiga
+lampan finns: ta bort testlampan från kartan och placera Zigbee-lampan.
+
+Utan lysdiod händer ingenting: firmware styr bara ett stift som inget är
+kopplat till, och kärnan klarar sig utan testlampan.
 
 ## LD2461 i stället för LD2450
 

@@ -27,6 +27,9 @@ Modulen är uppdelad så att tolkningen går att pröva utan nätverk:
 * `EsphomeSource` håller reda på korten och lämnar observationerna till kärnan.
 * `AioesphomeNetwork` pratar med korten (aioesphomeapi) och söker efter dem (mDNS).
 
+Ett kort kan också ha en testlampa, en lysdiod som kärnan styr som en lampa
+(se cardled.py). Den är valfri, så att kort med äldre firmware fungerar som förut.
+
 Loggen nämner kort och delar men aldrig var någon är eller vad radarn ser.
 """
 
@@ -54,6 +57,8 @@ from aioesphomeapi.model import (
     BinarySensorState,
     EntityInfo,
     EntityState,
+    LightInfo,
+    LightState,
     SensorState,
     TextSensorState,
 )
@@ -140,6 +145,24 @@ REQUIRED_ENTITIES = (
     ILLUMINANCE,
 )
 """Entiteterna som varje kort ska ha, oavsett radar."""
+CARD_LED = "Test Lamp"
+"""Testlampan, en lysdiod på kortet (se cardled.py). Den är valfri och saknas på äldre kort."""
+
+
+@dataclass(frozen=True)
+class LedState:
+    """Hur testlampan på ett kort är, enligt kortet."""
+
+    on: bool
+    brightness: int
+    """Ljusstyrkan i procent (1–100)."""
+
+
+def led_percent(brightness: float) -> int:
+    """ESPHome:s ljusstyrka (0–1) i procent, 1–100."""
+    if not math.isfinite(brightness):
+        return 100
+    return max(1, min(100, round(brightness * 100)))
 
 
 def card_radar(names: Iterable[str]) -> RadarModel:
@@ -225,6 +248,13 @@ class CardReader:
         """Entiteter som firmware-paketet ska ha men som kortet saknar."""
         self.radar = RadarModel.LD2450
         """Kortets radar, enligt entiteterna vid senaste anslutningen."""
+        self.led_key: int | None = None
+        """Testlampans nyckel, eller None om kortet inte har någon testlampa."""
+        self.led: LedState | None = None
+        """Testlampans läge, eller None när det inte är känt."""
+        self.has_led: bool | None = None
+        """Om kortet har en testlampa, eller None om det inte har anslutit än."""
+        self._led_changed = False
 
     def use_entities(self, entities: Iterable[EntityInfo], now: float) -> None:
         """Kortet har anslutit. Värdena från förra anslutningen gäller inte längre."""
@@ -233,6 +263,10 @@ class CardReader:
         names = set(self._names.values())
         self.radar = card_radar(names)
         self.missing = tuple(name for name in REQUIRED_ENTITIES if name not in names)
+        self.led_key = next(
+            (e.key for e in entities if isinstance(e, LightInfo) and e.name == CARD_LED), None
+        )
+        self.has_led = self.led_key is not None
         self._values.clear()
         self.disconnected()
         self._heard_at = now
@@ -246,6 +280,7 @@ class CardReader:
             part.heard_at = -math.inf
         self._csi_motion = self._csi_calibrating = False
         self._heard_at = -math.inf
+        self._set_led(None)
 
     def alive(self, part: Capability) -> bool:
         return self._parts[part].alive
@@ -262,6 +297,18 @@ class CardReader:
                 self._binary(name, state, now)
             case TextSensorState() if name == FIRMWARE_VERSION and not state.missing_state:
                 self.firmware_version = state.state[:32]
+            case LightState() if state.key == self.led_key:
+                self._set_led(LedState(state.state, led_percent(state.brightness)))
+
+    def _set_led(self, led: LedState | None) -> None:
+        if led != self.led:
+            self.led = led
+            self._led_changed = True
+
+    def take_led_change(self) -> bool:
+        """Om testlampans läge har ändrats sedan förra anropet."""
+        changed, self._led_changed = self._led_changed, False
+        return changed
 
     def _sensor(self, name: str, state: SensorState, now: float) -> None:
         value = math.nan if state.missing_state else state.state
@@ -408,6 +455,12 @@ class CardLink(Protocol):
 
     def stop(self) -> None: ...
 
+    def light(self, key: int, on: bool, brightness: float) -> None:
+        """Tänder eller släcker en ljusentitet på kortet. `brightness` är 0–1.
+
+        Får inte blockera. Ett kort som inte är anslutet får inget.
+        """
+
 
 @dataclass(frozen=True)
 class Discovered:
@@ -519,6 +572,7 @@ class EsphomeSource:
         self._cards: dict[str, _Card] = {}
         self._discovered: dict[str, Discovered] = {}
         self._listeners: list[Listener] = []
+        self._led_listeners: list[Callable[[str], None]] = []
 
     @property
     def source_id(self) -> str:
@@ -614,10 +668,16 @@ class EsphomeSource:
     def _remove(self, name: str) -> None:
         card = self._cards.pop(name)
         if card.link is not None:
+            led, led_key = card.reader.led, card.reader.led_key
+            if card.online and led is not None and led.on and led_key is not None:
+                # Ett kort som inte längre används ska inte lämnas med testlampan tänd.
+                card.link.light(led_key, False, 1.0)
             card.link.stop()
             card.link = None
         for part in PARTS:
             self._emit(SourceLost(part_source(name, part)))
+        if card.reader.led is not None:
+            self._led_changed(name)
         logger.info("Kortet %s är inte längre placerat och kopplas från", name)
 
     # Upptäckt
@@ -682,6 +742,35 @@ class EsphomeSource:
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
 
+    # Testlampan (se cardled.py)
+
+    def led(self, name: str) -> LedState | None:
+        """Testlampans läge på ett anslutet kort, eller None om det inte är känt."""
+        card = self._cards.get(name)
+        return card.reader.led if card is not None and card.online else None
+
+    def set_led(self, name: str, on: bool, brightness: int) -> bool:
+        """Tänder eller släcker testlampan på ett kort. `brightness` är i procent (1–100).
+
+        Kommandot går genom kortets krypterade anslutning. Returnerar False om
+        kortet inte är anslutet eller inte har någon testlampa.
+        """
+        card = self._cards.get(name)
+        if card is None or card.link is None or not card.online or card.reader.led_key is None:
+            return False
+        card.link.light(card.reader.led_key, on, brightness / 100)
+        return True
+
+    def has_led(self, name: str) -> bool | None:
+        """Om kortet har en testlampa, eller None om det inte har anslutit sedan kärnan startade."""
+        card = self._cards.get(name)
+        return None if card is None else card.reader.has_led
+
+    def subscribe_leds(self, listener: Callable[[str], None]) -> Callable[[], None]:
+        """Anropar `listener` med kortets namn när dess testlampa ändras eller blir okänd."""
+        self._led_listeners.append(listener)
+        return lambda: self._led_listeners.remove(listener)
+
     # Internt
 
     def _now(self) -> float:
@@ -703,7 +792,13 @@ class EsphomeSource:
             return
         for observation in card.reader.observations(card.room_id):
             self._emit(observation)
+        if card.reader.take_led_change():
+            self._led_changed(card.name)
         self._notify()
+
+    def _led_changed(self, name: str) -> None:
+        for listener in list(self._led_listeners):
+            listener(name)
 
     def _emit(self, observation: Observation) -> None:
         if self._sink is not None:
@@ -821,6 +916,12 @@ class _AioesphomeLink:
         task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    def light(self, key: int, on: bool, brightness: float) -> None:
+        try:
+            self._client.light_command(key=key, state=on, brightness=brightness if on else None)
+        except APIConnectionError:
+            logger.warning("Kunde inte styra testlampan på kortet %s", self._name)
 
     async def _shutdown(self) -> None:
         await self._logic.stop()

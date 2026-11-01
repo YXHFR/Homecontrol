@@ -97,6 +97,10 @@ jobs:
             ! grep -qE '^(ota|update|http_request):' "$resolved" \
               || fail "Ingen firmware över nätverket: korten uppdateras bara över USB ($resolved)"
             ! grep -qE '^\s+(password|key|psk):' "$resolved" || fail "Hemligheter hör inte hemma i paketet ($resolved)"
+            # Ljusets inställningar: från namnet till nästa post i listan.
+            awk '/^    name: Test Lamp$/{f=1; next} f && /^(\S|  - )/{exit} f' "$resolved" \
+              | grep -qE '^    restore_mode: ALWAYS_OFF$' \
+              || fail "Testlampan ska vara släckt efter omstart ($resolved)"
           done
 
   build:

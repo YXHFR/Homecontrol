@@ -40,7 +40,7 @@ class LampDevices(Protocol):
 
 
 def create_lamp_devices_router(
-    devices: LampDevices | None, allowed_hosts: Set[str] = frozenset()
+    devices: Sequence[LampDevices], allowed_hosts: Set[str] = frozenset()
 ) -> APIRouter:
     """`allowed_hosts` är värdnamn utöver localhost och IP-adresser som kärnan får nås på."""
     router = APIRouter()
@@ -49,7 +49,7 @@ def create_lamp_devices_router(
     def get_lamps(request: Request) -> JSONResponse:
         if not trusted(request.headers, allowed_hosts):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Okänd adress eller avsändare")
-        found = [] if devices is None else devices.lamps()
+        found = [lamp for output in devices for lamp in output.lamps()]
         return JSONResponse(
             [
                 {

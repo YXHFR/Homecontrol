@@ -7,7 +7,7 @@ samma entiteter som firmware-paketet (se homecontrol/esphome.py).
 import asyncio
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,8 @@ _TYPES = {
         "BinarySensorInfo",
         "TextSensorInfo",
         "ButtonInfo",
+        "LightInfo",
+        "LightState",
         "UpdateInfo",
         "SensorState",
         "BinarySensorState",
@@ -83,12 +85,17 @@ class FakeLink:
     key: bytes
     events: CardEvents
     running: bool = False
+    lights: list[tuple[int, bool, float]] = field(default_factory=list)
+    """Ljuskommandona som kortet har fått: nyckel, tänd och ljusstyrka (0–1)."""
 
     def start(self) -> None:
         self.running = True
 
     def stop(self) -> None:
         self.running = False
+
+    def light(self, key: int, on: bool, brightness: float) -> None:
+        self.lights.append((key, on, brightness))
 
 
 class FakeNetwork:
