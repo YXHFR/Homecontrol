@@ -7,7 +7,7 @@ services:
     # Färdig avbild från releasen (amd64 och arm64). release-please byter
     # versionen vid varje release. Finns avbilden inte att hämta byggs den
     # på datorn från koden i repot; docker compose up --build bygger alltid själv.
-    image: ghcr.io/yxhfr/homecontrol:0.2.0 # x-release-please-version
+    image: ghcr.io/yxhfr/homecontrol:0.2.1 # x-release-please-version
     build:
       context: .
       dockerfile: core/Dockerfile
@@ -72,7 +72,7 @@ services:
   # aldrig finns hos den kärna som är igång. Skapar kärnans roll om den saknas,
   # så att en databas från en tidigare version uppgraderas med datan kvar.
   db-setup:
-    image: ghcr.io/yxhfr/homecontrol:0.2.0 # x-release-please-version
+    image: ghcr.io/yxhfr/homecontrol:0.2.1 # x-release-please-version
     build:
       context: .
       dockerfile: core/Dockerfile
