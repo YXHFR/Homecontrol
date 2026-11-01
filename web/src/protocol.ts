@@ -105,14 +105,6 @@ export interface Simulation {
   persons: Person[];
 }
 
-/** En ny version av kortets firmware, som användaren kan godkänna. */
-export interface CardUpdate {
-  version: string;
-  in_progress: boolean;
-  /** Hur långt uppdateringen har kommit, 0–100, om kortet säger det. */
-  progress: number | null;
-}
-
 /** Ett riktigt rumskort (se cards_message i core/src/homecontrol/cards.py). */
 export interface Card {
   /** Kortets namn, homecontrol-<rum>. Ett placerat kort är en nod med samma id. */
@@ -126,7 +118,6 @@ export interface Card {
   calibrating: boolean;
   wifi_signal: number | null;
   firmware_version: string | null;
-  update: CardUpdate | null;
 }
 
 export interface RoomState {
@@ -236,9 +227,7 @@ export type ClientMessage =
   | { type: "move_person"; person_id: string; floor_id: string; x: number; y: number }
   | { type: "remove_person"; person_id: string }
   | { type: "set_daylight"; lux: number }
-  | { type: "set_speed"; speed: Speed }
-  /** Användaren har godkänt att kortet uppdateras. */
-  | { type: "install_update"; card: string };
+  | { type: "set_speed"; speed: Speed };
 
 /** Tolkar ett meddelande från kärnan. Okända eller trasiga meddelanden ger null. */
 export function parseServerMessage(text: string): ServerMessage | null {

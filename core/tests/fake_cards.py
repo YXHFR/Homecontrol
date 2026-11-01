@@ -7,7 +7,7 @@ samma entiteter som firmware-paketet (se homecontrol/esphome.py).
 import asyncio
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -83,17 +83,12 @@ class FakeLink:
     key: bytes
     events: CardEvents
     running: bool = False
-    installs: list[int] = field(default_factory=list)
 
     def start(self) -> None:
         self.running = True
 
     def stop(self) -> None:
         self.running = False
-
-    def install_update(self, key: int) -> bool:
-        self.installs.append(key)
-        return True
 
 
 class FakeNetwork:

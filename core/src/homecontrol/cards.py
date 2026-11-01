@@ -17,21 +17,6 @@ from homecontrol.trust import trusted
 
 
 @dataclass(frozen=True)
-class FirmwareUpdate:
-    """Kortets firmware: versionen det har och den senaste som finns."""
-
-    current_version: str
-    latest_version: str
-    in_progress: bool
-    progress: float | None
-    """Hur långt uppdateringen har kommit, 0–100, om kortet säger det."""
-
-    @property
-    def available(self) -> bool:
-        return bool(self.latest_version) and self.latest_version != self.current_version
-
-
-@dataclass(frozen=True)
 class CardView:
     """Det som går att visa om ett kort."""
 
@@ -44,15 +29,12 @@ class CardView:
     calibrating: bool
     wifi_signal: float | None
     firmware_version: str | None
-    update: FirmwareUpdate | None
 
 
 class Cards(Protocol):
     """De riktiga rumskorten, till exempel ESPHome-kopplingen (se esphome.py)."""
 
     def cards(self) -> Sequence[CardView]: ...
-
-    def install_update(self, name: str) -> bool: ...
 
     def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]: ...
 
@@ -61,8 +43,7 @@ def cards_message(cards: Sequence[CardView]) -> list[dict[str, Any]]:
     """Korten: placerade kort med sina varningar, och nya kort som väntar på att placeras.
 
     Ett kort är ``"placed": false`` tills det har placerats i kartredigeraren.
-    ``problems`` är varningar i klartext. ``update`` är null, eller den version
-    som kortet kan uppdateras till.
+    ``problems`` är varningar i klartext.
     """
     return [
         {
@@ -74,15 +55,6 @@ def cards_message(cards: Sequence[CardView]) -> list[dict[str, Any]]:
             "calibrating": card.calibrating,
             "wifi_signal": card.wifi_signal,
             "firmware_version": card.firmware_version,
-            "update": (
-                None
-                if card.update is None or not card.update.available
-                else {
-                    "version": card.update.latest_version,
-                    "in_progress": card.update.in_progress,
-                    "progress": card.update.progress,
-                }
-            ),
         }
         for card in cards
     ]

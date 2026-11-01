@@ -18,8 +18,8 @@ kabeln lossnar, skickas `SourceLost` för just den delen, så att rummet blir
 okänt i stället för tomt. Ett placerat kort som inte svarar räknas som tyst i
 alla delar, också innan det har svarat en enda gång.
 
-Uppdatering av kortens firmware (OTA) sker bara när någon har godkänt den i
-livevyn (`EsphomeSource.install_update`). Kortet hämtar då själv filen.
+Korten har ingen uppdatering över nätverket. Ny firmware installeras över
+USB med webbinstalleraren (se firmware/README.md).
 
 Modulen är uppdelad så att tolkningen går att pröva utan nätverk:
 
@@ -56,15 +56,12 @@ from aioesphomeapi.model import (
     EntityState,
     SensorState,
     TextSensorState,
-    UpdateCommand,
-    UpdateInfo,
-    UpdateState,
 )
 from aioesphomeapi.reconnect_logic import ReconnectLogic
 from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
-from homecontrol.cards import CardView, FirmwareUpdate
+from homecontrol.cards import CardView
 from homecontrol.connectors import (
     Defer,
     LightLevelObserved,
@@ -134,7 +131,6 @@ CSI_CALIBRATING = "CSI Calibrating"
 ILLUMINANCE = "Illuminance"
 WIFI_SIGNAL = "WiFi Signal"
 FIRMWARE_VERSION = "Firmware Version"
-FIRMWARE_UPDATE = "Firmware"
 REQUIRED_ENTITIES = (
     *(name for pair in RADAR_TARGETS for name in pair),
     RADAR_ONLINE,
@@ -142,7 +138,6 @@ REQUIRED_ENTITIES = (
     CSI_MOVEMENT,
     CSI_CALIBRATING,
     ILLUMINANCE,
-    FIRMWARE_UPDATE,
 )
 """Entiteterna som varje kort ska ha, oavsett radar."""
 
@@ -226,8 +221,6 @@ class CardReader:
         """När kortet senast skickade något alls."""
         self.wifi_signal: float | None = None
         self.firmware_version: str | None = None
-        self.update: FirmwareUpdate | None = None
-        self.update_key: int | None = None
         self.missing: tuple[str, ...] = ()
         """Entiteter som firmware-paketet ska ha men som kortet saknar."""
         self.radar = RadarModel.LD2450
@@ -240,12 +233,7 @@ class CardReader:
         names = set(self._names.values())
         self.radar = card_radar(names)
         self.missing = tuple(name for name in REQUIRED_ENTITIES if name not in names)
-        self.update_key = next(
-            (e.key for e in entities if isinstance(e, UpdateInfo) and e.name == FIRMWARE_UPDATE),
-            None,
-        )
         self._values.clear()
-        self.update = None
         self.disconnected()
         self._heard_at = now
 
@@ -274,13 +262,6 @@ class CardReader:
                 self._binary(name, state, now)
             case TextSensorState() if name == FIRMWARE_VERSION and not state.missing_state:
                 self.firmware_version = state.state[:32]
-            case UpdateState() if name == FIRMWARE_UPDATE and not state.missing_state:
-                self.update = FirmwareUpdate(
-                    current_version=state.current_version[:32],
-                    latest_version=state.latest_version[:32],
-                    in_progress=state.in_progress,
-                    progress=state.progress if state.has_progress else None,
-                )
 
     def _sensor(self, name: str, state: SensorState, now: float) -> None:
         value = math.nan if state.missing_state else state.state
@@ -426,10 +407,6 @@ class CardLink(Protocol):
     def start(self) -> None: ...
 
     def stop(self) -> None: ...
-
-    def install_update(self, key: int) -> bool:
-        """Ber kortet uppdatera sig. Returnerar False om anslutningen just har brutits."""
-        ...
 
 
 @dataclass(frozen=True)
@@ -680,7 +657,6 @@ class EsphomeSource:
                         calibrating=False,
                         wifi_signal=None,
                         firmware_version=None,
-                        update=None,
                     )
                 )
                 continue
@@ -697,27 +673,9 @@ class EsphomeSource:
                     calibrating=card.online and card.reader.calibrating,
                     wifi_signal=card.reader.wifi_signal if card.online else None,
                     firmware_version=card.reader.firmware_version,
-                    update=card.reader.update if card.online else None,
                 )
             )
         return tuple(views)
-
-    def install_update(self, name: str) -> bool:
-        """Startar en uppdatering som användaren har godkänt. Returnerar om den startade."""
-        card = self._cards.get(name)
-        if card is None or card.link is None or not card.online:
-            return False
-        update = card.reader.update
-        key = card.reader.update_key
-        if update is None or key is None or not update.available or update.in_progress:
-            return False
-        logger.info(
-            "Uppdaterar kortet %s från %s till %s",
-            name,
-            update.current_version,
-            update.latest_version,
-        )
-        return card.link.install_update(key)
 
     def subscribe(self, listener: Listener) -> Callable[[], None]:
         """Anropar `listener` när något om korten ändras. Returnerar en funktion som avslutar."""
@@ -858,13 +816,6 @@ class _AioesphomeLink:
 
     def stop(self) -> None:
         self._spawn(self._shutdown())
-
-    def install_update(self, key: int) -> bool:
-        try:
-            self._client.update_command(key, UpdateCommand.INSTALL)
-        except APIConnectionError:
-            return False
-        return True
 
     def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
         task = asyncio.get_running_loop().create_task(coro)

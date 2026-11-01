@@ -41,11 +41,6 @@ Styrningen går genom samma ström som allt annat och omfattas av samma
 kontroll av adress och avsändare (se trust.py). Det finns inga konton: alla
 som når livevyn kan styra lamporna.
 
-Livevyn kan be om en uppdatering av ett korts firmware, som användaren har
-godkänt genom att trycka på knappen:
-
-* ``{"type": "install_update", "card": "homecontrol-kok"}``
-
 Livevyn skickar kommandon till simuleringen:
 
 * ``{"type": "set_simulation", "enabled": true}``
@@ -151,11 +146,6 @@ class SetSpeed(BaseModel):
         return value
 
 
-class InstallUpdate(BaseModel):
-    type: Literal["install_update"]
-    card: Annotated[str, Field(max_length=64)]
-
-
 ClientMessage = (
     SetLamp
     | ResumeAutomation
@@ -165,7 +155,6 @@ ClientMessage = (
     | RemovePerson
     | SetDaylight
     | SetSpeed
-    | InstallUpdate
 )
 
 _client_message: TypeAdapter[ClientMessage] = TypeAdapter(
@@ -379,7 +368,7 @@ def create_live_router(
         async def receive_commands(group: anyio.abc.TaskGroup) -> None:
             try:
                 while True:
-                    _handle(controller, simulation, cards, await websocket.receive_text())
+                    _handle(controller, simulation, await websocket.receive_text())
             except WebSocketDisconnect:
                 # Att klienten går är det normala slutet; då behövs inga fler lägen.
                 group.cancel_scope.cancel()
@@ -399,17 +388,11 @@ def create_live_router(
     return router
 
 
-def _handle(
-    controller: Controller, simulation: Simulation | None, cards: Cards | None, text: str
-) -> None:
+def _handle(controller: Controller, simulation: Simulation | None, text: str) -> None:
     try:
         message = _client_message.validate_json(text)
     except ValidationError:
         logger.warning("Ogiltigt meddelande från livevyn ignoreras")
-        return
-    if isinstance(message, InstallUpdate):
-        if cards is None or not cards.install_update(message.card):
-            logger.info("Kortet %s kan inte uppdateras just nu", message.card[:64])
         return
     match message:
         case SetLamp(lamp_id=lamp_id, on=on):
