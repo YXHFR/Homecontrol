@@ -20,6 +20,7 @@ import argparse
 import functools
 import http.server
 import os
+import socket
 import sys
 import threading
 import webbrowser
@@ -44,6 +45,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         ".txt": "text/plain; charset=utf-8",
     }
 
+    def send_head(self):
+        # Bara sidor som öppnats som localhost får svar. Annars kunde en
+        # främmande webbsida läsa mappen genom att låta sitt eget namn peka
+        # på 127.0.0.1 (DNS-rebinding).
+        host = (self.headers.get("Host") or "").lower()
+        port = self.server.server_address[1]
+        if host not in (f"localhost:{port}", f"127.0.0.1:{port}"):
+            self.send_error(403, "Öppna sidan som http://localhost")
+            return None
+        return super().send_head()
+
+    def list_directory(self, path):
+        # Visa inte vad som mer finns i mappen.
+        self.send_error(404)
+        return None
+
     def end_headers(self) -> None:
         # Alltid den nya firmware när en ny version har packats upp i mappen.
         self.send_header("Cache-Control", "no-store")
@@ -51,6 +68,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
+
+
+class Server(http.server.ThreadingHTTPServer):
+    # Ingen annan får lyssna på samma port. På Windows kan annars två
+    # installerare (till exempel en gammal och en ny version) svara på samma
+    # adress, och kortet kan få den gamla firmware.
+    allow_reuse_address = False
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def open_browser(url: str) -> None:
@@ -73,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
 
     handler = functools.partial(Handler, directory=str(FOLDER))
     try:
-        server = http.server.ThreadingHTTPServer((HOST, args.port), handler)
+        server = Server((HOST, args.port), handler)
     except OSError:
         print(
             f"Port {args.port} används redan. Kanske är installeraren redan igång i ett annat\n"

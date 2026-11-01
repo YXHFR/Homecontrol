@@ -28,6 +28,8 @@ on:
       - scripts/add_esp_web_tools.sh
       - web/e2e-installer/**
       - web/playwright.installer.config.ts
+      - web/package.json
+      - web/package-lock.json
       - .github/workflows/firmware.yml
   pull_request:
     paths:
@@ -36,6 +38,8 @@ on:
       - scripts/add_esp_web_tools.sh
       - web/e2e-installer/**
       - web/playwright.installer.config.ts
+      - web/package.json
+      - web/package-lock.json
       - .github/workflows/firmware.yml
   workflow_dispatch:
 
@@ -47,11 +51,6 @@ concurrency:
   # En PR avbryter sin förra körning. På main körs de i tur och ordning, så
   # att en publicering aldrig avbryts halvvägs.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-env:
-  # ESP Web Tools läggs på samma sida i stället för att laddas från ett CDN.
-  ESP_WEB_TOOLS_VERSION: 10.4.0
-  ESP_WEB_TOOLS_SHA256: f18da75335d2f0dca044c4bb052848c0696e7b03cc23d61d8530dd6eba0a9008
 
 jobs:
   validate:
@@ -255,8 +254,8 @@ jobs:
 
   deploy:
     name: Publicera webbinstalleraren på Cloudflare (valfritt)
-    # Samma villkor som för sidan: bara main i det här repot, aldrig en PR
-    # eller en fork. En fork har inte heller hemligheterna.
+    # Som för sidan (bara main, aldrig en PR), och dessutom bara i det här
+    # repot, aldrig i en fork. En fork har inte heller hemligheterna.
     if: >-
       github.event_name != 'pull_request'
       && github.ref == 'refs/heads/main'

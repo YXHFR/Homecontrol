@@ -1,4 +1,5 @@
 import http.client
+import importlib.util
 import json
 import re
 import socket
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
 
 import firmware_site
 import pytest
@@ -218,16 +220,40 @@ def free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def get(port: int, path: str) -> tuple[str, bytes]:
-    """Filtypen och innehållet, från servern på 127.0.0.1."""
+def get(port: int, path: str, host: str = "localhost") -> tuple[int | str, bytes]:
+    """Filtypen och innehållet från servern på 127.0.0.1, eller felkoden."""
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
-        connection.request("GET", path)
+        connection.request("GET", path, headers={"Host": f"{host}:{port}"})
         response = connection.getresponse()
-        assert response.status == 200, path
+        if response.status != 200:
+            return response.status, b""
         return response.getheader("Content-Type", ""), response.read()
     finally:
         connection.close()
+
+
+def load_start_script() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "starta", REPO / "firmware" / "installer" / "starta.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_start_script_names_the_file_types_itself() -> None:
+    """Windows register kan göra .js till text/plain; då körs inte ESP Web Tools."""
+    extensions = load_start_script().Handler.extensions_map
+
+    assert extensions[".js"].startswith("text/javascript")
+    assert extensions[".json"] == "application/json"
+    assert extensions[".html"].startswith("text/html")
+
+
+def test_start_script_does_not_share_its_port() -> None:
+    assert load_start_script().Server.allow_reuse_address is False
 
 
 def test_start_script_serves_the_installer_on_localhost(tmp_path: Path) -> None:
@@ -245,15 +271,23 @@ def test_start_script_serves_the_installer_on_localhost(tmp_path: Path) -> None:
     )
     try:
         for _ in range(100):
+            if server.poll() is not None:
+                pytest.fail("starta.py avslutades innan den svarade")
             try:
                 socket.create_connection(("127.0.0.1", port), timeout=1).close()
                 break
             except OSError:
                 time.sleep(0.1)
+        else:
+            pytest.fail("starta.py svarade inte")
 
         content_type, _ = get(port, "/esp-web-tools/install-button.js")
         # En modul körs bara om filtypen är JavaScript.
+        assert isinstance(content_type, str)
         assert content_type.startswith("text/javascript")
+        # Bara som localhost (mot DNS-rebinding), och ingen mapplistning.
+        assert get(port, "/manifest-kok.json", host="elak.example")[0] == 403
+        assert get(port, "/firmware/")[0] == 404
         _, body = get(port, "/manifest-kok.json")
         path = json.loads(body)["builds"][0]["parts"][0]["path"]
         assert get(port, "/" + path)[1] == b"factory-kok"
