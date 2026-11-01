@@ -356,6 +356,8 @@ lampa hittad · inte placerad**.
 
 ## 8b. Testlampa utan Zigbee
 
+Har du kopplat en Zigbee-lampa i steg 8 kan du hoppa över det här steget.
+
 Med en testlampa går hela idén att prova direkt: radarn ser dig,
 ljussensorn säger att det är mörkt och lysdioden på kortet tänds.
 
@@ -369,8 +371,9 @@ ljussensorn säger att det är mörkt och lysdioden på kortet tänds.
    Lysdiodens **korta ben** (katod, −) → **GND**.
 3. Sätt i USB-kabeln igen.
 
-**Glöm inte motståndet.** Kortets stift klarar bara några milliampere.
-Utan motstånd kan lysdioden och kortet gå sönder.
+**Glöm inte motståndet.** Kortets stift tål bara en liten ström. Utan
+motstånd kan lysdioden och kortet gå sönder. Koppla aldrig lysdioden till
+**5V**.
 
 Lampan läggs till i webben i nästa steg (punkt 5 i steg 9): under **Nya
 lampor som kärnan har hittat:** står **Placera LED på rumskort
@@ -384,8 +387,8 @@ tänd. Kärnan använder samma regler och ljusgräns som för en riktig lampa.
 Mer om kopplingen, LED-moduler och andra stift finns i
 [firmware/README.md](firmware/README.md#testlampa-prova-utan-zigbee-lampa).
 
-**Kontrollera:** lysdioden är släckt när kortet har startat. När
-testlampan är placerad på kartan och du går in i det mörka rummet tänds den.
+**Kontrollera:** lysdioden är släckt när kortet har startat. Att den tänds
+provar du i steg 10, när testlampan är placerad på kartan.
 
 ## 9. Rita rummet på kartan
 
@@ -449,7 +452,7 @@ stund släcks den. Webbsidan får varje ändring direkt från kärnan.
 
 - En **fylld prick** följer dig på kartan. En **streckad ring** betyder att
   radarn har tappat dig en kort stund men att kärnan minns var du var.
-- Rummets kort visar **upptaget**, och lampan tänds om det är mörkt.
+- Rummets kort visar **upptaget**, och lampan (eller testlampan) tänds om det är mörkt.
   Rummet står kvar som upptaget ungefär 10 sekunder efter att du gått ut.
 - Hamnar pricken på fel sida om kortet: öppna kortets kort → **Fler
   inställningar** → kryssa i **Spegelvänd sidled**.

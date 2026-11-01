@@ -297,7 +297,7 @@ engelska och ändras inte, så att kärnan kan lita på dem.
 | ESPHome Version | ESPHome-versionen |
 | Radar Firmware | Radarns egen firmware |
 | Uptime, Free Heap, Loop Time | Hälsa (drifttid, ledigt minne, looptid) |
-| Test Lamp | Ljus (in): testlampan på GPIO4. Släckt efter varje omstart. Valfri för kärnan |
+| Test Lamp | Lampa som kärnan styr: testlampan på GPIO4. Släckt efter varje omstart. Valfri för kärnan |
 
 Radarns värden skickas utan ESPHome:s vanliga strypning till 1 gång per
 sekund. Med LD2450 skickas ett värde bara när det ändras. Med LD2461 skickar
@@ -387,9 +387,16 @@ webben visar det.
   eget motstånd.
 - Två eller tre kopplingskablar, gärna med en kopplingsplatta (breadboard).
 
-**Glöm inte motståndet.** Kortets stift ger 3,3 V och klarar bara några
-milliampere. Utan motstånd drar lysdioden för mycket ström, och både
-lysdioden och kortet kan gå sönder.
+**Glöm inte motståndet.** Kortets stift ger 3,3 V och tål bara en liten
+ström (några tiotals milliampere). Utan motstånd drar lysdioden för mycket
+ström, och både lysdioden och kortet kan gå sönder. Med 220–330 Ω blir
+strömmen ungefär 5–15 mA, vilket är lagom.
+
+**Dra ur USB-kabeln innan du kopplar**, och koppla aldrig något till
+**5V** här: på ESP32-S3-Zero sitter 5V precis bredvid GND och 3V3.
+
+En röd, gul eller grön lysdiod lyser bra. En blå eller vit lyser svagare på
+3,3 V, särskilt med 330 Ω; välj då 220 Ω.
 
 ### Koppling
 
@@ -403,8 +410,8 @@ GPIO4 ── motstånd 220–330 Ω ── långa benet (anod, +) ─▶|─ kor
 
 Det spelar ingen roll åt vilket håll motståndet sitter. Lysdioden måste
 däremot vända rätt; lyser den aldrig, vänd på den. På en LED-modul går
-`S`/`IN` till GPIO4 och `-`/`GND` till GND (och `+` till 3V3 om modulen har
-det stiftet).
+`S`/`IN` till GPIO4 och `-`/`GND` till GND (och `+` till 3V3, aldrig 5V, om
+modulen har det stiftet).
 
 GPIO4 sitter på kantstiften på både ESP32-S3-DevKitC-1U och
 [ESP32-S3-Zero](#waveshare-esp32-s3-zero) (vänstra sidan). Det är inget
@@ -414,8 +421,9 @@ Vill du använda ett annat stift: bygg firmware själv med till exempel
 
 ### Lägg till testlampan i webben
 
-Kortet behöver firmware med testlampan (version från och med den här).
-Installera om med webbinstalleraren om kortet är äldre.
+Kortet behöver firmware med testlampan. Syns ingen **LED på rumskort …**
+under **Nya lampor** fast kortet är placerat och anslutet: installera om
+kortet med webbinstalleraren.
 
 1. Placera rumskortet på kartan som vanligt.
 2. Tryck på **Ändra rummet**. Under **Placera** står efter några sekunder
@@ -428,8 +436,9 @@ Livevyn visar testlampan som andra lampor: tänd, släckt eller **svarar
 inte** (när kortet inte är anslutet eller saknar testlampan). Du kan också
 tända och släcka den för hand i lampans kort.
 
-Lysdioden är alltid släckt när kortet startar. Var den tänd när kortet
-startade om tänder kärnan den igen när kortet är anslutet. När den riktiga
+Lysdioden är alltid släckt när kortet startar. Var den tänd och kortet är
+anslutet igen inom en minut tänder kärnan den igen. Efter ett längre
+avbrott förblir den släckt tills någon kommer in i rummet på nytt. När den riktiga
 lampan finns: ta bort testlampan från kartan och placera Zigbee-lampan.
 
 Utan lysdiod händer ingenting: firmware styr bara ett stift som inget är
