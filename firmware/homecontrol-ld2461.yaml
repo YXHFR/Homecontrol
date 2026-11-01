@@ -23,6 +23,9 @@ substitutions:
   # BH1750 (ljus) på I²C.
   i2c_sda_pin: GPIO8
   i2c_scl_pin: GPIO9
+  # Testlampan (valfri lysdiod med motstånd till GND). GPIO4 sitter på
+  # kantstiften på både DevKitC-1U och ESP32-S3-Zero och är inget strapping-stift.
+  test_lamp_pin: GPIO4
 
 packages:
   common: !include common.yaml
