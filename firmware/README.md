@@ -20,7 +20,7 @@ lika på båda (Wi-Fi-CSI, ljussensorn, API:t och uppdateringarna) finns i
 
 | Del | Kommentar |
 | --- | --- |
-| ESP32-S3-kort med extern antenn | Till exempel ESP32-S3-DevKitC-1U (modul WROOM-1U) med en U.FL-antenn. Inbyggd kretskortsantenn ger sämre CSI. |
+| ESP32-S3-kort med extern antenn | Till exempel ESP32-S3-DevKitC-1U (modul WROOM-1U) med en U.FL-antenn. Inbyggd kretskortsantenn ger sämre CSI. Det lilla [Waveshare ESP32-S3-Zero](#waveshare-esp32-s3-zero) fungerar också. |
 | HLK-LD2450 | 5 V-matning. Signalerna är 3,3 V. |
 | eller HLK-LD2461 | I stället för LD2450. Se [LD2461 i stället för LD2450](#ld2461-i-stället-för-ld2450). |
 | BH1750 | Ljussensor på I²C, 3,3 V. |
@@ -47,9 +47,11 @@ Stiften kan ändras med `substitutions` överst i `homecontrol.yaml` och
 
 ## Installera
 
-1. Öppna webbinstalleraren i Chrome eller Edge på en dator. Den är inte
-   publicerad på webben än: den byggs av workflowen Firmware och sparas som
-   artefakten `webbinstallerare` under workflowen i fliken Actions.
+1. Öppna webbinstalleraren i Chrome eller Edge på en dator. Den finns på
+   `https://homecontrol-installer.<ditt-namn>.workers.dev` när den är
+   publicerad (se [Publicera webbinstalleraren](#publicera-webbinstalleraren)).
+   Varje bygge sparas också som artefakten `webbinstallerare` under
+   workflowen Firmware i fliken Actions.
 2. Välj rum. Kortet får namnet `homecontrol-<rum>`. Välj också radarn som
    sitter på kortet: LD2450 eller LD2461. Med fel radar svarar kortets
    radar inte.
@@ -81,16 +83,55 @@ raderas och installeras om på samma sätt.
 
 ### Uppdatera
 
-- **Över nätverket:** fungerar först när webbinstalleraren är publicerad på
-  webben, vilket den inte är än. Kortet kollar var 6:e timme om
-  webbinstalleraren har en ny version och visar det i entiteten `Firmware`. Uppdateringen startar
+- **Över nätverket:** fungerar när webbinstalleraren är publicerad och
+  firmware på kortet är byggd med dess adress (variabeln `INSTALLER_URL`,
+  se [Publicera webbinstalleraren](#publicera-webbinstalleraren)). Ett kort
+  som installerades innan dess behöver installeras om en gång över USB.
+  Kortet kollar var 6:e timme om webbinstalleraren har en ny version och
+  visar det i entiteten `Firmware`. Uppdateringen startar
   bara när kärnan ber om det, efter att du har tryckt på **Uppdatera till
   …** (med den nya versionen) i rumskortets kort. Kortet hämtar då
   själv filen över https. Det tar inte emot firmware från någon annan.
-  Adressen är `yxhfr.github.io`, så GitHub-kontot **YXHFR får inte byta
-  namn**. Då kan någon annan ta namnet och skicka firmware till korten.
+  Adressen innehåller ditt namn på workers.dev, så **byt inte det namnet
+  och ta inte bort Cloudflare-kontot** så länge korten används. Då kan
+  någon annan ta namnet och skicka firmware till korten.
 - **Över USB:** kör webbinstalleraren igen och lämna **Erase device** tom.
   Kortet behåller Wi-Fi och nyckeln.
+
+### Publicera webbinstalleraren
+
+Webbinstalleraren publiceras på Cloudflare (en Worker med bara statiska
+filer, [`wrangler.jsonc`](../wrangler.jsonc)) varje gång firmware ändras på
+`main`. Adressen är https, vilket webbläsaren kräver för att få prata med
+kortet över USB (Web Serial). Ingen hemlighet finns i repot; ägaren ställer
+in det här en gång:
+
+1. **API-token.** Logga in på [Cloudflare](https://dash.cloudflare.com).
+   Klicka på profilbilden → **My Profile** → **API Tokens** → **Create
+   Token** och välj mallen **Edit Cloudflare Workers**. Begränsa token
+   till ditt eget konto (och dess zoner), och skapa den. Kopiera token;
+   den visas bara en gång.
+2. **Account ID.** Öppna **Workers & Pages** i Cloudflare. Under **Account
+   Details** finns **Account ID** med en kopieringsknapp.
+3. **Lägg in dem i GitHub.** I repot: **Settings** → **Secrets and
+   variables** → **Actions** → fliken **Secrets** → **New repository
+   secret**. Skapa `CLOUDFLARE_API_TOKEN` (token från steg 1) och
+   `CLOUDFLARE_ACCOUNT_ID` (från steg 2).
+4. **Publicera.** **Actions** → **Firmware** → **Run workflow** (på
+   `main`). När jobbet **Publicera webbinstalleraren på Cloudflare** är
+   klart finns sidan på `https://homecontrol-installer.<ditt-namn>.workers.dev`.
+   Adressen står i jobbets logg och under **Workers & Pages** i
+   Cloudflare. Första gången du använder Workers ber Cloudflare dig välja
+   namnet (`<ditt-namn>`).
+5. **Berätta adressen för korten.** Samma sida i GitHub som i steg 3, men
+   fliken **Variables** → **New repository variable**: `INSTALLER_URL` =
+   adressen från steg 4, utan `/` sist. Kör workflowen igen (steg 4). Nu
+   hämtar korten sina uppdateringar därifrån. Installera om korten en gång
+   över USB, så att de får adressen.
+
+Saknas hemligheterna hoppas publiceringen över med en notis, och
+workflowen blir ändå grön. Publiceringen körs bara från `main` i det här
+repot, aldrig från en PR eller en fork.
 
 ### Rummet finns inte i listan
 
@@ -141,6 +182,60 @@ har `Radar Target 4` och `5`.
 
 ESPectre lägger också till några egna inställningar och diagnostikvärden
 (tröskel, profil, paketflöden).
+
+## Waveshare ESP32-S3-Zero
+
+[ESP32-S3-Zero](https://www.waveshare.com/wiki/ESP32-S3-Zero) är ett
+mycket litet ESP32-S3-kort (4 MB flash, 2 MB PSRAM, USB-C). Firmware kan
+användas som den är, men det finns två saker att känna till.
+
+**Antennen.** Kortet har en liten keramisk antenn och inget uttag för
+extern antenn (U.FL). Wi-Fi-CSI (ESPectre) blir därför sämre än med en
+extern antenn. Radarn är ändå den viktigaste källan för närvaro och
+fungerar lika bra.
+
+**Stiften.** Enligt Waveshares pinout-bild och schema (på wikisidan ovan):
+
+| Stift | Var på kortet |
+| --- | --- |
+| GPIO8, GPIO9 | Kantstiften på högra sidan (märkta 8 och 9). |
+| GPIO17, GPIO18 | **Inte** på kantstiften. Bara som små lödpunkter på kortets undersida (märkta 17 och 18, bredvid 38–45). |
+| 5V, GND, 3V3 | Kantstiften på vänstra sidan, överst. |
+
+Ljussensorn (GPIO8 och GPIO9) kopplas alltså som vanligt. För radarn
+finns två sätt:
+
+1. **Löd på undersidan (rekommenderas).** Löd radarns TX till punkten 18
+   och radarns RX till punkten 17. Då passar firmware från
+   webbinstalleraren som den är, och kortet får uppdateringar över
+   nätverket.
+2. **Använd andra stift.** Till exempel GPIO1 (TX) och GPIO2 (RX) på
+   vänstra kanten, bredvid 5V och GND. Då måste du bygga firmware själv:
+
+   ```sh
+   esphome -s rum kok -s ld2450_tx_pin GPIO1 -s ld2450_rx_pin GPIO2 run firmware/homecontrol.yaml
+   esphome -s rum kok -s ld2461_tx_pin GPIO1 -s ld2461_rx_pin GPIO2 run firmware/homecontrol-ld2461.yaml
+   ```
+
+   **Uppdatera inte ett sådant kort från webbinstalleraren** (varken över
+   nätverket eller över USB). Den firmware har GPIO17 och GPIO18, och då
+   svarar radarn inte.
+
+Övrigt:
+
+| Från | Till ESP32-S3-Zero |
+| --- | --- |
+| Radarns 5V | 5V (kortet får ström via USB-C) |
+| Radarns GND | GND |
+| BH1750 VCC | 3V3 |
+| BH1750 GND | GND |
+
+- Kortet har bara den inbyggda USB-porten (ingen separat USB-UART-krets).
+  Det är den porten webbinstalleraren och Wi-Fi-inställningen använder,
+  så det fungerar som vanligt.
+- Kommer kortet inte in i installationsläget: håll knappen **BOOT** nere
+  när du sätter i USB-kabeln.
+- Den färgade lysdioden sitter på GPIO21 och används inte av firmware.
 
 ## LD2461 i stället för LD2450
 
