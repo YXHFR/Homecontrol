@@ -1,5 +1,10 @@
-import hashlib
+import http.client
 import json
+import re
+import socket
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import firmware_site
@@ -55,8 +60,8 @@ def test_rooms_in_repo_are_valid() -> None:
     assert parse_rooms(ROOMS_FILE.read_text(encoding="utf-8"))
 
 
-def test_manifest_has_usb_install_and_ota_parts() -> None:
-    data = manifest("kok", "1.2.3", "abc", "https://example.invalid/src")
+def test_manifest_has_only_the_usb_install() -> None:
+    data = manifest("kok", "1.2.3")
 
     assert data["name"] == "Homecontrol kok"
     assert data["version"] == "1.2.3"
@@ -64,12 +69,6 @@ def test_manifest_has_usb_install_and_ota_parts() -> None:
         {
             "chipFamily": "ESP32-S3",
             "parts": [{"path": "firmware/kok.bin", "offset": 0}],
-            "ota": {
-                "path": "firmware/kok.ota.bin",
-                "md5": "abc",
-                "summary": "Homecontrol 1.2.3",
-                "release_url": "https://example.invalid/src",
-            },
         }
     ]
 
@@ -77,19 +76,13 @@ def test_manifest_has_usb_install_and_ota_parts() -> None:
 def test_ld2461_manifest_points_at_its_own_files() -> None:
     ld2461 = next(radar for radar in RADARS if radar.id == "ld2461")
 
-    data = manifest("kok", "1.2.3", "abc", "src", ld2461)
+    data = manifest("kok", "1.2.3", ld2461)
 
     assert data["name"] == "Homecontrol kok (LD2461)"
     assert data["builds"] == [
         {
             "chipFamily": "ESP32-S3",
             "parts": [{"path": "firmware/ld2461-kok.bin", "offset": 0}],
-            "ota": {
-                "path": "firmware/ld2461-kok.ota.bin",
-                "md5": "abc",
-                "summary": "Homecontrol 1.2.3",
-                "release_url": "src",
-            },
         }
     ]
 
@@ -113,12 +106,13 @@ def test_every_room_is_built_for_both_radars() -> None:
     ]
 
 
-@pytest.mark.parametrize("radar", RADARS, ids=lambda radar: radar.id)
-def test_each_radar_package_fetches_updates_for_its_own_radar(radar: firmware_site.Radar) -> None:
-    """Ett kort med LD2461 får aldrig firmware för LD2450, och tvärtom."""
-    config = (REPO / "firmware" / radar.config).read_text(encoding="utf-8")
+@pytest.mark.parametrize("config", [radar.config for radar in RADARS] + ["common.yaml"])
+def test_room_cards_never_fetch_firmware_over_the_network(config: str) -> None:
+    """Rumskorten uppdateras bara över USB: ingen update, ota eller http_request."""
+    text = (REPO / "firmware" / config).read_text(encoding="utf-8")
 
-    assert f"source: ${{update_source}}/manifest-{radar.prefix}${{rum}}.json" in config
+    assert not re.search(r"^(update|ota|http_request):", text, re.MULTILINE)
+    assert "update_source" not in text
 
 
 def write_builds(directory: Path, rooms: list[str]) -> None:
@@ -127,7 +121,6 @@ def write_builds(directory: Path, rooms: list[str]) -> None:
         for room in rooms:
             name = radar.name(room)
             (directory / f"{name}.factory.bin").write_bytes(f"factory-{name}".encode())
-            (directory / f"{name}.ota.bin").write_bytes(f"ota-{name}".encode())
 
 
 def test_build_site_writes_firmware_manifests_and_pages(tmp_path: Path) -> None:
@@ -137,7 +130,7 @@ def test_build_site_writes_firmware_manifests_and_pages(tmp_path: Path) -> None:
     build_site(["kok", "hall"], tmp_path / "builds", out, "1.2.3", "https://example.invalid/src")
 
     assert (out / "firmware" / "kok.bin").read_bytes() == b"factory-kok"
-    assert (out / "firmware" / "hall.ota.bin").read_bytes() == b"ota-hall"
+    assert not list(out.glob("firmware/*.ota.bin"))
     assert (out / "firmware" / "ld2461-kok.bin").read_bytes() == b"factory-ld2461-kok"
     assert (out / "manifest-ld2461-hall.json").is_file()
     info = json.loads((out / "info.json").read_text())
@@ -150,7 +143,8 @@ def test_build_site_writes_firmware_manifests_and_pages(tmp_path: Path) -> None:
             {"id": "ld2461", "label": RADARS[1].label, "prefix": "ld2461-"},
         ],
     }
-    assert (out / "index.html").is_file()
+    for page in ["index.html", "starta.py", "starta.bat", "starta.sh"]:
+        assert (out / page).is_file(), page
 
 
 def test_manifest_paths_point_at_written_files(tmp_path: Path) -> None:
@@ -161,13 +155,13 @@ def test_manifest_paths_point_at_written_files(tmp_path: Path) -> None:
 
     manifest_file = out / "manifest-kok.json"
     build = json.loads(manifest_file.read_text())["builds"][0]
-    factory = manifest_file.parent / build["parts"][0]["path"]
-    ota = manifest_file.parent / build["ota"]["path"]
-    assert factory.read_bytes() == b"factory-kok"
-    assert build["ota"]["md5"] == hashlib.md5(ota.read_bytes(), usedforsecurity=False).hexdigest()
+    path = build["parts"][0]["path"]
+    # Relativ, så att sidan fungerar från vilken adress som helst (även localhost).
+    assert not path.startswith("/") and "://" not in path
+    assert (manifest_file.parent / path).read_bytes() == b"factory-kok"
 
 
-@pytest.mark.parametrize("missing", ["hall.factory.bin", "hall.ota.bin", "ld2461-hall.ota.bin"])
+@pytest.mark.parametrize("missing", ["hall.factory.bin", "ld2461-hall.factory.bin"])
 def test_build_site_fails_when_firmware_is_missing(tmp_path: Path, missing: str) -> None:
     write_builds(tmp_path, ["kok", "hall"])
     (tmp_path / missing).unlink()
@@ -209,3 +203,60 @@ def test_main_reports_bad_rooms_file(
     assert main(["rooms"]) == 1
 
     assert "Felaktiga rum" in capsys.readouterr().err
+
+
+def test_windows_start_script_has_crlf_line_endings() -> None:
+    """cmd.exe läser .bat-filer fel med bara LF (se .gitattributes)."""
+    data = (REPO / "firmware" / "installer" / "starta.bat").read_bytes()
+
+    assert data.count(b"\n") == data.count(b"\r\n") > 0
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def get(port: int, path: str) -> tuple[str, bytes]:
+    """Filtypen och innehållet, från servern på 127.0.0.1."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        assert response.status == 200, path
+        return response.getheader("Content-Type", ""), response.read()
+    finally:
+        connection.close()
+
+
+def test_start_script_serves_the_installer_on_localhost(tmp_path: Path) -> None:
+    write_builds(tmp_path / "builds", ["kok"])
+    out = tmp_path / "site"
+    build_site(["kok"], tmp_path / "builds", out, "1", "src")
+    (out / "esp-web-tools").mkdir()
+    (out / "esp-web-tools" / "install-button.js").write_text("export {};\n")
+    port = free_port()
+
+    server = subprocess.Popen(
+        [sys.executable, "-I", str(out / "starta.py"), "--no-browser", "--port", str(port)],
+        cwd=tmp_path,
+        stdout=subprocess.DEVNULL,
+    )
+    try:
+        for _ in range(100):
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=1).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+
+        content_type, _ = get(port, "/esp-web-tools/install-button.js")
+        # En modul körs bara om filtypen är JavaScript.
+        assert content_type.startswith("text/javascript")
+        _, body = get(port, "/manifest-kok.json")
+        path = json.loads(body)["builds"][0]["parts"][0]["path"]
+        assert get(port, "/" + path)[1] == b"factory-kok"
+    finally:
+        server.terminate()
+        server.wait(timeout=5)

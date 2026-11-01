@@ -68,17 +68,9 @@ api:
   # En omstart nollställer radarn och CSI-kalibreringen.
   reboot_timeout: 0s
 
-# Uppdatering över nätverket utan lösenord: kortet tar inte emot någon
-# firmware, utan hämtar den själv från update_source över https och
-# kontrollerar md5-summan. Det sker bara när någon trycker på "Install" på
-# Firmware-entiteten via det krypterade API:t (kärnan frågar användaren).
-http_request:
-  verify_ssl: true
-  # Följ inga omdirigeringar, så att en hämtning aldrig hamnar på vanlig http.
-  follow_redirects: false
-
-ota:
-  - platform: http_request
+# Ingen uppdatering över nätverket (ingen ota, ingen update, ingen
+# http_request). Kortet tar inte emot firmware över Wi-Fi och hämtar inget
+# från internet. Ny firmware installeras över USB med webbinstalleraren.
 
 script:
   # Släcker "Radar Online" om ingen ram kommit på 3 sekunder (kabel eller
