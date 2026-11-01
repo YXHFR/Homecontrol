@@ -1,0 +1,16 @@
+// Webbinstalleraren för rumskortens firmware, publicerad som en Cloudflare
+// Worker med bara statiska filer (ingen egen kod). .github/workflows/firmware.yml
+// bygger sidan till site/ och publicerar den härifrån med wrangler deploy.
+// Sidan nås på https://homecontrol-installer.<ditt-namn>.workers.dev
+// (Web Serial i webbläsaren kräver https).
+{
+  "name": "homecontrol-installer",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    // En fil som inte finns ger 404.
+    "directory": "./site"
+  },
+  "workers_dev": true,
+  // Inga extra förhandsadresser för varje version, bara den fasta adressen.
+  "preview_urls": false
+}
