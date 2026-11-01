@@ -1,4 +1,4 @@
-# Homecontrol – firmware för ett rumskort (ESP32-S3 med extern antenn) med
+# Homecontrol – firmware för ett rumskort (ESP32-S3, helst med extern antenn) med
 # radarn LD2450. Varianten med LD2461 är homecontrol-ld2461.yaml. Allt som är
 # lika på båda finns i common.yaml.
 #
@@ -22,11 +22,11 @@
 substitutions:
   rum: rum
   firmware_version: dev
-  # Var kortet hämtar uppdateringar (webbinstalleraren). Den är inte
-  # publicerad på webben än, så tills dess hittar kortet inga uppdateringar.
-  # Adressen innehåller GitHub-kontots namn. Byts namnet kan någon annan ta
-  # det och skicka firmware till korten, så kontot får inte byta namn.
-  update_source: https://yxhfr.github.io/Homecontrol
+  # Var kortet hämtar uppdateringar (webbinstalleraren på Cloudflare). CI
+  # sätter den riktiga adressen från repots variabel INSTALLER_URL (se
+  # .github/workflows/firmware.yml). Domänen .invalid finns aldrig, så ett
+  # kort som byggs utan adressen hittar inga uppdateringar.
+  update_source: https://homecontrol-installer.invalid
   # LD2450 (radar) på hårdvaru-UART.
   ld2450_tx_pin: GPIO17
   ld2450_rx_pin: GPIO18
