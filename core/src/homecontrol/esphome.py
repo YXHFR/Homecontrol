@@ -252,8 +252,9 @@ class CardReader:
         """Testlampans nyckel, eller None om kortet inte har någon testlampa."""
         self.led: LedState | None = None
         """Testlampans läge, eller None när det inte är känt."""
-        self.led_changed = False
-        """Testlampans läge har ändrats sedan `observations` senast anropades."""
+        self.has_led: bool | None = None
+        """Om kortet har en testlampa, eller None om det inte har anslutit än."""
+        self._led_changed = False
 
     def use_entities(self, entities: Iterable[EntityInfo], now: float) -> None:
         """Kortet har anslutit. Värdena från förra anslutningen gäller inte längre."""
@@ -265,6 +266,7 @@ class CardReader:
         self.led_key = next(
             (e.key for e in entities if isinstance(e, LightInfo) and e.name == CARD_LED), None
         )
+        self.has_led = self.led_key is not None
         self._values.clear()
         self.disconnected()
         self._heard_at = now
@@ -301,7 +303,12 @@ class CardReader:
     def _set_led(self, led: LedState | None) -> None:
         if led != self.led:
             self.led = led
-            self.led_changed = True
+            self._led_changed = True
+
+    def take_led_change(self) -> bool:
+        """Om testlampans läge har ändrats sedan förra anropet."""
+        changed, self._led_changed = self._led_changed, False
+        return changed
 
     def _sensor(self, name: str, state: SensorState, now: float) -> None:
         value = math.nan if state.missing_state else state.state
@@ -661,6 +668,10 @@ class EsphomeSource:
     def _remove(self, name: str) -> None:
         card = self._cards.pop(name)
         if card.link is not None:
+            led, led_key = card.reader.led, card.reader.led_key
+            if card.online and led is not None and led.on and led_key is not None:
+                # Ett kort som inte längre används ska inte lämnas med testlampan tänd.
+                card.link.light(led_key, False, 1.0)
             card.link.stop()
             card.link = None
         for part in PARTS:
@@ -750,6 +761,11 @@ class EsphomeSource:
         card.link.light(card.reader.led_key, on, brightness / 100)
         return True
 
+    def has_led(self, name: str) -> bool | None:
+        """Om kortet har en testlampa, eller None om det inte har anslutit sedan kärnan startade."""
+        card = self._cards.get(name)
+        return None if card is None else card.reader.has_led
+
     def subscribe_leds(self, listener: Callable[[str], None]) -> Callable[[], None]:
         """Anropar `listener` med kortets namn när dess testlampa ändras eller blir okänd."""
         self._led_listeners.append(listener)
@@ -776,8 +792,7 @@ class EsphomeSource:
             return
         for observation in card.reader.observations(card.room_id):
             self._emit(observation)
-        if card.reader.led_changed:
-            card.reader.led_changed = False
+        if card.reader.take_led_change():
             self._led_changed(card.name)
         self._notify()
 

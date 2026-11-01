@@ -12,9 +12,11 @@ krypterade ESPHome-anslutning (se esphome.py); ingen ny nätverkstjänst behövs
 Kortet tänder eller släcker ett stift (se firmware/common.yaml) och berättar
 sedan hur lysdioden är. Det beskedet lämnas till kärnan som `LampStateReported`.
 
-Lysdioden går bara att styra från kärnan, så ett besked från kortet är aldrig
-en ändring utifrån. Startar kortet om är lysdioden släckt; när kortet är
-anslutet igen får det kärnans senaste kommando på nytt.
+Bara den som har kortets API-nyckel kan styra lysdioden, i praktiken kärnan,
+så ett besked från kortet räknas aldrig som en ändring utifrån. Startar
+kortet om är lysdioden släckt; är kortet snart anslutet igen får det kärnans
+senaste kommando på nytt (se `RESEND_WITHIN_SECONDS`). En testlampa som inte
+finns på kartan hålls släckt.
 """
 
 import asyncio
@@ -28,10 +30,18 @@ from homecontrol.esphome import LedState, is_card_name
 from homecontrol.home import Home, LampProfile
 from homecontrol.lampdevices import FoundLamp
 from homecontrol.lamplimit import LampLimit
+from homecontrol.rules import FULL_BRIGHTNESS
 
 LAMP_ID_PREFIX = "led-"
 RELEASE_SECONDS = 1.0
 """Hur ofta kommandon som styrgränsen har skjutit upp prövas igen."""
+RESEND_WITHIN_SECONDS = 60.0
+"""Kommer kortet tillbaka inom så här lång tid får det kärnans senaste kommando igen.
+
+Det täcker en omstart eller ett kort Wi-Fi-avbrott, då rummet sällan hinner
+ändras. Efter ett längre avbrott kan rummet ha tömts, så då tänds lysdioden
+inte av ett gammalt kommando; den förblir släckt tills regeln tänder den igen.
+"""
 
 
 def card_led_lamp_id(card: str) -> str:
@@ -61,17 +71,20 @@ class CardLeds(Protocol):
 
     def set_led(self, name: str, on: bool, brightness: int) -> bool: ...
 
+    def has_led(self, name: str) -> bool | None: ...
+
     def subscribe_leds(self, listener: Callable[[str], None]) -> Callable[[], None]: ...
 
 
-_UNKNOWN = LedState(on=False, brightness=0)
-"""Står för att inget har rapporterats än (skiljer sig från alla riktiga lägen)."""
+_NEVER_REPORTED = LedState(on=False, brightness=0)
+"""Står för att inget har rapporterats om lampan än. Skiljer sig från alla riktiga lägen
+och från None, som betyder att lampan inte svarar."""
 
 
 class CardLedOutput:
     """Lamputgången för testlamporna på rumskorten.
 
-    `now` är tiden för styrgränsen i sekunder.
+    `now` är tiden i sekunder, för styrgränsen och för hur länge ett kort har varit borta.
     """
 
     def __init__(
@@ -79,6 +92,7 @@ class CardLedOutput:
     ) -> None:
         self._cards = cards
         self._home = home
+        self._now = now
         self._limit = LampLimit(now)
         self._sink: ObservationSink | None = None
         self._unsubscribe: Callable[[], None] | None = None
@@ -87,9 +101,14 @@ class CardLedOutput:
         self._wanted: dict[str, LampCommand] = {}
         """Kärnans senaste kommando till varje testlampa."""
         self._held: dict[str, LampCommand] = {}
-        """Kommandon som styrgränsen har skjutit upp, det senaste per lampa."""
+        """Kommandon som styrgränsen har skjutit upp, det senaste per lampa.
+
+        Ligger kvar även för en lampa som just har tagits bort från kartan, så
+        att den ändå blir släckt."""
         self._reported: dict[str, LedState | None] = {}
         """Det som senast rapporterades till kärnan om varje lampa."""
+        self._lost_at: dict[str, float] = {}
+        """När varje lampa slutade svara, för lampor som inte svarar."""
 
     # --- Livscykeln ---
 
@@ -118,7 +137,7 @@ class CardLedOutput:
         """Byter till ett ändrat hem och berättar hur nyplacerade testlampor är."""
         self._home = home
         self._lamps = card_led_lamps(home)
-        for lamps in (self._wanted, self._held, self._reported):
+        for lamps in (self._wanted, self._reported, self._lost_at):
             for lamp_id in set(lamps) - self._lamps:
                 del lamps[lamp_id]
         if self._sink is None:
@@ -134,25 +153,25 @@ class CardLedOutput:
         self._wanted[command.lamp_id] = command
         # Ett nytt kommando ersätter ett som har skjutits upp.
         self._held.pop(command.lamp_id, None)
-        self._try(command)
+        self._send_or_hold(command)
 
     def release_held(self) -> None:
         """Skickar de uppskjutna kommandona till lampor som får styras igen."""
         for lamp_id, command in list(self._held.items()):
             if self._limit.allow(lamp_id):
                 del self._held[lamp_id]
-                self._set(command)
+                self._send_to_card(command)
 
-    def _try(self, command: LampCommand) -> None:
+    def _send_or_hold(self, command: LampCommand) -> None:
         if self._limit.allow(command.lamp_id):
-            self._set(command)
+            self._send_to_card(command)
         else:
             self._held[command.lamp_id] = command
 
-    def _set(self, command: LampCommand) -> None:
+    def _send_to_card(self, command: LampCommand) -> None:
         card = led_card(command.lamp_id)
         if card is not None:
-            # Svarar inte kortet nu får det kommandot när det ansluter igen.
+            # Svarar inte kortet nu avgör `_led_changed` vad det får när det är tillbaka.
             self._cards.set_led(card, command.on, command.brightness)
 
     # --- Det kortet berättar ---
@@ -163,18 +182,32 @@ class CardLedOutput:
 
     def _led_changed(self, card: str) -> None:
         lamp_id = card_led_lamp_id(card)
-        if lamp_id not in self._lamps:
-            return
         state = self._cards.led(card)
-        came_back = self._reported.get(lamp_id, _UNKNOWN) is None and state is not None
+        if lamp_id not in self._lamps:
+            if state is not None and state.on:
+                # Lampan har tagits bort från kartan medan kortet inte svarade.
+                self._send_or_hold(LampCommand(lamp_id, False, "Testlampan finns inte på kartan"))
+            return
+        lost_for = self._lost_for(lamp_id, state)
         self._report(lamp_id, state)
         wanted = self._wanted.get(lamp_id)
-        if came_back and wanted is not None and not _matches(state, wanted):
-            # Kortet har varit borta, till exempel startat om, och glömt kommandot.
-            self._try(wanted)
+        if lost_for is None or wanted is None or _already(state, wanted):
+            return
+        if not wanted.on or lost_for <= RESEND_WITHIN_SECONDS:
+            # Kortet har varit borta en kort stund, till exempel startat om, och
+            # glömt kommandot. Ett släck-kommando är alltid säkert att skicka igen.
+            self._send_or_hold(wanted)
+
+    def _lost_for(self, lamp_id: str, state: LedState | None) -> float | None:
+        """Hur länge lampan var borta, om den svarar igen nu. Annars None."""
+        if state is None:
+            self._lost_at.setdefault(lamp_id, self._now())
+            return None
+        lost_at = self._lost_at.pop(lamp_id, None)
+        return None if lost_at is None else self._now() - lost_at
 
     def _report(self, lamp_id: str, state: LedState | None) -> None:
-        if self._reported.get(lamp_id, _UNKNOWN) == state:
+        if self._reported.get(lamp_id, _NEVER_REPORTED) == state:
             return
         self._reported[lamp_id] = state
         if self._sink is None:
@@ -182,25 +215,33 @@ class CardLedOutput:
         if state is None:
             self._sink(LampStateReported(lamp_id, None))
         else:
-            self._sink(LampStateReported(lamp_id, state.on, state.brightness if state.on else 100))
+            # En släckt lampa rapporteras med full ljusstyrka, som i `LampStateReported`.
+            brightness = state.brightness if state.on else FULL_BRIGHTNESS
+            self._sink(LampStateReported(lamp_id, state.on, brightness))
 
     # --- Kartredigeraren (se lampdevices.py) ---
 
     def lamps(self) -> list[FoundLamp]:
-        """En testlampa för varje placerat kort, så att den kan placeras på kartan."""
+        """En testlampa för varje placerat kort, så att den kan placeras på kartan.
+
+        Kort som har svarat utan någon testlampa (äldre firmware) hoppas över.
+        Namnet bygger på kortets eget namn, inte på det kortet säger om sig själv
+        med mDNS, som vem som helst i nätet kan förfalska.
+        """
         return [
             FoundLamp(
                 card_led_lamp_id(card.name),
-                f"LED på rumskort {card.friendly_name}"[:100],
+                f"LED på rumskort {card.name}",
                 LampProfile.GENERIC,
                 placed=card_led_lamp_id(card.name) in self._lamps,
             )
             for card in self._cards.cards()
-            if card.placed
+            if card.placed and self._cards.has_led(card.name) is not False
         ]
 
 
-def _matches(state: LedState | None, command: LampCommand) -> bool:
+def _already(state: LedState | None, command: LampCommand) -> bool:
+    """Lysdioden är redan som kommandot ber om."""
     if state is None or state.on != command.on:
         return False
     return not command.on or state.brightness == command.brightness

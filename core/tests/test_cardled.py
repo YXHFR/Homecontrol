@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from fake_cards import CARD, SECRET, FakeLink, FakeNetwork, Recording, card_home, recording
 from homecontrol.app import create_app
 from homecontrol.cardled import (
+    RESEND_WITHIN_SECONDS,
     CardLedOutput,
     card_led_lamp_id,
     card_led_lamps,
@@ -215,13 +216,69 @@ def test_a_card_that_restarts_gets_the_latest_command_again() -> None:
     assert harness.lamp() == (None, False)
 
     # Efter omstarten är lysdioden släckt (restore_mode ALWAYS_OFF).
+    harness.now += RESEND_WITHIN_SECONDS / 2
     harness.connect()
     assert harness.commands() == [(True, 1.0), (True, 1.0)]
     assert harness.lamp() == (True, True)
 
 
+def test_after_a_long_outage_an_old_command_does_not_light_an_empty_room() -> None:
+    harness = Harness()
+    harness.connect()
+    harness.walk_in()
+    harness.link.events.disconnected()
+    harness.settle()
+
+    # En timme senare, när rummet kan ha tömts, startar kortet igen.
+    harness.now += 3600
+    harness.connect()
+    assert harness.commands() == [(True, 1.0)]
+    assert harness.lamp() == (False, True)
+
+
+def test_a_removed_lamp_is_turned_off_when_its_card_answers_again() -> None:
+    harness = Harness()
+    harness.connect()
+    harness.walk_in()
+    harness.link.events.disconnected()
+    harness.settle()
+
+    # Lampan tas bort från kartan medan kortet inte svarar, så släck-kommandot når inte fram.
+    without_led = card_home()
+    harness.controller.replace_home(without_led)
+    harness.leds.use_home(without_led)
+
+    # Kortet kommer tillbaka utan omstart, med lysdioden fortfarande tänd.
+    harness.link.events.connected(with_led(harness.walk))
+    harness.link.events.state(light(LED_KEY, True, 1.0))
+    harness.settle()
+    assert harness.commands()[-1] == (False, 1.0)
+
+
+def test_a_card_taken_off_the_map_turns_its_led_off() -> None:
+    harness = Harness()
+    harness.connect()
+    harness.walk_in()
+    link = harness.link
+
+    harness.source.use_home(card_home(placed=False))
+    assert link.lights[-1] == (LED_KEY, False, 1.0)
+    assert not link.running
+
+
+def test_a_lamp_placed_before_its_card_answers_is_unknown_until_then() -> None:
+    harness = Harness()
+    assert harness.lamp() == (None, False)
+    harness.leds.send(LampCommand(LED, on=True, reason="test"))
+    assert harness.commands() == []  # kortet svarar inte än
+
+    harness.connect()
+    assert harness.lamp() == (False, True)
+
+
 def test_a_card_without_the_led_still_works_and_the_lamp_does_not_answer() -> None:
     harness = Harness()
+    assert [lamp.id for lamp in harness.leds.lamps()] == [LED]  # inte anslutet än
     harness.link.events.connected(harness.walk.entities)
     harness.settle()
     harness.walk_in()
@@ -230,6 +287,8 @@ def test_a_card_without_the_led_still_works_and_the_lamp_does_not_answer() -> No
     assert card.problems == ()  # testlampan är valfri
     assert harness.commands() == []
     assert harness.lamp() == (None, False)
+    # Kortet har ingen testlampa, så den erbjuds inte i kartredigeraren.
+    assert harness.leds.lamps() == []
 
 
 def test_other_lamps_are_left_alone() -> None:
@@ -258,3 +317,15 @@ def test_without_cards_the_editor_lists_no_leds_and_the_led_is_virtual() -> None
     with TestClient(app) as client:
         assert client.get("/api/lamps").json() == []
     assert app.state.simulation.enabled
+
+
+def test_a_placed_led_is_real_so_the_simulation_starts_off() -> None:
+    app = create_app(
+        allowed_hosts={"testserver"},
+        home=led_home(),
+        esphome_secret=SECRET,
+        card_network=FakeNetwork(),
+    )
+    with TestClient(app) as client:
+        assert client.get("/api/lamps").json()[0]["placed"] is True
+    assert not app.state.simulation.enabled

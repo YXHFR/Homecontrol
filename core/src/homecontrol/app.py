@@ -32,7 +32,7 @@ from homecontrol.esphome import (
 from homecontrol.history import History
 from homecontrol.home import Home
 from homecontrol.homefile import example_home
-from homecontrol.lampdevices import LampDevices, create_lamp_devices_router
+from homecontrol.lampdevices import create_lamp_devices_router
 from homecontrol.live import create_live_router, run_timer
 from homecontrol.simulation import (
     SimulatedLampOutput,
@@ -201,8 +201,7 @@ def create_app(
         )
     )
     app.include_router(create_cards_router(cards, allowed_hosts))
-    lamp_devices: list[LampDevices] = [o for o in (zigbee, card_leds) if o is not None]
-    app.include_router(create_lamp_devices_router(lamp_devices, allowed_hosts))
+    app.include_router(create_lamp_devices_router(real_outputs, allowed_hosts))
     changes = HomeChanges(
         controller,
         home_store if home_store is not None else MemoryStore(),
