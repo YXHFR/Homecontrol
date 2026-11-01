@@ -16,6 +16,12 @@ docker compose up -d
 Sidan finns sedan på http://localhost:8000. Utan hårdvara kan allt provas i
 simuleringsläget.
 
+**Windows 11:** följ [WINDOWS.md](WINDOWS.md), steg för steg (Ubuntu i WSL,
+Docker, brandväggen och Zigbee-stickan).
+
+**Rumskortens firmware** installeras från webbläsaren med webbinstalleraren,
+se [firmware/README.md](firmware/README.md#installera).
+
 ## Delar
 
 | Mapp         | Innehåll                                         |
