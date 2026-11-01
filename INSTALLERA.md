@@ -220,8 +220,215 @@ WINDOWS.md steg 7 för hur du hittar adressen).
 får en ström av händelser från kärnan, så att kartan uppdateras direkt när
 något händer, utan att du laddar om.
 
-**Kontrollera:** du ser en karta med ett exempelhem. Så länge
-`ESPHOME_SECRET` är tom är **simuleringen** påslagen: Homecontrol låtsas
-att det finns rumskort, så att du kan prova allt utan hårdvara.
+**Kontrollera:**
 
-<!-- AVSNITT 6–10 FORTSÄTTER -->
+- Överst på sidan står **Homecontrol**, och bredvid det **hälsoraden**. Den
+  ska visa **Allt fungerar** (eller **Zigbee-stickan svarar inte** om du
+  inte har kopplat in någon sticka än).
+- Du ser en karta. Är hemmet tomt står det **Hemmet har inga rum än** och
+  en knapp **Ändra rummet**.
+- Står **Simulering** överst och har kartan en randig kant är
+  **simuleringen** på: Homecontrol låtsas att det finns rumskort, så att du
+  kan prova allt utan hårdvara. Knappen **Sim** slår på och av den.
+
+Prova gärna simuleringen nu: tryck på **+ Person** och dra personen in i
+ett rum. Rummet blir **upptaget** och lampan tänds om det är mörkt (dra
+reglaget **Dagsljus** åt vänster).
+
+## 7. Installera det första rumskortet
+
+Rumskortet är ett litet kretskort (ESP32-S3) med en radar. Det behöver
+**firmware**, programmet som körs på kortet. Den läggs på över USB med
+**webbinstalleraren**, en webbsida som du startar på din egen dator.
+
+### 7a. Ge kärnan en hemlighet för korten
+
+**Gör så här:** i Ubuntu, i mappen `Homecontrol`:
+
+```sh
+openssl rand -hex 32
+nano .env
+```
+
+Klistra in svaret efter `ESPHOME_SECRET=`, spara (Ctrl+O, Enter) och stäng
+(Ctrl+X). Starta sedan om det som ändrats:
+
+```sh
+docker compose up -d
+```
+
+**Vad händer?** Kärnan och varje kort pratar krypterat, med en nyckel per
+kort. Nyckeln räknas fram ur hemligheten och kortets namn, ungefär som en
+nyckelsmed som kan göra en ny nyckel till varje dörr utifrån en
+huvudnyckel. Kortet får sin nyckel första gången kärnan ansluter. `docker
+compose up -d` startar om bara de containrar vars inställningar har ändrats.
+
+**Kontrollera:** `grep ESPHOME_SECRET .env` visar en lång rad med siffror
+och bokstäver efter `=`.
+
+### 7b. Lägg firmware på kortet
+
+**Gör så här:** följ [firmware/README.md, avsnittet
+Installera](firmware/README.md#installera), steg 1–6. I korthet:
+
+1. GitHub → **Actions** → **Firmware** → den senaste gröna körningen på
+   **main** → **Artifacts** → **webbinstallerare** (du måste vara inloggad).
+2. Packa upp zip-filen (**Extrahera alla…**).
+3. Dubbelklicka på **`starta.bat`** i mappen. Edge öppnar
+   <http://localhost:8765>.
+4. Välj rum och radar, anslut kortet med USB-C, klicka på **CONNECT**,
+   välj kortets port och klicka på **Anslut**.
+5. **INSTALL HOMECONTROL …** → kryssa i **Erase device** → **NEXT** →
+   **INSTALL**. Vänta tills det står **Installation complete!**
+6. Ange Wi-Fi-nätverk och lösenord när sidan frågar (Improv) och klicka på
+   **CONNECT**.
+
+**Vad händer?**
+
+- `starta.bat` startar en liten webbserver som bara din egen dator når.
+  Webbläsaren litar på `localhost`, och därför får sidan prata med USB
+  (det kallas **Web Serial**). Det fungerar i Chrome och Edge, inte i
+  Firefox eller Safari.
+- Sidan skickar firmware-filen till kortet över kabeln, som att skriva en
+  ny bok på ett tomt block. **Erase device** suddar först ut allt gammalt.
+- **Improv** är ett sätt att ge kortet Wi-Fi-lösenordet över kabeln i
+  stället för att skriva in det i firmware. Lösenordet stannar på kortet.
+- Kortet hämtar aldrig något från internet. En ny version installerar du
+  på samma sätt, över USB, med **Erase device** tom.
+
+**Kontrollera:** efter en halv minut visar hälsoraden i Homecontrol
+**+1 ny enhet**. Tryck på den: kortet står som **Nytt rumskort hittat ·
+inte placerat**. Det placerar du på kartan i steg 9.
+
+Syns kortet inte i webbinstalleraren: se
+[Felsökning](firmware/README.md#felsökning) (datakabel, knappen **BOOT** på
+ESP32-S3-Zero, drivrutin, porten upptagen).
+
+## 8. Koppla Zigbee-lampan
+
+Lamporna kopplas i **Zigbee2MQTT:s egen webbsida**, inte i Homecontrol.
+Det är med flit: kärnan får styra lamporna men inte släppa in nya enheter i
+Zigbee-nätet.
+
+**Gör så här:**
+
+1. Öppna <http://localhost:8080> och logga in med lösenordet
+   `ZIGBEE2MQTT_AUTH_TOKEN` från `.env`.
+2. Första gången visar Zigbee2MQTT en guide. Välj din Zigbee-stickas typ
+   och port (porten är redan ifylld som `/dev/zigbee`) och spara.
+3. Klicka på knappen för att släppa in enheter, överst på sidan (på
+   engelska **Permit join (All)**). Den är öppen i några minuter.
+4. Sätt lampan i parkopplingsläge. Det står i lampans manual; ofta tänder
+   och släcker man den 5–6 gånger i rad tills den blinkar.
+5. Vänta tills lampan syns i listan **Devices** i Zigbee2MQTT. Ge den
+   gärna ett namn du känner igen, till exempel `Taklampa kök`.
+6. Klicka på samma knapp igen för att stänga för nya enheter.
+
+**Vad händer?** Zigbee-nätet är som en klubb med dörrvakt. **Permit join**
+öppnar dörren en stund så att lampan får komma in och får en egen adress.
+Sedan skickar Zigbee2MQTT lampans läge som meddelanden till MQTT-brokern,
+och kärnan läser dem där. När kärnan vill tända lampan skickar den ett
+meddelande tillbaka samma väg.
+
+**Kontrollera:** i Homecontrol visar hälsoraden **+1 ny enhet** (eller
+**+2 nya enheter** tillsammans med rumskortet), och lampan står som **Ny
+lampa hittad · inte placerad**.
+
+## 9. Rita rummet på kartan
+
+**Gör så här:**
+
+1. Tryck på **Ändra rummet**. Överst står nu **Ändrar rummet** och en
+   knapp **Klar**.
+2. Under **Rita**: välj **Rum, rektangel**. Tryck där ett hörn av rummet
+   är och dra till hörnet snett emot. Släpp.
+   (Med **Rum, fri form** klickar du på varje hörn och till sist på det
+   första hörnet igen.)
+3. Rummet är valt. Skriv rummets namn i rutan **Namn** under **Valt på
+   kartan** och tryck Enter.
+4. Har du en planritning: **Ladda upp bild** under **Planritning**, och
+   sedan **Skala bilden**. Klicka på två punkter vars avstånd du vet, skriv
+   avståndet under **Avstånd i meter** och tryck på **Skala**. Då blir
+   måtten rätt.
+5. Under **Placera** står **Nya rumskort som kärnan har hittat:** och
+   **Nya lampor som kärnan har hittat:**. Klicka på **Placera
+   homecontrol-…** och sedan på lampans **Placera …**.
+6. Välj **Välj och flytta** och dra kortet och lampan dit de sitter i
+   verkligheten. Vrid kortet med ringen så att det pekar dit radarn
+   tittar.
+7. Exempelhemmets rum behöver du inte: välj dem och tryck på **Ta bort
+   rummet**.
+8. Tryck på **Klar**.
+
+**Vad händer?** Kartan är kärnans bild av hemmet. Den sparas i databasen
+direkt när du ändrar något. Radarn säger bara "en person står 2 meter
+framför mig och 1 meter till vänster". Med kortets läge och riktning på
+kartan räknar kärnan om det till en plats i rummet, ungefär som att läsa en
+vägbeskrivning utifrån var någon står och åt vilket håll den tittar.
+
+När kortet placeras ansluter kärnan till det och ger det dess nyckel.
+Placera därför kortet så snart det har fått Wi-Fi.
+
+**Kontrollera:**
+
+- Under verktygen står **Alla ändringar är sparade.**
+- Hälsoraden visar **Allt fungerar** och inte längre **ny enhet**.
+- Ladda om sidan: rummet, kortet och lampan finns kvar.
+
+## 10. Se närvaro live
+
+**Gör så här:**
+
+1. Stäng av simuleringen om den är på: tryck på **Sim** så att
+   **Simulering** försvinner överst.
+2. Gå in i rummet.
+3. Titta på kartan.
+
+**Vad händer?** Radarn mäter ungefär 10 gånger i sekunden var personer är
+och skickar det till kärnan. Kärnan lägger ihop det med Wi-Fi-rörelsen
+(**CSI**, hur Wi-Fi-signalen störs när någon rör sig) och bestämmer om
+rummet är upptaget. Är det mörkt tänds lampan; när rummet har varit tomt en
+stund släcks den. Webbsidan får varje ändring direkt från kärnan.
+
+**Kontrollera:**
+
+- En **fylld prick** följer dig på kartan. En **streckad ring** betyder att
+  radarn har tappat dig en kort stund men att kärnan minns var du var.
+- Rummets kort visar **upptaget**, och lampan tänds om det är mörkt.
+  Rummet står kvar som upptaget ungefär 10 sekunder efter att du gått ut.
+- Hamnar pricken på fel sida om kortet: öppna kortets kort → **Fler
+  inställningar** → kryssa i **Spegelvänd sidled**.
+- Tänder du lampan för hand i dess kort står det **Manuellt läge**.
+  **Automatik igen** lämnar tillbaka den till Homecontrol.
+
+Vill du att lampan tänds vid rätt ljusnivå: tryck på **Mät lampornas
+ljus** i rummets kort och sedan **Starta kalibreringen**. Kärnan tänder och
+släcker lamporna och mäter med kortets ljussensor hur mycket ljus var och
+en ger.
+
+## Vad du lärt dig
+
+- Homecontrol är flera små program i **containrar** som startas med
+  `docker compose up -d` och pratar med varandra.
+- **Kärnan** fattar besluten, **databasen** minns, **MQTT-brokern** delar
+  ut meddelanden och **Zigbee2MQTT** pratar med lamporna.
+- `.env` håller alla lösenord och stannar på din dator.
+- Rumskorten får firmware över **USB** med webbinstalleraren som du kör
+  lokalt, och Wi-Fi med **Improv**. De hämtar inget från internet.
+- Kartan kopplar ihop radarns mätningar med verkliga platser i hemmet.
+- Du kan alltid kontrollera läget med `docker compose ps` och hälsoraden.
+
+## Nästa steg
+
+- **Fler rum:** ett rumskort per rum. Upprepa steg 7b och 9.
+- **Zoner:** rita till exempel en **Stillhetszon** vid soffan under
+  **Zoner** i **Ändra rummet**, så att lampan inte släcks när du sitter
+  still.
+- **Inställningar för rummet:** välj rummet i **Ändra rummet**. Där
+  ställer du in när lampan tänds och släcks, till exempel **Tänd när det är
+  mörkare än (lux)** och **Släck när rummet varit tomt i (minuter)**.
+- **Starta med Windows:** se [WINDOWS.md](WINDOWS.md#starta-allt-när-windows-startar).
+- **Uppdatera Homecontrol:** `git pull` och `docker compose up -d` i mappen
+  `Homecontrol`. Rumskorten uppdaterar du över USB (se
+  [firmware/README.md](firmware/README.md#uppdatera)).
+- **Dörrklocka (valfritt):** se [firmware/README.md](firmware/README.md#dörrklockan).
