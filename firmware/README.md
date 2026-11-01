@@ -104,7 +104,7 @@ Sidan serveras bara till din egen dator, inte till hemnätet. Den använder
 port 8765, eftersom Homecontrol själv svarar på 8000. Webbläsaren räknar
 `localhost` som säker, så den får prata med kortet över USB utan https.
 
-Kommandot som körs är `python starta.py` (`py -3 starta.py` på Windows).
+Kommandot som körs är `python3 starta.py` (`py -3 starta.py` på Windows).
 Det startar en liten webbserver i mappen, ungefär som `python -m
 http.server 8765 --bind 127.0.0.1`, men med rätt filtyp för JavaScript
 även på Windows.
@@ -212,9 +212,15 @@ Korten uppdateras över USB, på samma sätt som de installeras: ladda ner den
 nya webbinstalleraren (steg 1), starta den och installera med rutan
 **Erase device** tom. Kortet behåller Wi-Fi och nyckeln till Homecontrol.
 
-Korten har ingen uppdatering över nätverket. De tar inte emot firmware
+Rumskorten har ingen uppdatering över nätverket. De tar inte emot firmware
 över Wi-Fi och hämtar inget från internet. Det gör att ingen annan kan byta
 firmware på dem, och att de inte beror på någon webbsida som kan försvinna.
+
+**Kort med äldre firmware** (installerade före den här ändringen) har
+kvar en uppdatering över nätverket i sin firmware. Installera om dem en gång
+över USB enligt ovan, med **Erase device** tom. Kärnan ber inte längre korten
+att uppdatera sig, men först efter ominstallationen är funktionen borta från
+kortet.
 
 ### Publicera på Cloudflare (valfritt)
 
@@ -400,7 +406,8 @@ med LD2461, och kontrollera också att
 - Ingen egen åtkomstpunkt eller captive portal. ESPHome:s captive portal
   tar med firmwareuppladdning utan lösenord och startar av sig själv när
   Wi-Fi försvinner. Byter du Wi-Fi-nät ställer du in det igen via USB.
-- Ingen uppdatering över nätverket. Ny firmware installeras över USB.
+- Rumskorten har ingen uppdatering över nätverket. Ny firmware installeras
+  över USB.
 - Kortet startar inte om när kärnan är borta. Det startar bara om om
   Wi-Fi är borta i 15 minuter.
 - ESPectre skickar ping till routern för att få jämn CSI-trafik.

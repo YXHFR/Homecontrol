@@ -2,14 +2,17 @@
 
 Den här guiden tar dig från en tom dator till ett rum där lampan tänds när
 du går in. Den är skriven för dig som inte kodar men vill förstå vad som
-händer. Varje steg har tre delar:
+händer. Steg 2–10 har tre delar var:
 
 - **Gör så här:** exakt vad du gör, med kommandon att kopiera.
 - **Vad händer?** en kort förklaring av vad som sker bakom kulisserna.
 - **Kontrollera:** hur du ser att det fungerade innan du går vidare.
 
-Ta ett steg i taget. Fungerar inte kontrollen: stanna där och läs
-felsökningen i den länkade guiden, innan du går vidare.
+Ta ett steg i taget. Fungerar inte kontrollen: stanna där innan du går
+vidare. Läs felsökningen i [WINDOWS.md](WINDOWS.md#om-något-inte-fungerar)
+och [firmware/README.md](firmware/README.md#felsökning), och titta i
+loggen med `docker compose logs <namn>` (till exempel `docker compose logs
+core`).
 
 > Projektet är under arbete och provas just nu i ett rum. Räkna med att
 > något kan behöva justeras.
@@ -112,6 +115,9 @@ git clone https://github.com/YXHFR/Homecontrol.git
 cd Homecontrol
 ```
 
+`sudo apt install git` installerar programmet git i Ubuntu. `sudo` betyder
+att du gör det som administratör; Ubuntu frågar då efter ditt lösenord.
+
 **Vad händer?** **Git** är ett program som håller reda på alla versioner
 av koden. **Klona** betyder att hämta en egen kopia av hela projektet (ett
 **repo**, förkortning av repository, "förråd") från GitHub till din dator.
@@ -144,7 +150,8 @@ Skapa lösenord med:
 openssl rand -hex 24
 ```
 
-Kör kommandot en gång för varje lösenord och kopiera svaret. I `nano`
+Kommandot skapar en slumpad rad med siffror och bokstäver. Kör det en gång
+för varje lösenord och kopiera svaret. I `nano`
 sparar du med Ctrl+O och Enter och stänger med Ctrl+X.
 
 **Vad betyder raderna?**
@@ -186,7 +193,8 @@ Första gången hämtas programmen från nätet. Det tar några minuter.
 **Vad händer?** `docker compose` läser filen `compose.yaml`, som är en
 lista över alla containrar och hur de hänger ihop. `up` startar dem, och
 `-d` betyder att de körs i bakgrunden, så att du kan stänga fönstret. De
-startar också av sig själva efter en omstart.
+startar också av sig själva efter en omstart (på Windows först när Ubuntu
+startar, se [WINDOWS.md](WINDOWS.md#starta-allt-när-windows-startar)).
 
 | Container | Vad den gör |
 | --- | --- |
@@ -206,14 +214,15 @@ docker compose ps
 ```
 
 `core`, `db`, `mosquitto` och `zigbee2mqtt` ska ha **Up** i kolumnen
-STATUS (gärna med **(healthy)**). Står något som **Restarting** eller
+STATUS (gärna med **(healthy)**, som betyder att programmet har klarat sin
+egen hälsokontroll). Står något som **Restarting** eller
 saknas: titta i loggen med `docker compose logs core` (byt `core` mot
 containerns namn).
 
 ## 6. Öppna webben
 
 **Gör så här:** öppna <http://localhost:8000> i webbläsaren på samma
-dator. Från mobilen i hemnätet: `http://<datorns adress>:8000` (se
+dator. `localhost` betyder "den här datorn", och `8000` är porten. Från mobilen i hemnätet: `http://<datorns adress>:8000` (se
 WINDOWS.md steg 7 för hur du hittar adressen).
 
 **Vad händer?** Kärnan är också en liten webbserver. Sidan i webbläsaren
@@ -243,6 +252,9 @@ Rumskortet är ett litet kretskort (ESP32-S3) med en radar. Det behöver
 
 ### 7a. Ge kärnan en hemlighet för korten
 
+Har du redan fyllt i `ESPHOME_SECRET` (i steg 4 eller WINDOWS.md steg 7):
+hoppa över det här steget. Byt aldrig en hemlighet som redan finns.
+
 **Gör så här:** i Ubuntu, i mappen `Homecontrol`:
 
 ```sh
@@ -260,13 +272,15 @@ docker compose up -d
 **Vad händer?** Kärnan och varje kort pratar krypterat, med en nyckel per
 kort. Nyckeln räknas fram ur hemligheten och kortets namn, ungefär som en
 nyckelsmed som kan göra en ny nyckel till varje dörr utifrån en
-huvudnyckel. Kortet får sin nyckel första gången kärnan ansluter. `docker
-compose up -d` startar om bara de containrar vars inställningar har ändrats.
+huvudnyckel. Kortet får sin nyckel första gången kärnan ansluter.
 
 **Kontrollera:** `grep ESPHOME_SECRET .env` visar en lång rad med siffror
 och bokstäver efter `=`.
 
 ### 7b. Lägg firmware på kortet
+
+**Actions** är GitHubs byggrobot, som bygger firmware åt dig varje gång
+koden ändras. **Artifacts** är filerna den sparar efter bygget.
 
 **Gör så här:** följ [firmware/README.md, avsnittet
 Installera](firmware/README.md#installera), steg 1–6. I korthet:
@@ -289,12 +303,13 @@ Installera](firmware/README.md#installera), steg 1–6. I korthet:
   Webbläsaren litar på `localhost`, och därför får sidan prata med USB
   (det kallas **Web Serial**). Det fungerar i Chrome och Edge, inte i
   Firefox eller Safari.
-- Sidan skickar firmware-filen till kortet över kabeln, som att skriva en
-  ny bok på ett tomt block. **Erase device** suddar först ut allt gammalt.
+- Sidan skickar firmware-filen till kortet över kabeln, som att spela in
+  en ny låt på ett kassettband. **Erase device** suddar bandet först.
 - **Improv** är ett sätt att ge kortet Wi-Fi-lösenordet över kabeln i
   stället för att skriva in det i firmware. Lösenordet stannar på kortet.
-- Kortet hämtar aldrig något från internet. En ny version installerar du
-  på samma sätt, över USB, med **Erase device** tom.
+
+Kortet hämtar aldrig något från internet. En ny version installerar du på
+samma sätt, över USB, med **Erase device** tom.
 
 **Kontrollera:** efter en halv minut visar hälsoraden i Homecontrol
 **+1 ny enhet**. Tryck på den: kortet står som **Nytt rumskort hittat ·
