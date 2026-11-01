@@ -28,3 +28,6 @@ mosquitto/acl   text eol=lf
 *.woff  binary
 *.woff2 binary
 *.ttf   binary
+
+# Windows-skript (webbinstallerarens starta.bat) behöver CRLF för att cmd ska läsa dem rätt.
+*.bat   text eol=crlf

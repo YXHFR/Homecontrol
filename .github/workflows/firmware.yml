@@ -3,23 +3,16 @@ name: Firmware
 # Validerar och bygger rumskortens firmware, för korten med LD2450
 # (firmware/homecontrol.yaml) och med LD2461 (firmware/homecontrol-ld2461.yaml),
 # och lägger ihop den till webbinstalleraren, som sparas som artefakten
-# "webbinstallerare".
+# "webbinstallerare". Det rekommenderade sättet är att ladda ner artefakten,
+# packa upp den och starta den på den egna datorn (starta.bat / starta.sh,
+# http://localhost:8765). Allt finns i mappen, så det fungerar utan internet.
+# Korten hämtar ingen firmware över nätverket; de uppdateras över USB.
 #
-# Från main publiceras webbinstalleraren på Cloudflare (Workers med statiska
-# filer, firmware/wrangler.jsonc), aldrig från en PR eller en fork.
-# Ägaren ställer in det en gång (steg för steg i firmware/README.md,
-# avsnittet "Publicera webbinstalleraren"):
-#   1. Cloudflare: My Profile -> API Tokens -> Create Token -> mallen
-#      "Edit Cloudflare Workers", begränsad till ditt eget konto.
-#   2. Account ID: Workers & Pages i Cloudflare -> Account Details.
-#   3. GitHub: Settings -> Secrets and variables -> Actions -> fliken Secrets
-#      -> New repository secret: CLOUDFLARE_API_TOKEN och CLOUDFLARE_ACCOUNT_ID.
-#   4. Efter första publiceringen: samma sida, fliken Variables -> New
-#      repository variable: INSTALLER_URL = sidans adress, till exempel
-#      https://homecontrol-installer.<ditt-namn>.workers.dev (utan / sist).
-#      Korten hämtar uppdateringar därifrån. Kör sedan workflowen igen
-#      (Actions -> Firmware -> Run workflow) så att firmware får adressen,
-#      och installera om korten en gång över USB.
+# Valfritt: från main kan webbinstalleraren också publiceras på Cloudflare
+# (Workers med statiska filer, firmware/wrangler.jsonc), aldrig från en PR
+# eller en fork. Det behövs inte och rekommenderas inte längre, men finns
+# kvar för den som vill ha sidan på en egen https-adress. Inställningen står
+# i firmware/README.md, avsnittet "Publicera på Cloudflare (valfritt)".
 # Saknas hemligheterna hoppas publiceringen över med en notis, utan fel.
 #
 # Dörrklockan (firmware/dorrklocka.yaml) valideras och byggs för sig, med
@@ -32,11 +25,21 @@ on:
     paths:
       - firmware/**
       - scripts/firmware_site.py
+      - scripts/add_esp_web_tools.sh
+      - web/e2e-installer/**
+      - web/playwright.installer.config.ts
+      - web/package.json
+      - web/package-lock.json
       - .github/workflows/firmware.yml
   pull_request:
     paths:
       - firmware/**
       - scripts/firmware_site.py
+      - scripts/add_esp_web_tools.sh
+      - web/e2e-installer/**
+      - web/playwright.installer.config.ts
+      - web/package.json
+      - web/package-lock.json
       - .github/workflows/firmware.yml
   workflow_dispatch:
 
@@ -48,11 +51,6 @@ concurrency:
   # En PR avbryter sin förra körning. På main körs de i tur och ordning, så
   # att en publicering aldrig avbryts halvvägs.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-env:
-  # ESP Web Tools läggs på samma sida i stället för att laddas från ett CDN.
-  ESP_WEB_TOOLS_VERSION: 10.4.0
-  ESP_WEB_TOOLS_SHA256: f18da75335d2f0dca044c4bb052848c0696e7b03cc23d61d8530dd6eba0a9008
 
 jobs:
   validate:
@@ -87,10 +85,6 @@ jobs:
           fail() { echo "::error::$1"; exit 1; }
           grep -qE '^\s+baud_rate: 256000$' resolved-ld2450.yaml || fail "LD2450 ska köra 256000 baud"
           grep -qE '^\s+baud_rate: 9600$' resolved-ld2461.yaml || fail "LD2461 ska köra 9600 baud"
-          grep -q 'manifest-ci-test.json$' resolved-ld2450.yaml \
-            || fail "LD2450-kortet ska hämta uppdateringar för LD2450"
-          grep -q 'manifest-ld2461-ci-test.json$' resolved-ld2461.yaml \
-            || fail "LD2461-kortet ska hämta uppdateringar för LD2461"
           for resolved in resolved-ld2450.yaml resolved-ld2461.yaml; do
             ! grep -q throttle "$resolved" || fail "Radarns strypfilter ska vara borttaget ($resolved)"
             ! grep -qE '^(esp32_ble|esp32_ble_tracker|bluetooth_proxy|ble_client):' "$resolved" \
@@ -100,12 +94,8 @@ jobs:
               || fail "API:t ska vara krypterat utan inbyggd nyckel ($resolved)"
             ! grep -qE '^(web_server|captive_portal):' "$resolved" \
               || fail "Ingen webbserver eller captive portal, de tar emot firmware utan lösenord ($resolved)"
-            ! grep -qE '^\s+- platform: (esphome|web_server)$' "$resolved" \
-              || fail "OTA får bara hämtas av kortet självt, platform: http_request ($resolved)"
-            grep -qE '^\s+verify_ssl: true$' "$resolved" \
-              || fail "Uppdateringar ska hämtas med kontrollerat https ($resolved)"
-            grep -qE '^\s+follow_redirects: false$' "$resolved" \
-              || fail "Uppdateringar ska inte följa omdirigeringar ($resolved)"
+            ! grep -qE '^(ota|update|http_request):' "$resolved" \
+              || fail "Ingen firmware över nätverket: korten uppdateras bara över USB ($resolved)"
             ! grep -qE '^\s+(password|key|psk):' "$resolved" || fail "Hemligheter hör inte hemma i paketet ($resolved)"
           done
 
@@ -121,9 +111,6 @@ jobs:
       ROOM: ${{ matrix.room }}
       CONFIG: ${{ matrix.config }}
       NAME: ${{ matrix.name }}
-      # Webbinstallerarens adress, där korten hämtar uppdateringar (se överst).
-      # Bara firmware från main får den; en PR bygger med adressen i YAML-filen.
-      INSTALLER_URL: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.INSTALLER_URL || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -139,20 +126,10 @@ jobs:
           key: esphome-${{ hashFiles('firmware/requirements.txt') }}
       - name: Bygg
         run: |
-          source=()
-          if [ -n "$INSTALLER_URL" ]; then
-            # Bara https och ett vanligt värdnamn, utan / sist (manifestets
-            # sökväg läggs till efter).
-            [[ "$INSTALLER_URL" =~ ^https://[a-z0-9.-]+(/[A-Za-z0-9._~-]+)*$ ]] \
-              || { echo "::error::INSTALLER_URL ska vara en https-adress utan / sist"; exit 1; }
-            source=(-s update_source "$INSTALLER_URL")
-          fi
-          esphome -s rum "$ROOM" -s firmware_version "git-${GITHUB_SHA::7}" "${source[@]}" \
-            compile "firmware/$CONFIG"
+          esphome -s rum "$ROOM" -s firmware_version "git-${GITHUB_SHA::7}" compile "firmware/$CONFIG"
           mkdir -p out
           build="firmware/.esphome/build/homecontrol-$ROOM/build"
           cp "$build/firmware.factory.bin" "out/$NAME.factory.bin"
-          cp "$build/firmware.ota.bin" "out/$NAME.ota.bin"
       - uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.name }}
@@ -228,13 +205,7 @@ jobs:
             --version "git-${GITHUB_SHA::7}" \
             --source "${{ github.server_url }}/${{ github.repository }}/tree/${GITHUB_SHA}/firmware"
       - name: Lägg till ESP Web Tools
-        run: |
-          archive="esp-web-tools-${ESP_WEB_TOOLS_VERSION}.tgz"
-          curl -sSfLO "https://registry.npmjs.org/esp-web-tools/-/${archive}"
-          echo "${ESP_WEB_TOOLS_SHA256}  ${archive}" | sha256sum --check
-          tar -xzf "${archive}"
-          cp -r package/dist/web site/esp-web-tools
-          cp package/LICENSE site/esp-web-tools/LICENSE
+        run: scripts/add_esp_web_tools.sh site
       - name: Lägg till GPL-3.0-licensen
         run: |
           # Samma ESPectre-commit som firmware byggs med.
@@ -248,10 +219,43 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+  installer:
+    name: Prova webbinstalleraren på localhost
+    # Bygger installeraren med påhittad firmware (så att det går fort, även i
+    # en PR), startar den med starta.py som ägaren gör och öppnar den i
+    # Chromium utan internet. Själva installationen kräver ett kort.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Bygg installeraren med påhittad firmware
+        run: |
+          mkdir builds
+          for name in $(python3 scripts/firmware_site.py builds | jq -r '.[].name'); do
+            echo "inte riktig firmware" > "builds/$name.factory.bin"
+          done
+          python3 scripts/firmware_site.py site --builds builds --out site \
+            --version "test-${GITHUB_SHA::7}" --source "${{ github.server_url }}/${{ github.repository }}"
+          scripts/add_esp_web_tools.sh site
+      - run: npm ci
+        working-directory: web
+      - name: Installera Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Webbläsartest
+        run: npx playwright test -c playwright.installer.config.ts
+        working-directory: web
+        env:
+          INSTALLER_SITE: ${{ github.workspace }}/site
+
   deploy:
-    name: Publicera webbinstalleraren på Cloudflare
-    # Samma villkor som för sidan: bara main i det här repot, aldrig en PR
-    # eller en fork. En fork har inte heller hemligheterna.
+    name: Publicera webbinstalleraren på Cloudflare (valfritt)
+    # Som för sidan (bara main, aldrig en PR), och dessutom bara i det här
+    # repot, aldrig i en fork. En fork har inte heller hemligheterna.
     if: >-
       github.event_name != 'pull_request'
       && github.ref == 'refs/heads/main'
@@ -277,7 +281,7 @@ jobs:
           if [ "$HAS_TOKEN" = true ] && [ "$HAS_ACCOUNT" = true ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice title=Webbinstalleraren publicerades inte::CLOUDFLARE_API_TOKEN och CLOUDFLARE_ACCOUNT_ID saknas bland repots secrets. Se firmware/README.md, avsnittet Publicera webbinstalleraren."
+            echo "::notice title=Webbinstalleraren publicerades inte på Cloudflare (valfritt)::Det behövs inte: ladda ner artefakten webbinstallerare och starta den på din dator (firmware/README.md). Vill du ändå publicera: se avsnittet Publicera på Cloudflare (valfritt)."
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.secrets.outputs.publish == 'true'
@@ -299,19 +303,3 @@ jobs:
           wranglerVersion: "4.149.0"
           workingDirectory: firmware
           command: deploy
-      - if: steps.secrets.outputs.publish == 'true' && vars.INSTALLER_URL == ''
-        run: echo "::notice title=INSTALLER_URL saknas::Webbinstalleraren är publicerad, men korten vet inte var. Lägg in sidans adress som variabeln INSTALLER_URL och kör workflowen igen (se firmware/README.md)."
-      - name: Finns den nya versionen på INSTALLER_URL?
-        # Korten hämtar från INSTALLER_URL. Visar sidan där inte den version
-        # som just publicerades är adressen fel (eller Worker-namnet bytt).
-        if: steps.secrets.outputs.publish == 'true' && vars.INSTALLER_URL != ''
-        env:
-          INSTALLER_URL: ${{ vars.INSTALLER_URL }}
-        run: |
-          want=$(jq -r .version site/info.json)
-          for attempt in 1 2 3 4 5 6; do
-            got=$(curl -sSf --proto '=https' --max-redirs 0 "$INSTALLER_URL/info.json" | jq -r .version) || got=""
-            [ "$got" = "$want" ] && { echo "Version $want finns på $INSTALLER_URL"; exit 0; }
-            sleep 10
-          done
-          echo "::warning title=INSTALLER_URL visar inte den nya versionen::Väntade $want men fick '${got}' från $INSTALLER_URL. Kontrollera variabeln INSTALLER_URL mot adressen i Cloudflare."

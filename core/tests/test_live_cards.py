@@ -3,12 +3,8 @@
 from collections.abc import Callable
 from typing import Any
 
-import pytest
-from aioesphomeapi.model import UpdateState
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.testclient import WebSocketDenialResponse
-from starlette.websockets import WebSocketDisconnect
 
 from fake_cards import CARD, SECRET, FakeNetwork, card_home, recording
 from homecontrol.app import create_app
@@ -125,78 +121,22 @@ def test_card_list_is_refused_to_other_sites() -> None:
         assert response.status_code == 403
 
 
-def connected_card_with_update(client: TestClient, network: FakeNetwork) -> int:
-    """Kortet ansluter och säger att det finns en ny version. Returnerar uppdateringens nyckel."""
-    walk = recording("person_gar_in")
-    link = network.links[CARD]
-    [firmware] = [entity for entity in walk.entities if entity.name == "Firmware"]
-
-    def connect() -> None:
-        link.events.connected(walk.entities)
-        for _, state in walk.states:
-            link.events.state(state)
-
-    in_loop(client, connect)
-    return firmware.key
-
-
-def test_approved_update_is_installed() -> None:
+def test_cards_have_no_network_update() -> None:
+    """Korten uppdateras bara över USB: inget update-fält, och install_update finns inte."""
     network = FakeNetwork()
     with (
         TestClient(app(card_home(), network)) as client,
         client.websocket_connect("/api/live") as ws,
     ):
-        key = connected_card_with_update(client, network)
-        state = receive_until(ws, lambda s: s["cards"][0]["update"])
-        assert state["cards"][0]["update"] == {
-            "version": "0.5.0",
-            "in_progress": False,
-            "progress": None,
-        }
-        assert network.links[CARD].installs == []
+        walk = recording("person_gar_in")
+
+        def connect() -> None:
+            network.links[CARD].events.connected(walk.entities)
+
+        in_loop(client, connect)
+        state = receive_until(ws, lambda s: s["cards"] and s["cards"][0]["online"])
+        assert "update" not in state["cards"][0]
 
         ws.send_json({"type": "install_update", "card": CARD})
-        in_loop(
-            client,
-            network.links[CARD].events.state,
-            UpdateState.from_dict(
-                {"key": key, "current_version": "0.4.0", "latest_version": "0.5.0"}
-            ),
-        )
-        receive_until(ws, lambda s: True)
-
-        assert network.links[CARD].installs == [key]
-
-
-def test_update_cannot_be_started_from_another_site() -> None:
-    network = FakeNetwork()
-    with TestClient(app(card_home(), network)) as client:
-        connected_card_with_update(client, network)
-        for url, origin in (
-            ("/api/live", "http://elak.example"),
-            ("ws://elak.example/api/live", "http://elak.example"),
-        ):
-            with (
-                pytest.raises((WebSocketDisconnect, WebSocketDenialResponse)),
-                client.websocket_connect(url, headers={"origin": origin}) as ws,
-            ):
-                ws.send_json({"type": "install_update", "card": CARD})
-                ws.receive_json()
-
-        assert network.links[CARD].installs == []
-
-
-def test_invalid_update_requests_are_ignored() -> None:
-    network = FakeNetwork()
-    with (
-        TestClient(app(card_home(), network)) as client,
-        client.websocket_connect("/api/live") as ws,
-    ):
-        connected_card_with_update(client, network)
-        ws.send_json({"type": "install_update", "card": "homecontrol-kok"})
-        ws.send_json({"type": "install_update", "card": "x" * 1000})
-        ws.send_json({"type": "install_update"})
         ws.send_json({"type": "add_person", "floor_id": FLOOR, "x": 1, "y": 1})
         receive_until(ws, lambda s: s["simulation"] is not None)
-
-        assert network.links[CARD].installs == []

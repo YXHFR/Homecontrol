@@ -287,7 +287,7 @@ export function roomCard(room: RoomModel, data: CardData, actions: CardActions):
   return parts;
 }
 
-/** Kortet för ett valt rumskort: hälsan, Flytta, kalibrering, uppdatering och fler inställningar. */
+/** Kortet för ett valt rumskort: hälsan, Flytta, kalibrering och fler inställningar. */
 export function nodeCard(found: FoundItem, data: CardData, actions: CardActions): HTMLElement[] {
   const node = found.item as NodeModel;
   const card = cardFor(data.state, node.id);
@@ -340,31 +340,13 @@ export function nodeCard(found: FoundItem, data: CardData, actions: CardActions)
   }
   parts.push(...buttonRow(buttons, data));
 
-  if (card?.update != null && card.online) {
-    const update = card.update;
-    if (update.in_progress) {
-      const progress = update.progress === null ? "" : ` ${Math.round(update.progress)} %`;
-      parts.push(element("p", { className: "status mono" }, `Uppdaterar till ${update.version} …${progress}`));
-    } else {
-      const approve = button(`Uppdatera till ${update.version}`, () => {
-        approve.disabled = true;
-        actions.send({ type: "install_update", card: card.id });
-      });
-      approve.dataset.card = card.id;
-      parts.push(
-        element("p", { className: "help" }, "Kortet startar om och är borta en stund. Det uppdateras bara när du godkänner."),
-        approve,
-      );
-    }
-  }
-
   parts.push(nodeSettings(node, actions));
   parts.push(
     element(
       "p",
       { className: "help" },
-      "Installera på ett nytt kort: det kräver en dator med Chrome eller Edge och webbinstalleraren " +
-        "(se firmware/README.md). Det går inte från mobilen.",
+      "Installera eller uppdatera ett kort över USB: det kräver en dator med Chrome eller Edge och " +
+        "webbinstalleraren (se firmware/README.md). Det går inte från mobilen.",
     ),
   );
   return parts;

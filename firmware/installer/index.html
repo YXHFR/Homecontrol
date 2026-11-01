@@ -84,7 +84,10 @@
             Webbläsaren kan inte prata med USB-enheter. Använd Chrome eller Edge
             på en dator.
           </span>
-          <span slot="not-allowed">Sidan måste öppnas över https.</span>
+          <span slot="not-allowed">
+            Sidan måste öppnas från http://localhost (starta den med starta.bat
+            eller starta.sh i mappen) eller över https.
+          </span>
         </esp-web-install-button>
 
         <p><strong>3. Ställ in Wi-Fi</strong> när installationen är klar. Sidan
@@ -100,7 +103,8 @@
           <li>Första gången: kryssa i <strong>Erase device</strong>. Vid en
             uppdatering ska rutan vara tom, så behåller kortet Wi-Fi och
             kopplingen till Homecontrol.</li>
-          <li>Kortet kan också uppdateras över nätverket från Homecontrol.</li>
+          <li>Ny version: ladda ner den nya webbinstalleraren och installera
+            på samma sätt, över USB. Kortet hämtar ingenting från internet.</li>
           <li>Rumsnamnet syns för alla i hemnätet.</li>
           <li>Rummet finns inte i listan?
             <a href="https://github.com/YXHFR/Homecontrol/blob/main/firmware/README.md#rummet-finns-inte-i-listan">Så bygger du ett eget</a>.</li>
@@ -108,13 +112,13 @@
       </section>
 
       <p class="muted">
-        <span id="error" hidden><strong>Kunde inte läsa rumslistan. Ladda om sidan.</strong><br /></span>
+        <span id="error" hidden><strong>Kunde inte läsa rumslistan. Starta sidan med starta.bat eller starta.sh i den uppackade mappen och ladda om.</strong><br /></span>
         Version <span id="version">–</span>.
         Firmware-filen innehåller <a href="https://github.com/francescopace/espectre">ESPectre</a>
         och <a href="https://esphome.io">ESPHome</a> och sprids därför under
         <a href="LICENSE-GPL-3.0.txt">GPL-3.0</a>.
         <a id="source" href="https://github.com/YXHFR/Homecontrol">Källkoden för just den här versionen</a>.
-        Installationssidan använder <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>
+        Installationssidan använder <a href="https://github.com/esphome/esp-web-tools">ESP Web Tools</a>
         (Apache-2.0). Firmware för LD2461 innehåller också en rättad
         <a href="https://github.com/Chreece/LD2461-ESPHome">LD2461-komponent</a> (Apache-2.0).
       </p>

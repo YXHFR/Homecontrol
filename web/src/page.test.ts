@@ -100,7 +100,6 @@ function card(changes: Partial<Card> = {}): Card {
     calibrating: false,
     wifi_signal: null,
     firmware_version: "0.4.0",
-    update: null,
     ...changes,
   };
 }
@@ -532,26 +531,17 @@ describe("sidan", () => {
     expect(root.querySelector(".sheet")?.textContent).toContain("Placera på kartan");
   });
 
-  it("uppdaterar ett kort först när någon har godkänt det", async () => {
+  it("visar kortets Wi-Fi och firmware, utan någon uppdatering över nätet", async () => {
     const { root, sent, handlers, callbacks } = await setup();
     handlers.onMessage(home);
-    const update = { version: "0.5.0", in_progress: false, progress: null };
-    handlers.onMessage({ ...state(null, false), cards: [card({ update, wifi_signal: -58 })] });
+    handlers.onMessage({ ...state(null, false), cards: [card({ wifi_signal: -58 })] });
     callbacks.onSelectItem("homecontrol-vardagsrum");
 
     expect(text(root, ".kv")).toMatch(/Wi-Fi -58 dBm \(bra\)/);
     expect(text(root, ".kv")).toMatch(/0\.4\.0/);
-    expect(sent).toEqual([]);
-
-    find<HTMLButtonElement>(root, 'button[data-card="homecontrol-vardagsrum"]').click();
-    expect(sent).toEqual([{ type: "install_update", card: "homecontrol-vardagsrum" }]);
-
-    handlers.onMessage({
-      ...state(null, false),
-      cards: [card({ update: { ...update, in_progress: true, progress: 42 } })],
-    });
+    expect(text(root, ".sheet")).toMatch(/över USB/);
     expect(root.querySelector('button[data-card="homecontrol-vardagsrum"]')).toBeNull();
-    expect(text(root, ".sheet")).toMatch(/Uppdaterar till 0\.5\.0 … 42 %/);
+    expect(sent).toEqual([]);
   });
 
   it("varnar när kärnan inte har kontakt med databasen, och slutar när den har det igen", async () => {

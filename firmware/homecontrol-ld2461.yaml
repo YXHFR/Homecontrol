@@ -1,7 +1,6 @@
 # Homecontrol – firmware för ett rumskort (ESP32-S3, helst med extern antenn) med
 # radarn LD2461 i stället för LD2450. Allt annat är som på LD2450-kortet
-# (common.yaml): Wi-Fi-CSI, ljussensorn, det krypterade API:t och
-# uppdateringarna.
+# (common.yaml): Wi-Fi-CSI, ljussensorn och det krypterade API:t.
 #
 # LD2461 följer upp till 5 personer enligt tillverkaren. Varken det,
 # räckvidden eller precisionen är provat än (se firmware/README.md).
@@ -18,9 +17,6 @@
 substitutions:
   rum: rum
   firmware_version: dev
-  # Var kortet hämtar uppdateringar, som i homecontrol.yaml. Varianten har
-  # egna filer i webbinstalleraren, så att kortet aldrig får LD2450-firmware.
-  update_source: https://homecontrol-installer.invalid
   # LD2461 (radar) på hårdvaru-UART, samma stift som LD2450.
   ld2461_tx_pin: GPIO17
   ld2461_rx_pin: GPIO18
@@ -39,12 +35,6 @@ external_components:
       type: local
       path: components
     components: [ld2461]
-
-update:
-  - platform: http_request
-    name: Firmware
-    source: ${update_source}/manifest-ld2461-${rum}.json
-    update_interval: 6h
 
 uart:
   id: ld2461_uart

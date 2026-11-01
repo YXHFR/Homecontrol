@@ -37,7 +37,6 @@ function card(changes: Partial<Card> = {}): Card {
     calibrating: false,
     wifi_signal: null,
     firmware_version: "0.4.0",
-    update: null,
     ...changes,
   };
 }

@@ -610,7 +610,6 @@ describe("kartredigeraren", () => {
       calibrating: false,
       wifi_signal: null,
       firmware_version: null,
-      update: null,
     };
     const { root, core, map, click, settled } = await setup([
       card,

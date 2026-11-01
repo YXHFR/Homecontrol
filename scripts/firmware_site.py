@@ -19,14 +19,14 @@ Användning:
             --version VERSION --source URL
         Lägger ihop färdiga firmware-filer till webbinstalleraren.
         DIR ska innehålla <namn>.factory.bin (hela kortet, för installation
-        över USB) och <namn>.ota.bin (bara appen, för uppdatering över
-        nätverket) för varje rum i rooms.txt och varje radar.
+        över USB) för varje rum i rooms.txt och varje radar.
 
-Sidans layout:
+Sidans layout (allt med relativa sökvägar, så att mappen kan serveras
+var som helst, till exempel från http://localhost med starta.py):
     index.html, info.json        installationssidan, rummen och radarerna
-    manifest-<namn>.json         läses av ESP Web Tools och av kortet självt
+    starta.py, starta.bat, ...   startar sidan på den egna datorn
+    manifest-<namn>.json         läses av ESP Web Tools
     firmware/<namn>.bin          hela kortet
-    firmware/<namn>.ota.bin      bara appen
 
 Skriptet använder bara standardbiblioteket.
 """
@@ -34,7 +34,6 @@ Skriptet använder bara standardbiblioteket.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import shutil
@@ -124,15 +123,11 @@ def firmware_builds(rooms: list[str]) -> list[dict[str, str]]:
     ]
 
 
-def manifest(
-    room: str, version: str, ota_md5: str, source: str, radar: Radar = LD2450
-) -> dict[str, object]:
+def manifest(room: str, version: str, radar: Radar = LD2450) -> dict[str, object]:
     """Manifest för ett rum med en viss radar.
 
-    ESP Web Tools läser "parts" vid installation över USB. Kortet läser "ota"
-    när det letar efter uppdateringar. Sökvägarna är relativa till manifestet.
-    Kortet hämtar bara uppdateringar för sin egen radar (se `update` i
-    firmware-paketen).
+    ESP Web Tools läser "parts" vid installation över USB. Sökvägen är
+    relativ till manifestet.
     """
     name = radar.name(room)
     title = f"Homecontrol {room}" if radar is LD2450 else f"Homecontrol {room} ({radar.id.upper()})"
@@ -146,12 +141,6 @@ def manifest(
             {
                 "chipFamily": CHIP_FAMILY,
                 "parts": [{"path": f"firmware/{name}.bin", "offset": 0}],
-                "ota": {
-                    "path": f"firmware/{name}.ota.bin",
-                    "md5": ota_md5,
-                    "summary": f"Homecontrol {version}",
-                    "release_url": source,
-                },
             }
         ],
     }
@@ -160,11 +149,10 @@ def manifest(
 def build_site(rooms: list[str], builds: Path, out: Path, version: str, source: str) -> None:
     """Skriver hela sidan till out. Se layouten överst i filen."""
     missing = [
-        f"{radar.name(room)}.{kind}.bin"
+        f"{radar.name(room)}.factory.bin"
         for radar in RADARS
         for room in rooms
-        for kind in ("factory", "ota")
-        if not (builds / f"{radar.name(room)}.{kind}.bin").is_file()
+        if not (builds / f"{radar.name(room)}.factory.bin").is_file()
     ]
     if missing:
         raise FileNotFoundError("Firmware saknas: " + ", ".join(missing))
@@ -174,11 +162,7 @@ def build_site(rooms: list[str], builds: Path, out: Path, version: str, source: 
         for room in rooms:
             name = radar.name(room)
             shutil.copyfile(builds / f"{name}.factory.bin", out / "firmware" / f"{name}.bin")
-            ota = builds / f"{name}.ota.bin"
-            shutil.copyfile(ota, out / "firmware" / f"{name}.ota.bin")
-            # ESPHome kräver md5. Den skyddar mot trasig överföring; äktheten kommer från https.
-            ota_md5 = hashlib.md5(ota.read_bytes(), usedforsecurity=False).hexdigest()
-            data = manifest(room, version, ota_md5, source, radar)
+            data = manifest(room, version, radar)
             text = json.dumps(data, ensure_ascii=False, indent=2)
             (out / f"manifest-{name}.json").write_text(text + "\n", encoding="utf-8")
 

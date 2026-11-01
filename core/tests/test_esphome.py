@@ -17,7 +17,7 @@ from aioesphomeapi.core import (
     EncryptionPlaintextAPIError,
     InvalidEncryptionKeyAPIError,
 )
-from aioesphomeapi.model import EntityInfo, EntityState, UpdateState
+from aioesphomeapi.model import EntityInfo, EntityState
 
 from fake_cards import CARD, SECRET, FakeLink, FakeNetwork, Recording, card_home, recording
 from homecontrol.clock import ManualClock
@@ -369,53 +369,13 @@ def test_only_well_named_cards_are_listed_and_not_too_many() -> None:
     assert len(harness.source.cards()) == MAX_DISCOVERED - 1
 
 
-def test_firmware_update_is_offered_but_installed_only_when_approved() -> None:
+def test_card_without_a_firmware_update_entity_is_not_called_outdated() -> None:
+    """Korten uppdateras bara över USB och har ingen update-entitet längre."""
     harness = Harness()
     walk = recording("person_gar_in")
-    harness.connect(walk)
-    harness.play(walk)
+    harness.link.events.connected([e for e in walk.entities if e.name != "Firmware"])
 
-    update = harness.card().update
-    assert update.available
-    assert (update.current_version, update.latest_version) == ("0.4.0", "0.5.0")
-    assert harness.link.installs == []  # inget installeras av sig självt
-
-    assert harness.source.install_update(CARD)
-    [firmware] = [e for e in walk.entities if e.name == "Firmware"]
-    assert harness.link.installs == [firmware.key]
-
-    harness.link.events.state(
-        UpdateState.from_dict(
-            {
-                "key": firmware.key,
-                "current_version": "0.4.0",
-                "latest_version": "0.5.0",
-                "in_progress": True,
-            }
-        )
-    )
-    assert not harness.source.install_update(CARD)  # pågår redan
-    assert not harness.source.install_update("homecontrol-kok")  # finns inte
-
-    harness.link.events.disconnected()
-    assert not harness.source.install_update(CARD)
-    assert harness.link.installs == [firmware.key]
-
-
-def test_card_without_a_newer_version_is_not_updated() -> None:
-    harness = Harness()
-    walk = recording("person_gar_in")
-    harness.connect(walk)
-    [firmware] = [e for e in walk.entities if e.name == "Firmware"]
-    harness.link.events.state(
-        UpdateState.from_dict(
-            {"key": firmware.key, "current_version": "0.5.0", "latest_version": "0.5.0"}
-        )
-    )
-
-    assert harness.card().update is not None
-    assert not harness.card().update.available
-    assert not harness.source.install_update(CARD)
+    assert not any("firmware" in problem for problem in harness.card().problems)
 
 
 def test_old_firmware_without_the_needed_entities_is_reported() -> None:
@@ -615,11 +575,6 @@ def test_a_card_whose_entities_cannot_be_read_is_disconnected() -> None:
     run_link(link._on_connect)
     assert events.calls == ["connected"]
     assert working.calls == ["subscribe"]
-
-
-def test_an_update_to_a_card_that_just_dropped_is_not_sent() -> None:
-    assert bare_link(LinkEvents(), FakeClient(), FakeClient()).install_update(7)
-    assert not bare_link(LinkEvents(), FakeClient(broken=True), FakeClient()).install_update(7)
 
 
 def entity_key(recorded: Recording, name: str) -> int:

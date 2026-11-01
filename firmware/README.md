@@ -13,7 +13,7 @@ skickar allt till kärnan:
 Firmware byggs med [ESPHome](https://esphome.io). Det finns ett paket per
 radar: [`homecontrol.yaml`](homecontrol.yaml) för LD2450 och
 [`homecontrol-ld2461.yaml`](homecontrol-ld2461.yaml) för LD2461. Allt som är
-lika på båda (Wi-Fi-CSI, ljussensorn, API:t och uppdateringarna) finns i
+lika på båda (Wi-Fi-CSI, ljussensorn och API:t) finns i
 [`common.yaml`](common.yaml).
 
 ## Det här behövs
@@ -47,22 +47,147 @@ Stiften kan ändras med `substitutions` överst i `homecontrol.yaml` och
 
 ## Installera
 
-1. Öppna webbinstalleraren i Chrome eller Edge på en dator. Den finns på
-   `https://homecontrol-installer.<ditt-namn>.workers.dev` när den är
-   publicerad (se [Publicera webbinstalleraren](#publicera-webbinstalleraren)).
-   Varje bygge sparas också som artefakten `webbinstallerare` under
-   workflowen Firmware i fliken Actions.
-2. Välj rum. Kortet får namnet `homecontrol-<rum>`. Välj också radarn som
-   sitter på kortet: LD2450 eller LD2461. Med fel radar svarar kortets
-   radar inte.
-3. Anslut kortet med USB. På kort med två USB-uttag: använd det som är
-   märkt **USB** (inte **UART**). Annars går det inte att ställa in Wi-Fi.
-4. Tryck på **Connect**, välj kortet i listan och sedan **Install**.
-5. Första gången: kryssa i **Erase device**.
-6. När installationen är klar frågar sidan efter Wi-Fi. Nätverk och
-   lösenord skickas bara till kortet och sparas där.
+Firmware läggs på kortet över USB med **webbinstalleraren**, en webbsida som
+du startar på din egen dator. Den finns som en zip-fil på GitHub. Allt sidan
+behöver finns i zip-filen, så när du väl har laddat ner den fungerar den utan
+internet.
+
+Du behöver:
+
+- en dator med **Chrome** eller **Edge** (Firefox och Safari kan inte prata
+  med USB-enheter),
+- **Python 3** (på Windows: se steg 4 om det saknas),
+- en **USB-C-kabel som klarar data** (inte bara laddning),
+- ett GitHub-konto med tillgång till repot (för att ladda ner zip-filen).
+
+### 1. Ladda ner webbinstalleraren
+
+1. Logga in på [github.com](https://github.com) och öppna repot
+   **YXHFR/Homecontrol**.
+2. Klicka på fliken **Actions** högst upp.
+3. Klicka på **Firmware** i listan till vänster.
+4. Klicka på den senaste körningen med en **grön bock** där det står
+   **main** (grenen). En körning från en PR har ingen webbinstallerare.
+5. Rulla ner till rubriken **Artifacts** på sidan som öppnas.
+6. Klicka på **webbinstallerare**. Filen `webbinstallerare.zip` laddas ner.
+   Knappen syns bara när du är inloggad.
+
+Finns det ingen grön körning med **webbinstallerare** (den sparas i 90
+dagar): klicka på **Run workflow** till höger på sidan **Firmware**, låt
+**Branch: main** stå kvar och klicka på den gröna knappen **Run workflow**.
+Bygget tar ungefär en halvtimme.
+
+### 2. Packa upp
+
+- **Windows:** högerklicka på `webbinstallerare.zip` i mappen Hämtade filer
+  och välj **Extrahera alla…** → **Extrahera**. En mapp med samma namn
+  öppnas. Starta inte filerna inifrån zip-filen; packa upp först.
+- **Linux/macOS:** `unzip webbinstallerare.zip -d webbinstallerare`
+
+### 3. Starta installeraren
+
+- **Windows:** dubbelklicka på **`starta.bat`** i den uppackade mappen.
+  - Frågar Windows **Vill du köra den här filen?**: klicka på **Kör**.
+  - Visar Windows **Windows skyddade datorn**: klicka på **Mer
+    information** → **Kör ändå**. Filen kommer från GitHub och Windows
+    känner inte igen den.
+- **Linux, macOS eller Ubuntu i WSL:** öppna en terminal i mappen och kör
+  `sh starta.sh`
+
+Ett svart fönster öppnas med texten **Webbinstalleraren är igång på
+http://localhost:8765/**, och Edge (eller din vanliga webbläsare) öppnar
+sidan. Gör den inte det: skriv `http://localhost:8765` i adressfältet i
+Chrome eller Edge. Låt det svarta fönstret vara öppet så länge du
+installerar; stäng det när du är klar.
+
+Sidan serveras bara till din egen dator, inte till hemnätet. Den använder
+port 8765, eftersom Homecontrol själv svarar på 8000. Webbläsaren räknar
+`localhost` som säker, så den får prata med kortet över USB utan https.
+
+Kommandot som körs är `python3 starta.py` (`py -3 starta.py` på Windows).
+Det startar en liten webbserver i mappen, ungefär som `python -m
+http.server 8765 --bind 127.0.0.1`, men med rätt filtyp för JavaScript
+även på Windows.
+
+### 4. Om Python saknas (Windows)
+
+Säger fönstret **Python saknas på datorn**:
+
+1. Öppna PowerShell: tryck på **Start**, skriv `PowerShell` och tryck Enter.
+2. Kör: `winget install Python.Python.3.13`
+3. Stäng PowerShell och dubbelklicka på `starta.bat` igen.
+
+### 5. Installera på kortet
+
+1. **Välj rum** i den första listan. Kortet får namnet `homecontrol-<rum>`
+   i nätverket.
+2. **Radar på kortet:** välj LD2450 eller LD2461, den som sitter på kortet.
+   Med fel radar svarar kortets radar inte.
+3. **Anslut kortet** till datorn med USB-C-kabeln. På kort med två
+   USB-uttag: använd det som är märkt **USB** (inte **UART**). Annars går
+   det inte att ställa in Wi-Fi.
+4. Klicka på **CONNECT**.
+5. Webbläsaren visar rutan **localhost:8765 vill ansluta till en
+   serieport**. Välj kortet, till exempel **USB JTAG/serial debug unit
+   (COM5)** på Windows eller **ttyACM0** på Linux, och klicka på
+   **Anslut**.
+6. I rutan som öppnas: klicka på **INSTALL HOMECONTROL …** (med ditt
+   rum, till exempel **INSTALL HOMECONTROL KOK**).
+7. Första gången: kryssa i **Erase device** (radera kortet). Vid en
+   uppdatering ska rutan vara tom, så behåller kortet Wi-Fi och nyckeln
+   till Homecontrol. Klicka på **NEXT** och sedan **INSTALL**.
+8. Vänta. **Installing** visas med en förloppsindikator. Det tar 1–3
+   minuter. Dra inte ur kabeln.
+9. När det står **Installation complete!**: klicka på **NEXT**.
+
+### 6. Anslut kortet till Wi-Fi (Improv)
+
+Direkt efter installationen frågar sidan efter Wi-Fi. Det heter **Improv**:
+ett sätt att ge kortet nätverk och lösenord över USB-kabeln.
+
+1. Välj ditt nätverk under **Network** (eller skriv namnet).
+2. Skriv lösenordet under **Password** och klicka på **CONNECT**.
+3. Efter några sekunder visar sidan att kortet är anslutet. Klicka på
+   **CLOSE** eller stäng rutan.
+
+Nätverk och lösenord skickas bara till kortet och sparas där. Kortet når
+inte internet för egen del och hämtar ingen firmware själv.
+
+Visar sidan ingen Wi-Fi-fråga: dra ur och sätt i kabeln, klicka på
+**CONNECT** igen och välj kortet. Rutan visar då en knapp för att ställa in
+Wi-Fi (till exempel **CONFIGURE WI-FI**).
 
 Rumsnamnet syns för alla i hemnätet (till exempel i routerns lista).
+
+### Felsökning
+
+- **Kortet syns inte i listan över serieportar.**
+  - Kabeln kan vara en laddkabel utan dataledare. Prova en annan kabel,
+    gärna direkt i datorn utan USB-hubb.
+  - **ESP32-S3-Zero** och andra kort utan USB-UART-krets: håll knappen
+    **BOOT** nere, sätt i kabeln och släpp knappen. Klicka på **CONNECT**
+    igen. Efter installationen: dra ur och sätt i kabeln en gång.
+  - Kort med uttaget **UART** (till exempel DevKitC) behöver en drivrutin
+    på Windows: CP210x från Silicon Labs eller CH343 från WCH, beroende på
+    kretsen. ESP Web Tools visar länken om det behövs.
+  - Använder du Ubuntu i WSL med `usbipd` (för Zigbee-stickan): koppla inte
+    kortet till WSL. Kortet ska stå kvar i Windows, där webbläsaren är.
+    Kör `usbipd list` i PowerShell; står kortet som **Attached**, kör
+    `usbipd detach --busid <busid>`.
+- **"Failed to open serial port" eller porten är upptagen.** Ett annat
+  program har porten öppen: en annan flik med installeraren, Arduino IDE,
+  `esphome logs`, PuTTY eller liknande. Stäng det, dra ur och sätt i
+  kabeln och försök igen.
+- **Sidan säger "Webbläsaren kan inte prata med USB-enheter".** Du använder
+  Firefox eller Safari (eller Chrome på mobilen). Öppna
+  `http://localhost:8765` i Chrome eller Edge på datorn.
+- **Sidan säger att den måste öppnas från localhost eller https.** Du har
+  öppnat `index.html` direkt som fil eller via datorns IP-adress. Använd
+  `http://localhost:8765` från `starta.bat`/`starta.sh`.
+- **Fönstret säger "Port 8765 används redan".** Installeraren är redan
+  igång i ett annat fönster. Använd det, eller stäng det och starta igen.
+- **"Kunde inte läsa rumslistan"** längst ner på sidan: sidan är inte
+  startad från den uppackade mappen. Starta `starta.bat` igen.
 
 ### Koppla kortet till kärnan
 
@@ -83,29 +208,31 @@ raderas och installeras om på samma sätt.
 
 ### Uppdatera
 
-- **Över nätverket:** fungerar när webbinstalleraren är publicerad och
-  firmware på kortet är byggd med dess adress (variabeln `INSTALLER_URL`,
-  se [Publicera webbinstalleraren](#publicera-webbinstalleraren)). Ett kort
-  som installerades innan dess behöver installeras om en gång över USB.
-  Kortet kollar var 6:e timme om webbinstalleraren har en ny version och
-  visar det i entiteten `Firmware`. Uppdateringen startar
-  bara när kärnan ber om det, efter att du har tryckt på **Uppdatera till
-  …** (med den nya versionen) i rumskortets kort. Kortet hämtar då
-  själv filen över https. Det tar inte emot firmware från någon annan.
-  Adressen innehåller ditt namn på workers.dev och Workerns namn
-  (`homecontrol-installer`), så **byt inte namnen och ta inte bort
-  Workern eller Cloudflare-kontot** så länge korten används. Om namnet
-  blir ledigt kan någon annan ta det och skicka firmware till korten.
-- **Över USB:** kör webbinstalleraren igen och lämna **Erase device** tom.
-  Kortet behåller Wi-Fi och nyckeln.
+Korten uppdateras över USB, på samma sätt som de installeras: ladda ner den
+nya webbinstalleraren (steg 1), starta den och installera med rutan
+**Erase device** tom. Kortet behåller Wi-Fi och nyckeln till Homecontrol.
 
-### Publicera webbinstalleraren
+Rumskorten har ingen uppdatering över nätverket. De tar inte emot firmware
+över Wi-Fi och hämtar inget från internet. Det gör att ingen annan kan byta
+firmware på dem, och att de inte beror på någon webbsida som kan försvinna.
 
-Webbinstalleraren publiceras på Cloudflare (en Worker med bara statiska
-filer, [`wrangler.jsonc`](wrangler.jsonc)) varje gång firmware ändras på
-`main`. Adressen är https, vilket webbläsaren kräver för att få prata med
-kortet över USB (Web Serial). Ingen hemlighet finns i repot; ägaren ställer
-in det här en gång:
+**Kort med äldre firmware** (installerade före den här ändringen) har
+kvar en uppdatering över nätverket i sin firmware. Installera om dem en gång
+över USB enligt ovan, med **Erase device** tom. Kärnan ber inte längre korten
+att uppdatera sig, men först efter ominstallationen är funktionen borta från
+kortet.
+
+### Publicera på Cloudflare (valfritt)
+
+**Det här behövs inte och rekommenderas inte längre.** Starta i stället
+webbinstalleraren på din egen dator (se [Installera](#installera)). Korten
+hämtar ingenting från Cloudflare.
+
+Vill du ändå ha sidan på en egen https-adress kan workflowen publicera den
+på Cloudflare (en Worker med bara statiska filer,
+[`wrangler.jsonc`](wrangler.jsonc)) varje gång firmware ändras på `main`.
+Utan inställningen nedan hoppas det jobbet över med en notis, och
+workflowen blir ändå grön.
 
 1. **Namn på workers.dev.** Logga in på [Cloudflare](https://dash.cloudflare.com)
    och öppna **Workers & Pages** en gång. Första gången ber Cloudflare
@@ -117,31 +244,20 @@ in det här en gång:
    slutdatum. Skapa token och kopiera den; den visas bara en gång.
 3. **Account ID.** Öppna **Workers & Pages** i Cloudflare. Under **Account
    Details** finns **Account ID** med en kopieringsknapp.
-4. **Lägg in dem i GitHub.** I repot: **Settings** → **Secrets and
-   variables** → **Actions** → fliken **Secrets** → **New repository
-   secret**. Skapa `CLOUDFLARE_API_TOKEN` (token från steg 2) och
-   `CLOUDFLARE_ACCOUNT_ID` (från steg 3).
+4. **Lägg in dem i GitHub.** Skapa miljön **cloudflare-installer** under
+   **Settings** → **Environments**, ställ in **Deployment branches** till
+   bara `main` och lägg `CLOUDFLARE_API_TOKEN` (steg 2) och
+   `CLOUDFLARE_ACCOUNT_ID` (steg 3) som **Environment secrets** där.
+   (Repots secrets under **Settings** → **Secrets and variables** →
+   **Actions** fungerar också, men kan läsas av workflows på alla grenar.)
 5. **Publicera.** **Actions** → **Firmware** → **Run workflow** (på
-   `main`). När jobbet **Publicera webbinstalleraren på Cloudflare** är
-   klart finns sidan på `https://homecontrol-installer.<ditt-namn>.workers.dev`.
-   Adressen står i jobbets logg och under **Workers & Pages** i
-   Cloudflare.
-6. **Berätta adressen för korten.** Samma sida i GitHub som i steg 4, men
-   fliken **Variables** → **New repository variable**: `INSTALLER_URL` =
-   adressen från steg 5, utan `/` sist. Kör workflowen igen (steg 5). Nu
-   hämtar korten sina uppdateringar därifrån, och workflowen kontrollerar
-   att adressen visar den nya versionen. Installera om korten en gång över
-   USB, så att de får adressen.
+   `main`). Sidan finns sedan på
+   `https://homecontrol-installer.<ditt-namn>.workers.dev`.
 
-**Extra skydd (valfritt).** Med token kan man byta firmware för alla kort,
-och repots secrets kan läsas av workflows på alla grenar. Skapa därför
-gärna miljön **cloudflare-installer** under **Settings** → **Environments**,
-ställ in **Deployment branches** till bara `main`, och lägg de två
-hemligheterna där i stället för bland repots secrets.
-
-Saknas hemligheterna hoppas publiceringen över med en notis, och
-workflowen blir ändå grön. Publiceringen körs bara från `main` i det här
-repot, aldrig från en PR eller en fork.
+Publiceringen körs bara från `main` i det här repot, aldrig från en PR
+eller en fork. Den gamla variabeln `INSTALLER_URL` används inte längre och
+kan tas bort under **Settings** → **Secrets and variables** → **Actions** →
+fliken **Variables**.
 
 ### Rummet finns inte i listan
 
@@ -155,8 +271,7 @@ esphome -s rum gastrum run firmware/homecontrol.yaml          # LD2450
 esphome -s rum gastrum run firmware/homecontrol-ld2461.yaml   # LD2461
 ```
 
-Ett eget rum får inga uppdateringar över nätverket, eftersom
-webbinstalleraren inte har någon fil för det.
+Ett eget rum uppdaterar du på samma sätt, med `esphome ... run` över USB.
 
 ## Det här skickar kortet
 
@@ -177,7 +292,6 @@ engelska och ändras inte, så att kärnan kan lita på dem.
 | Illuminance | Ljus i lux, var 5:e sekund |
 | WiFi Signal | Signalstyrka i dBm |
 | Firmware Version | Homecontrol-versionen |
-| Firmware | Uppdatering: om en ny version finns, och knappen för att installera |
 | ESPHome Version | ESPHome-versionen |
 | Radar Firmware | Radarns egen firmware |
 | Uptime, Free Heap, Loop Time | Hälsa (drifttid, ledigt minne, looptid) |
@@ -217,8 +331,7 @@ finns två sätt:
 
 1. **Löd på undersidan (rekommenderas).** Löd radarns TX till punkten 18
    och radarns RX till punkten 17. Då passar firmware från
-   webbinstalleraren som den är, och kortet får uppdateringar över
-   nätverket.
+   webbinstalleraren som den är.
 2. **Använd andra stift.** Till exempel GPIO1 (TX) och GPIO2 (RX) på
    vänstra kanten, bredvid 5V och GND. Då måste du bygga firmware själv:
 
@@ -227,9 +340,9 @@ finns två sätt:
    esphome -s rum kok -s ld2461_tx_pin GPIO1 -s ld2461_rx_pin GPIO2 run firmware/homecontrol-ld2461.yaml
    ```
 
-   Ett sådant kort får inga uppdateringar över nätverket. **Installera inte
-   webbinstallerarens firmware på det över USB**: den har GPIO17 och
-   GPIO18, och då svarar radarn inte.
+   Uppdatera det på samma sätt, med ditt eget kommando. **Installera inte
+   webbinstallerarens firmware på det**: den har GPIO17 och GPIO18, och då
+   svarar radarn inte.
 
 Övrigt:
 
@@ -256,8 +369,8 @@ personer, och hur noga den mäter, är tillverkarens uppgifter. Inget av det
 - Kortet heter `homecontrol-<rum>` med båda radarerna, och allt annat på
   kortet är likadant. Kärnan ser själv vilken radar kortet har.
 - Firmware för LD2461 har egna filer i webbinstalleraren
-  (`manifest-ld2461-<rum>.json`), så ett kort med LD2461 uppdateras bara
-  med firmware för LD2461.
+  (`manifest-ld2461-<rum>.json`). Välj **LD2461** under **Radar på kortet**
+  när du installerar.
 - Det finns ingen underhållen ESPHome-komponent för LD2461. Firmware
   använder en rättad kopia av
   [Chreece/LD2461-ESPHome](https://github.com/Chreece/LD2461-ESPHome),
@@ -293,6 +406,8 @@ med LD2461, och kontrollera också att
 - Ingen egen åtkomstpunkt eller captive portal. ESPHome:s captive portal
   tar med firmwareuppladdning utan lösenord och startar av sig själv när
   Wi-Fi försvinner. Byter du Wi-Fi-nät ställer du in det igen via USB.
+- Rumskorten har ingen uppdatering över nätverket. Ny firmware installeras
+  över USB.
 - Kortet startar inte om när kärnan är borta. Det startar bara om om
   Wi-Fi är borta i 15 minuter.
 - ESPectre skickar ping till routern för att få jämn CSI-trafik.

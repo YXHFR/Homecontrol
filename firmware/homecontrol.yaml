@@ -10,8 +10,8 @@
 #     webbinstalleraren.
 #   - API:t är krypterat. Nyckeln skapas av kärnan och skickas till
 #     kortet vid första anslutningen. Den sparas i kortets flash.
-#   - Uppdateringar hämtas av kortet självt från webbinstalleraren över
-#     https, och bara när kärnan ber om det.
+#   - Kortet hämtar ingenting från internet. Ny firmware installeras över
+#     USB med webbinstalleraren (se firmware/README.md).
 #
 # Bygg för ett rum:
 #   esphome -s rum kok compile firmware/homecontrol.yaml
@@ -22,11 +22,6 @@
 substitutions:
   rum: rum
   firmware_version: dev
-  # Var kortet hämtar uppdateringar (webbinstalleraren på Cloudflare). CI
-  # sätter den riktiga adressen från repots variabel INSTALLER_URL (se
-  # .github/workflows/firmware.yml). Domänen .invalid finns aldrig, så ett
-  # kort som byggs utan adressen hittar inga uppdateringar.
-  update_source: https://homecontrol-installer.invalid
   # LD2450 (radar) på hårdvaru-UART.
   ld2450_tx_pin: GPIO17
   ld2450_rx_pin: GPIO18
@@ -36,12 +31,6 @@ substitutions:
 
 packages:
   common: !include common.yaml
-
-update:
-  - platform: http_request
-    name: Firmware
-    source: ${update_source}/manifest-${rum}.json
-    update_interval: 6h
 
 uart:
   id: ld2450_uart
