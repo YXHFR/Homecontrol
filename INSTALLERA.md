@@ -27,6 +27,7 @@ core`).
 6. [Öppna webben](#6-öppna-webben)
 7. [Installera det första rumskortet](#7-installera-det-första-rumskortet)
 8. [Koppla Zigbee-lampan](#8-koppla-zigbee-lampan)
+   (eller [8b. Testlampa utan Zigbee](#8b-testlampa-utan-zigbee))
 9. [Rita rummet på kartan](#9-rita-rummet-på-kartan)
 10. [Se närvaro live](#10-se-närvaro-live)
 11. [Vad du lärt dig](#vad-du-lärt-dig)
@@ -321,6 +322,10 @@ ESP32-S3-Zero, drivrutin, porten upptagen).
 
 ## 8. Koppla Zigbee-lampan
 
+> **Ingen Zigbee-sticka eller lampa än?** Hoppa över det här steget och
+> prova med en **testlampa**: en vanlig lysdiod på rumskortet som
+> Homecontrol styr som en lampa. Se [8b. Testlampa](#8b-testlampa-utan-zigbee).
+
 Lamporna kopplas i **Zigbee2MQTT:s egen webbsida**, inte i Homecontrol.
 Det är med flit: kärnan får styra lamporna men inte släppa in nya enheter i
 Zigbee-nätet.
@@ -349,6 +354,39 @@ meddelande tillbaka samma väg.
 **+2 nya enheter** tillsammans med rumskortet), och lampan står som **Ny
 lampa hittad · inte placerad**.
 
+## 8b. Testlampa utan Zigbee
+
+Med en testlampa går hela idén att prova direkt: radarn ser dig,
+ljussensorn säger att det är mörkt och lysdioden på kortet tänds.
+
+**Det här behövs:** en vanlig 5 mm-lysdiod och ett motstånd på 220–330 Ω
+(ohm), eller en färdig LED-modul med inbyggt motstånd.
+
+**Gör så här:**
+
+1. Dra ur USB-kabeln till rumskortet.
+2. Koppla: **GPIO4** → motståndet → lysdiodens **långa ben** (anod, +).
+   Lysdiodens **korta ben** (katod, −) → **GND**.
+3. Sätt i USB-kabeln igen.
+
+**Glöm inte motståndet.** Kortets stift klarar bara några milliampere.
+Utan motstånd kan lysdioden och kortet gå sönder.
+
+Lampan läggs till i webben i nästa steg (punkt 5 i steg 9): under **Nya
+lampor som kärnan har hittat:** står **Placera LED på rumskort
+homecontrol-…** så snart kortet är placerat.
+
+**Vad händer?** När kärnan vill tända lampan skickar den "tänd" krypterat
+till kortet, samma väg som radarn och ljussensorn redan pratar. Kortet slår
+på stiftet GPIO4 så att lysdioden lyser och berättar tillbaka att den är
+tänd. Kärnan använder samma regler och ljusgräns som för en riktig lampa.
+
+Mer om kopplingen, LED-moduler och andra stift finns i
+[firmware/README.md](firmware/README.md#testlampa-prova-utan-zigbee-lampa).
+
+**Kontrollera:** lysdioden är släckt när kortet har startat. När
+testlampan är placerad på kartan och du går in i det mörka rummet tänds den.
+
 ## 9. Rita rummet på kartan
 
 **Gör så här:**
@@ -367,7 +405,9 @@ lampa hittad · inte placerad**.
    måtten rätt.
 5. Under **Placera** står **Nya rumskort som kärnan har hittat:** och
    **Nya lampor som kärnan har hittat:**. Klicka på **Placera
-   homecontrol-…** och sedan på lampans **Placera …**.
+   homecontrol-…** och sedan på lampans **Placera …**. Med en testlampa
+   (steg 8b) står lampan som **Placera LED på rumskort homecontrol-…**;
+   den syns några sekunder efter att kortet är placerat.
 6. Välj **Välj och flytta** och dra kortet och lampan dit de sitter i
    verkligheten. Vrid kortet med ringen så att det pekar dit radarn
    tittar.
