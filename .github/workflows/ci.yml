@@ -39,7 +39,7 @@ jobs:
       HOMECONTROL_TEST_DATABASE: host=localhost dbname=homecontrol_test user=homecontrol
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       - run: uv sync --frozen
       - name: Lint
         run: uv run ruff check .. && uv run ruff format --check ..
@@ -99,7 +99,7 @@ jobs:
       HOMECONTROL_DATABASE: host=localhost dbname=homecontrol_e2e user=homecontrol
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       - uses: actions/setup-node@v7
         with:
           node-version: 22
