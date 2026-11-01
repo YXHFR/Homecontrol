@@ -16,26 +16,27 @@ Det här behövs:
 - Zigbee-stickan (till exempel Sonoff Zigbee 3.0 USB Dongle) om lamporna
   ska styras.
 
-Kommandon som börjar med `PS>` skrivs i **PowerShell** i Windows. Kommandon
-som börjar med `$` skrivs i **Ubuntu**. Skriv inte med `PS>` eller `$`.
+Varje kommando står under en mening som säger var det ska skrivas:
+**PowerShell** (i Windows) eller **Ubuntu** (fönstret Ubuntu 24.04 från
+Start-menyn).
 
 ## 1. Installera Ubuntu 24.04 i WSL
 
 Öppna PowerShell **som administratör** (högerklicka på Start →
-Terminal (administratör)) och kör:
+Terminal (administratör)) och kör i PowerShell:
 
 ```powershell
-PS> wsl --install -d Ubuntu-24.04
+wsl --install -d Ubuntu-24.04
 ```
 
 Starta om datorn om du blir ombedd. Ubuntu startar sedan av sig själv och
 frågar efter ett användarnamn och ett lösenord. De är bara för Ubuntu och
 behöver inte vara samma som i Windows.
 
-Kontrollera att Ubuntu kör WSL version 2:
+Kontrollera att Ubuntu kör WSL version 2 (i PowerShell):
 
 ```powershell
-PS> wsl --list --verbose
+wsl --list --verbose
 ```
 
 Kolumnen `VERSION` ska visa `2` för `Ubuntu-24.04`.
@@ -48,10 +49,10 @@ stället Windows nätverkskort, och hemnätet når Ubuntu på Windows egen
 adress.
 
 Skapa (eller ändra) filen `.wslconfig` i din användarmapp i Windows. Det
-enklaste är att öppna den i Anteckningar:
+enklaste är att öppna den i Anteckningar (i PowerShell):
 
 ```powershell
-PS> notepad "$env:USERPROFILE\.wslconfig"
+notepad "$env:USERPROFILE\.wslconfig"
 ```
 
 Svara **Ja** om Anteckningar frågar om filen ska skapas. Hela filen ska
@@ -71,20 +72,20 @@ instanceIdleTimeout=-1
 ```
 
 Spara. Stäng sedan av WSL helt, så att inställningarna läses in nästa gång
-Ubuntu startar:
+Ubuntu startar (i PowerShell):
 
 ```powershell
-PS> wsl --shutdown
+wsl --shutdown
 ```
 
 ## 3. Slå på systemd i Ubuntu
 
 Docker startas av systemd. I Ubuntu 24.04 som har installerats med
 `wsl --install` är systemd oftast redan påslaget. Öppna Ubuntu (Start →
-Ubuntu 24.04) och kontrollera:
+Ubuntu 24.04) och kontrollera i Ubuntu:
 
 ```sh
-$ cat /etc/wsl.conf
+cat /etc/wsl.conf
 ```
 
 Står det
@@ -94,16 +95,16 @@ Står det
 systemd=true
 ```
 
-är du klar med det här steget. Annars lägger du till raderna:
+är du klar med det här steget. Annars lägger du till raderna (i Ubuntu):
 
 ```sh
-$ printf '[boot]\nsystemd=true\n' | sudo tee -a /etc/wsl.conf
+printf '[boot]\nsystemd=true\n' | sudo tee -a /etc/wsl.conf
 ```
 
-och startar om WSL från PowerShell:
+och startar om WSL. Öppna PowerShell (ett nytt fönster i Windows) och kör:
 
 ```powershell
-PS> wsl --shutdown
+wsl --shutdown
 ```
 
 ## 4. Installera Docker Engine i Ubuntu
@@ -113,16 +114,16 @@ Kör i Ubuntu, ett block i taget:
 
 ```sh
 # Dockers nyckel, så att paketen kan kontrolleras.
-$ sudo apt update
-$ sudo apt install ca-certificates curl
-$ sudo install -m 0755 -d /etc/apt/keyrings
-$ sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-$ sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
 ```
 
 ```sh
 # Dockers paketkälla.
-$ sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
 Types: deb
 URIs: https://download.docker.com/linux/ubuntu
 Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
@@ -130,26 +131,27 @@ Components: stable
 Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
-$ sudo apt update
+sudo apt update
 ```
 
 ```sh
 # Docker och Docker Compose.
-$ sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
 
 Ge din användare rätt att köra Docker utan `sudo`
-([Dockers steg efter installationen](https://docs.docker.com/engine/install/linux-postinstall/)):
+([Dockers steg efter installationen](https://docs.docker.com/engine/install/linux-postinstall/)).
+I Ubuntu:
 
 ```sh
-$ sudo usermod -aG docker $USER
+sudo usermod -aG docker $USER
 ```
 
 Stäng Ubuntu-fönstret och öppna det igen, så att ändringen gäller. Prova
-sedan:
+sedan i Ubuntu:
 
 ```sh
-$ docker run hello-world
+docker run hello-world
 ```
 
 Det ska skriva `Hello from Docker!`. Docker startar sedan av sig själv
@@ -172,28 +174,34 @@ Har du ändrat `WEB_PORT`, `MQTT_PORT` eller `ZIGBEE2MQTT_PORT` i `.env`
 använder du dina portar i stället. Rumskorten behöver ingen öppning: det är
 kärnan som ansluter till dem.
 
+Reglerna gäller bara när Windows ser nätverket som **privat**. Kontrollera
+det först: Inställningar → Nätverk och Internet → Wi-Fi (eller Ethernet) →
+ditt nätverk → **Nätverksprofiltyp: Privat nätverk**. På ett offentligt
+nät (café, hotell) är portarna då stängda.
+
 Öppna PowerShell **som administratör** och kör de rader du behöver.
 `{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}` är WSL:s id i brandväggen och är
 samma på alla datorer.
 
 ```powershell
-PS> $wsl = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
-PS> New-NetFirewallHyperVRule -Name Homecontrol-Webb -DisplayName "Homecontrol webbsida" -Direction Inbound -VMCreatorId $wsl -Protocol TCP -LocalPorts 8000
-PS> New-NetFirewallHyperVRule -Name Homecontrol-mDNS -DisplayName "Homecontrol mDNS" -Direction Inbound -VMCreatorId $wsl -Protocol UDP -LocalPorts 5353
-PS> New-NetFirewallHyperVRule -Name Homecontrol-MQTT -DisplayName "Homecontrol MQTT" -Direction Inbound -VMCreatorId $wsl -Protocol TCP -LocalPorts 1883
-PS> New-NetFirewallHyperVRule -Name Homecontrol-Zigbee2MQTT -DisplayName "Homecontrol Zigbee2MQTT" -Direction Inbound -VMCreatorId $wsl -Protocol TCP -LocalPorts 8080
+$wsl = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+New-NetFirewallHyperVRule -Name Homecontrol-Webb -DisplayName "Homecontrol webbsida" -Direction Inbound -VMCreatorId $wsl -Protocol TCP -LocalPorts 8000 -Profiles Private
+New-NetFirewallHyperVRule -Name Homecontrol-mDNS -DisplayName "Homecontrol mDNS" -Direction Inbound -VMCreatorId $wsl -Protocol UDP -LocalPorts 5353 -Profiles Private
+New-NetFirewallHyperVRule -Name Homecontrol-MQTT -DisplayName "Homecontrol MQTT" -Direction Inbound -VMCreatorId $wsl -Protocol TCP -LocalPorts 1883 -Profiles Private
+New-NetFirewallHyperVRule -Name Homecontrol-Zigbee2MQTT -DisplayName "Homecontrol Zigbee2MQTT" -Direction Inbound -VMCreatorId $wsl -Protocol TCP -LocalPorts 8080 -Profiles Private
 ```
 
-Se vilka regler som finns för WSL:
+Se vilka regler som finns för WSL (i PowerShell):
 
 ```powershell
-PS> Get-NetFirewallHyperVRule -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+Get-NetFirewallHyperVRule -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
 ```
 
-Ta bort en regel (till exempel om du inte längre har dörrklockan):
+Ta bort en regel (till exempel om du inte längre har dörrklockan), som
+administratör i PowerShell:
 
 ```powershell
-PS> Remove-NetFirewallHyperVRule -Name Homecontrol-MQTT
+Remove-NetFirewallHyperVRule -Name Homecontrol-MQTT
 ```
 
 Öppna inte allt med `Set-NetFirewallHyperVVMSetting -DefaultInboundAction
@@ -214,7 +222,7 @@ Zigbee-sticka än.
 1. Installera usbipd-win (i PowerShell):
 
    ```powershell
-   PS> winget install usbipd
+   winget install usbipd
    ```
 
    Stäng PowerShell och öppna det igen efteråt.
@@ -222,7 +230,7 @@ Zigbee-sticka än.
 2. Sätt i stickan och leta upp den:
 
    ```powershell
-   PS> usbipd list
+   usbipd list
    ```
 
    Leta efter stickan i listan (till exempel `Silicon Labs CP210x` eller
@@ -233,20 +241,20 @@ Zigbee-sticka än.
    gäller även efter omstart:
 
    ```powershell
-   PS> usbipd bind --busid 2-3
+   usbipd bind --busid 2-3
    ```
 
 4. Koppla stickan till Ubuntu (Ubuntu måste vara igång; administratör
    behövs inte):
 
    ```powershell
-   PS> usbipd attach --wsl --busid 2-3
+   usbipd attach --wsl --busid 2-3
    ```
 
-5. Kontrollera i Ubuntu att stickan syns:
+5. Kontrollera att stickan syns. I Ubuntu:
 
    ```sh
-   $ ls -l /dev/serial/by-id/
+   ls -l /dev/serial/by-id/
    ```
 
    Du ser ett långt namn, till exempel
@@ -254,7 +262,8 @@ Zigbee-sticka än.
    mappen inte: prova `ls /dev/ttyUSB* /dev/ttyACM*`, och uppdatera WSL med
    `wsl --update` i PowerShell.
 
-6. Skriv in hela sökvägen i `.env` (se steg 7):
+6. Skriv upp hela sökvägen, från `/dev/serial/by-id/` till slutet. Den
+   ska in i `.env` i steg 7, så här:
 
    ```ini
    ZIGBEE_ADAPTER=/dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_..._if00-port0
@@ -265,26 +274,28 @@ Zigbee-sticka än.
    där du väljer stickans typ.
 
 **Efter en omstart** (av Windows, av WSL eller om stickan dras ur) är
-stickan inte längre kopplad till Ubuntu, och steg 4 måste göras igen.
-Låt usbipd göra det själv i stället:
+stickan inte längre kopplad till Ubuntu, och punkt 4 här ovanför måste
+göras igen. Låt usbipd göra det själv i stället (i PowerShell):
 
 ```powershell
-PS> usbipd attach --wsl --busid 2-3 --auto-attach
+usbipd attach --wsl --busid 2-3 --auto-attach
 ```
 
 Kommandot ligger kvar och kopplar in stickan igen så fort den försvinner,
-så länge PowerShell-fönstret är öppet.
+så länge PowerShell-fönstret är öppet. Startade Homecontrol innan stickan
+var inkopplad: starta om Zigbee2MQTT i Ubuntu med
+`docker compose restart zigbee2mqtt` (i mappen `Homecontrol`).
 
 ## 7. Starta Homecontrol
 
-I Ubuntu:
+Hämta Homecontrol och skapa inställningsfilen. I Ubuntu:
 
 ```sh
-$ sudo apt install git
-$ git clone https://github.com/YXHFR/Homecontrol.git
-$ cd Homecontrol
-$ cp .env.example .env
-$ nano .env
+sudo apt install git
+git clone https://github.com/YXHFR/Homecontrol.git
+cd Homecontrol
+cp .env.example .env
+nano .env
 ```
 
 Byt ut varje `byt-mig` mot ett eget lösenord (ett nytt för varje rad).
@@ -292,17 +303,17 @@ Skapa lösenord med `openssl rand -hex 24`. Fyll i `ZIGBEE_ADAPTER` från
 steg 6 och `ESPHOME_SECRET` om du har rumskort (`openssl rand -hex 32`).
 Spara med Ctrl+O och Enter, och stäng med Ctrl+X.
 
-Starta:
+Starta (i Ubuntu, i mappen `Homecontrol`):
 
 ```sh
-$ docker compose up -d
+docker compose up -d
 ```
 
 Första gången hämtas allt från nätet, och det tar några minuter. Se att
-allt är igång:
+allt är igång (i Ubuntu):
 
 ```sh
-$ docker compose ps
+docker compose ps
 ```
 
 Öppna sedan webbsidan:
@@ -320,12 +331,14 @@ Ubuntu. Vill du att Homecontrol alltid är igång kan Windows starta Ubuntu
 när du loggar in. Kör i PowerShell:
 
 ```powershell
-PS> schtasks /create /tn "Homecontrol WSL" /sc onlogon /tr "wsl.exe -d Ubuntu-24.04 --exec /bin/true"
+schtasks /create /tn "Homecontrol WSL" /sc onlogon /tr "wsl.exe -d Ubuntu-24.04 --exec /bin/true"
 ```
 
 Ubuntu startar då vid inloggning, Docker startar Homecontrol, och med
 `instanceIdleTimeout=-1` (steg 2) fortsätter allt att köra. Zigbee-stickan
-behöver fortfarande kopplas in (steg 6).
+behöver fortfarande kopplas in (steg 6), och därefter startas Zigbee2MQTT
+om med `docker compose restart zigbee2mqtt`. Docker försöker inte själv
+igen när stickan saknades vid start.
 
 ## Om något inte fungerar
 

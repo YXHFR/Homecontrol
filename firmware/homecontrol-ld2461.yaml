@@ -1,4 +1,4 @@
-# Homecontrol – firmware för ett rumskort (ESP32-S3 med extern antenn) med
+# Homecontrol – firmware för ett rumskort (ESP32-S3, helst med extern antenn) med
 # radarn LD2461 i stället för LD2450. Allt annat är som på LD2450-kortet
 # (common.yaml): Wi-Fi-CSI, ljussensorn, det krypterade API:t och
 # uppdateringarna.

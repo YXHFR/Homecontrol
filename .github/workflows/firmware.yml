@@ -6,8 +6,9 @@ name: Firmware
 # "webbinstallerare".
 #
 # Från main publiceras webbinstalleraren på Cloudflare (Workers med statiska
-# filer, wrangler.jsonc i repots rot), aldrig från en PR eller en fork.
-# Ägaren ställer in det en gång:
+# filer, firmware/wrangler.jsonc), aldrig från en PR eller en fork.
+# Ägaren ställer in det en gång (steg för steg i firmware/README.md,
+# avsnittet "Publicera webbinstalleraren"):
 #   1. Cloudflare: My Profile -> API Tokens -> Create Token -> mallen
 #      "Edit Cloudflare Workers", begränsad till ditt eget konto.
 #   2. Account ID: Workers & Pages i Cloudflare -> Account Details.
@@ -17,7 +18,8 @@ name: Firmware
 #      repository variable: INSTALLER_URL = sidans adress, till exempel
 #      https://homecontrol-installer.<ditt-namn>.workers.dev (utan / sist).
 #      Korten hämtar uppdateringar därifrån. Kör sedan workflowen igen
-#      (Actions -> Firmware -> Run workflow) så att firmware får adressen.
+#      (Actions -> Firmware -> Run workflow) så att firmware får adressen,
+#      och installera om korten en gång över USB.
 # Saknas hemligheterna hoppas publiceringen över med en notis, utan fel.
 #
 # Dörrklockan (firmware/dorrklocka.yaml) valideras och byggs för sig, med
@@ -43,7 +45,9 @@ permissions:
 
 concurrency:
   group: firmware-${{ github.ref }}
-  cancel-in-progress: true
+  # En PR avbryter sin förra körning. På main körs de i tur och ordning, så
+  # att en publicering aldrig avbryts halvvägs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # ESP Web Tools läggs på samma sida i stället för att laddas från ett CDN.
@@ -247,16 +251,19 @@ jobs:
   deploy:
     name: Publicera webbinstalleraren på Cloudflare
     # Samma villkor som för sidan: bara main i det här repot, aldrig en PR
-    # eller en fork. Hemligheterna finns bara här.
+    # eller en fork. En fork har inte heller hemligheterna.
     if: >-
       github.event_name != 'pull_request'
       && github.ref == 'refs/heads/main'
       && github.repository == 'yxhfr/Homecontrol'
     needs: site
     runs-on: ubuntu-latest
+    # Hemligheterna kan ligga i den här miljön och begränsas till main
+    # (Settings -> Environments), se firmware/README.md.
+    environment: cloudflare-installer
     permissions:
       contents: read
-    # En publicering i taget, och en pågående avbryts inte halvvägs.
+    # En publicering i taget, och en pågående avbryts inte.
     concurrency:
       group: cloudflare-installer
       cancel-in-progress: false
@@ -270,14 +277,14 @@ jobs:
           if [ "$HAS_TOKEN" = true ] && [ "$HAS_ACCOUNT" = true ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice title=Webbinstalleraren publicerades inte::CLOUDFLARE_API_TOKEN och CLOUDFLARE_ACCOUNT_ID saknas bland repots secrets. Se kommentaren överst i .github/workflows/firmware.yml."
+            echo "::notice title=Webbinstalleraren publicerades inte::CLOUDFLARE_API_TOKEN och CLOUDFLARE_ACCOUNT_ID saknas bland repots secrets. Se firmware/README.md, avsnittet Publicera webbinstalleraren."
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.secrets.outputs.publish == 'true'
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-          sparse-checkout: wrangler.jsonc
+          sparse-checkout: firmware/wrangler.jsonc
           sparse-checkout-cone-mode: false
       - if: steps.secrets.outputs.publish == 'true'
         uses: actions/download-artifact@v8
@@ -290,6 +297,21 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4.149.0"
+          workingDirectory: firmware
           command: deploy
       - if: steps.secrets.outputs.publish == 'true' && vars.INSTALLER_URL == ''
-        run: echo "::notice title=INSTALLER_URL saknas::Webbinstalleraren är publicerad, men korten vet inte var. Lägg in sidans adress som variabeln INSTALLER_URL och kör workflowen igen (se överst i firmware.yml)."
+        run: echo "::notice title=INSTALLER_URL saknas::Webbinstalleraren är publicerad, men korten vet inte var. Lägg in sidans adress som variabeln INSTALLER_URL och kör workflowen igen (se firmware/README.md)."
+      - name: Finns den nya versionen på INSTALLER_URL?
+        # Korten hämtar från INSTALLER_URL. Visar sidan där inte den version
+        # som just publicerades är adressen fel (eller Worker-namnet bytt).
+        if: steps.secrets.outputs.publish == 'true' && vars.INSTALLER_URL != ''
+        env:
+          INSTALLER_URL: ${{ vars.INSTALLER_URL }}
+        run: |
+          want=$(jq -r .version site/info.json)
+          for attempt in 1 2 3 4 5 6; do
+            got=$(curl -sSf --proto '=https' --max-redirs 0 "$INSTALLER_URL/info.json" | jq -r .version) || got=""
+            [ "$got" = "$want" ] && { echo "Version $want finns på $INSTALLER_URL"; exit 0; }
+            sleep 10
+          done
+          echo "::warning title=INSTALLER_URL visar inte den nya versionen::Väntade $want men fick '${got}' från $INSTALLER_URL. Kontrollera variabeln INSTALLER_URL mot adressen i Cloudflare."

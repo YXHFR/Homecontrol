@@ -92,42 +92,52 @@ raderas och installeras om på samma sätt.
   bara när kärnan ber om det, efter att du har tryckt på **Uppdatera till
   …** (med den nya versionen) i rumskortets kort. Kortet hämtar då
   själv filen över https. Det tar inte emot firmware från någon annan.
-  Adressen innehåller ditt namn på workers.dev, så **byt inte det namnet
-  och ta inte bort Cloudflare-kontot** så länge korten används. Då kan
-  någon annan ta namnet och skicka firmware till korten.
+  Adressen innehåller ditt namn på workers.dev och Workerns namn
+  (`homecontrol-installer`), så **byt inte namnen och ta inte bort
+  Workern eller Cloudflare-kontot** så länge korten används. Om namnet
+  blir ledigt kan någon annan ta det och skicka firmware till korten.
 - **Över USB:** kör webbinstalleraren igen och lämna **Erase device** tom.
   Kortet behåller Wi-Fi och nyckeln.
 
 ### Publicera webbinstalleraren
 
 Webbinstalleraren publiceras på Cloudflare (en Worker med bara statiska
-filer, [`wrangler.jsonc`](../wrangler.jsonc)) varje gång firmware ändras på
+filer, [`wrangler.jsonc`](wrangler.jsonc)) varje gång firmware ändras på
 `main`. Adressen är https, vilket webbläsaren kräver för att få prata med
 kortet över USB (Web Serial). Ingen hemlighet finns i repot; ägaren ställer
 in det här en gång:
 
-1. **API-token.** Logga in på [Cloudflare](https://dash.cloudflare.com).
-   Klicka på profilbilden → **My Profile** → **API Tokens** → **Create
-   Token** och välj mallen **Edit Cloudflare Workers**. Begränsa token
-   till ditt eget konto (och dess zoner), och skapa den. Kopiera token;
-   den visas bara en gång.
-2. **Account ID.** Öppna **Workers & Pages** i Cloudflare. Under **Account
+1. **Namn på workers.dev.** Logga in på [Cloudflare](https://dash.cloudflare.com)
+   och öppna **Workers & Pages** en gång. Första gången ber Cloudflare
+   dig välja ett namn, `<ditt-namn>` i adressen
+   `homecontrol-installer.<ditt-namn>.workers.dev`.
+2. **API-token.** Klicka på profilbilden → **My Profile** → **API Tokens**
+   → **Create Token** och välj mallen **Edit Cloudflare Workers**. Välj
+   bara ditt eget konto där sidan frågar efter konto, och sätt gärna ett
+   slutdatum. Skapa token och kopiera den; den visas bara en gång.
+3. **Account ID.** Öppna **Workers & Pages** i Cloudflare. Under **Account
    Details** finns **Account ID** med en kopieringsknapp.
-3. **Lägg in dem i GitHub.** I repot: **Settings** → **Secrets and
+4. **Lägg in dem i GitHub.** I repot: **Settings** → **Secrets and
    variables** → **Actions** → fliken **Secrets** → **New repository
-   secret**. Skapa `CLOUDFLARE_API_TOKEN` (token från steg 1) och
-   `CLOUDFLARE_ACCOUNT_ID` (från steg 2).
-4. **Publicera.** **Actions** → **Firmware** → **Run workflow** (på
+   secret**. Skapa `CLOUDFLARE_API_TOKEN` (token från steg 2) och
+   `CLOUDFLARE_ACCOUNT_ID` (från steg 3).
+5. **Publicera.** **Actions** → **Firmware** → **Run workflow** (på
    `main`). När jobbet **Publicera webbinstalleraren på Cloudflare** är
    klart finns sidan på `https://homecontrol-installer.<ditt-namn>.workers.dev`.
    Adressen står i jobbets logg och under **Workers & Pages** i
-   Cloudflare. Första gången du använder Workers ber Cloudflare dig välja
-   namnet (`<ditt-namn>`).
-5. **Berätta adressen för korten.** Samma sida i GitHub som i steg 3, men
+   Cloudflare.
+6. **Berätta adressen för korten.** Samma sida i GitHub som i steg 4, men
    fliken **Variables** → **New repository variable**: `INSTALLER_URL` =
-   adressen från steg 4, utan `/` sist. Kör workflowen igen (steg 4). Nu
-   hämtar korten sina uppdateringar därifrån. Installera om korten en gång
-   över USB, så att de får adressen.
+   adressen från steg 5, utan `/` sist. Kör workflowen igen (steg 5). Nu
+   hämtar korten sina uppdateringar därifrån, och workflowen kontrollerar
+   att adressen visar den nya versionen. Installera om korten en gång över
+   USB, så att de får adressen.
+
+**Extra skydd (valfritt).** Med token kan man byta firmware för alla kort,
+och repots secrets kan läsas av workflows på alla grenar. Skapa därför
+gärna miljön **cloudflare-installer** under **Settings** → **Environments**,
+ställ in **Deployment branches** till bara `main`, och lägg de två
+hemligheterna där i stället för bland repots secrets.
 
 Saknas hemligheterna hoppas publiceringen över med en notis, och
 workflowen blir ändå grön. Publiceringen körs bara från `main` i det här
@@ -217,9 +227,9 @@ finns två sätt:
    esphome -s rum kok -s ld2461_tx_pin GPIO1 -s ld2461_rx_pin GPIO2 run firmware/homecontrol-ld2461.yaml
    ```
 
-   **Uppdatera inte ett sådant kort från webbinstalleraren** (varken över
-   nätverket eller över USB). Den firmware har GPIO17 och GPIO18, och då
-   svarar radarn inte.
+   Ett sådant kort får inga uppdateringar över nätverket. **Installera inte
+   webbinstallerarens firmware på det över USB**: den har GPIO17 och
+   GPIO18, och då svarar radarn inte.
 
 Övrigt:
 
