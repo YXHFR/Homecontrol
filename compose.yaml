@@ -157,7 +157,7 @@ services:
       start_interval: 2s
 
   zigbee2mqtt:
-    image: koenkk/zigbee2mqtt:2.14.2
+    image: koenkk/zigbee2mqtt:2.14.3
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Europe/Stockholm}
