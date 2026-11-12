@@ -103,7 +103,7 @@ services:
         required: false
 
   db:
-    image: timescale/timescaledb:2.30.2-pg17
+    image: timescale/timescaledb:2.31.0-pg17
     restart: unless-stopped
     # Lyssnar bara på socketen och kräver lösenord för alla inloggningar
     # (se postgres/pg_hba.conf).
