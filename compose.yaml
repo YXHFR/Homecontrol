@@ -127,7 +127,7 @@ services:
       start_interval: 2s
 
   mosquitto:
-    image: eclipse-mosquitto:2.1.2-alpine
+    image: eclipse-mosquitto:2.1.4-alpine
     restart: unless-stopped
     entrypoint: ["sh", "/homecontrol/entrypoint.sh"]
     command: ["mosquitto", "-c", "/homecontrol/mosquitto.conf"]
